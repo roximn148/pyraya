@@ -15,13 +15,24 @@ when mixing Urdu Nastaliq with Latin scripts, numerals, and
 punctuation.
 
 ------------------------------
+## ⚠️ Alpha Status
+
+PyRaya is at **version 0.1.0-alpha.0**. The drop-in widget shell and API are available, but the headline features below are **roadmap** and *not yet implemented*:
+
+- **Native RTL layout** — right-to-left alignment and paragraph handling.
+- **Noto Nastaliq typography** — the default Urdu font stack.
+- **Inbuilt spell-checker** — real-time Urdu tokenization and misspelling highlighting.
+
+Do not assume these work yet.
+
+------------------------------
 ## Key Features
 
-* Plug-and-Play Qt Component: Drop it instantly into any PySide6 or PyQt6 user interface.
-* Native RTL Layout: Automatic Right-to-Left alignment and paragraph handling out of the box.
-* Streamlined Noto Typography: Default font stack built on Noto Nastaliq Urdu for flawless script rendering.
-* Inbuilt Spell-Checker: Real-time tokenization and highlighting of misspelled Urdu words.
-* Multilingual Harmony: Smooth rendering when blending Nastaliq prose with English text strings.
+* **Plug-and-Play Qt Component** *(available)*: Drop it instantly into any PySide6 or PyQt6 user interface.
+* **Native RTL Layout** *(roadmap)*: Automatic Right-to-Left alignment and paragraph handling.
+* **Streamlined Noto Typography** *(roadmap)*: Default font stack built on Noto Nastaliq Urdu.
+* **Inbuilt Spell-Checker** *(roadmap)*: Real-time tokenization and highlighting of misspelled Urdu words.
+* **Multilingual Harmony** *(roadmap)*: Smooth rendering when blending Nastaliq prose with English text strings.
 
 ------------------------------
 ## 💻 Quick Start
@@ -38,7 +49,6 @@ editor = PyRaya()
 editor.show()
 
 sys.exit(app.exec())
-
 ```
 
 ------------------------------

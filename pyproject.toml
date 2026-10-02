@@ -1,6 +1,8 @@
 [project]
 name = "pyraya"
 version = "0.1.0-alpha.0"
+license = "MIT"
+license-files = ["LICENSE"]
 description = "PyRaya is a reusable, self-contained Qt text editor widget written in Python (PySide6)"
 readme = "README.md"
 authors = [
@@ -8,7 +10,7 @@ authors = [
 ]
 requires-python = ">=3.14"
 dependencies = [
-    "pydantic>=2.13.4",
+    "pydantic==2.13.5",
     "pyside6>=6.11.2",
     "romanalfaz>=0.1.0a3",
 ]
@@ -26,3 +28,22 @@ dev = [
     "pytest>=9.1.1",
     "ruff>=0.16.4",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["pyraya"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.pyrefly]
+project-includes = ["src", "tests"]
+python-version = "3.14"
