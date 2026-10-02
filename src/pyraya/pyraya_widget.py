@@ -4,7 +4,7 @@
 """PyRaya — a self-contained PySide6 (Qt) text editor widget for Urdu.
 
 The public entry point is :class:`PyRaya`, a drop-in ``QWidget`` designed for
-right-to-left (Nastaliq) Urdu text in any PySide6 or PyQt6 application.
+right-to-left (Nastaliq) Urdu text in Qt applications — currently PySide6 only.
 """
 
 from PySide6.QtWidgets import QWidget

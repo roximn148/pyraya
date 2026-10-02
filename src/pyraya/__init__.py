@@ -1,6 +1,6 @@
 """PyRaya: a reusable, self-contained Qt (PySide6) text editor widget for Urdu.
 
-Drop-in component for Urdu/Nastaliq text in any PySide6 or PyQt6 application.
+Drop-in component for Urdu/Nastaliq text in Qt applications — currently PySide6 only.
 """
 
 import sys

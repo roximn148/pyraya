@@ -28,7 +28,7 @@ Do not assume these work yet.
 ------------------------------
 ## Key Features
 
-* **Plug-and-Play Qt Component** *(available)*: Drop it instantly into any PySide6 or PyQt6 user interface.
+* **Plug-and-Play Qt Component** *(available)*: Drop it instantly into any Qt user interface (currently PySide6 only).
 * **Native RTL Layout** *(roadmap)*: Automatic Right-to-Left alignment and paragraph handling.
 * **Streamlined Noto Typography** *(roadmap)*: Default font stack built on Noto Nastaliq Urdu.
 * **Inbuilt Spell-Checker** *(roadmap)*: Real-time tokenization and highlighting of misspelled Urdu words.
