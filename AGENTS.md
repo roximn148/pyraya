@@ -5,7 +5,7 @@ Guidance for AI coding agents working in this repository.
 ## What this project is
 PyRaya (پیرایہ) is a **reusable, self-contained PySide6 (Qt) text editor widget** for Urdu / Nastaliq (right-to-left) text. It is a drop-in `QWidget` for embedding Urdu text editing in Qt applications — currently PySide6 only.
 
-Current status: **alpha (0.1.0-alpha.0)**. The widget shell exists; RTL layout, Noto Nastaliq typography, and the built-in spell-checker are on the **roadmap** (see `README.md`) and are *not yet implemented*. Do not assume they work.
+Current status: **alpha (0.1.0-alpha.0)**. The widget is a `QPlainTextEdit` with RTL layout, right-aligned paragraphs, a configurable Noto font stack (default `Noto Naskh Arabic`), visible whitespace, and a dedicated rule-based formatting highlighter implemented. The built-in spell-checker remains on the **roadmap** (see `README.md`) and is *not yet implemented*. Do not assume it works.
 
 ## Repository layout
 ```
@@ -20,7 +20,7 @@ pyraya/
 │   └── pyraya/
 │       ├── __init__.py       # public API + main() demo entry point
 │       ├── py.typed          # typed-package marker
-│       └── pyraya_widget.py  # the PyRaya QWidget
+│       └── pyraya_widget.py  # the PyRaya widget (QPlainTextEdit) + formatting highlighter
 └── tests/
     └── test_pyraya.py      # minimal offscreen smoke test
 ```
@@ -58,12 +58,12 @@ Bare `pyraya` only works with the `.venv` activated; `uv run pyraya` always work
 ## Testing
 - This is a **GUI** app. Automated checks must run headless — use the offscreen Qt platform so tests do not open a window. The test sets `QT_QPA_PLATFORM=offscreen`.
 - The smoke test imports `PyRaya` under an offscreen `QApplication` and verifies it instantiates.
-- New tests must reuse the single offscreen `QApplication` (see the `qapp` fixture); never call `QApplication.exec()` inside a test.
+- New tests must reuse the single offscreen `QApplication` (see the `app` fixture); never call `QApplication.exec()` inside a test.
 
 ## Gotchas
 - Instantiating `PyRaya` requires a `QApplication` to exist (see the offscreen test).
-- The **Noto Nastaliq Urdu** font may not be installed in CI / agent environments — do not assume font availability in automated tests.
-- RTL / Unicode bidi shaping is **not yet implemented** — do not assume correct Urdu rendering.
+- The **Noto** fonts (Noto Naskh Arabic, Noto Nastaliq Urdu, Noto Sans Arabic, …) may not be installed in CI / agent environments — the widget falls back through its font stack and lets Qt substitute; do not assume a specific font is available in automated tests.
+- RTL layout is implemented via the widget layout direction and right-aligned blocks; the shaping engine handles Urdu/Arabic script ordering. The Noto fonts may be absent in automated environments, so the rendered font may be a fallback.
 - `pydantic` and `romanalfaz` are declared dependencies but are currently unused — reserved for roadmap work; do not build the current API on them.
 - **Never stage IDE/editor files** — `.idea/`, `.vscode/`, and other IDE-specific files are git-ignored and must not be committed.
 - Do not hand-edit `uv.lock` — regenerate it with `uv lock`.

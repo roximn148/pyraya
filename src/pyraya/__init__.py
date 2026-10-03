@@ -7,9 +7,9 @@ import sys
 
 from PySide6.QtWidgets import QApplication
 
-from .pyraya_widget import PyRaya
+from .pyraya_widget import PyRaya, PyRayaHighlighter
 
-__all__ = ["PyRaya", "main"]
+__all__ = ["PyRaya", "PyRayaHighlighter", "main"]
 
 
 def main() -> None:
@@ -20,6 +20,7 @@ def main() -> None:
     """
     app = QApplication(sys.argv)
     editor = PyRaya()
+    editor.set_font_size(24)
     editor.show()
     sys.exit(app.exec())
 

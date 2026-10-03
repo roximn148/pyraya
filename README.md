@@ -17,20 +17,23 @@ punctuation.
 ------------------------------
 ## ⚠️ Alpha Status
 
-PyRaya is at **version 0.1.0-alpha.0**. The drop-in widget shell and API are available, but the headline features below are **roadmap** and *not yet implemented*:
+PyRaya is at **version 0.1.0-alpha.0**. The widget is a drop-in `QPlainTextEdit`. The following are now **implemented**:
 
 - **Native RTL layout** — right-to-left alignment and paragraph handling.
-- **Noto Nastaliq typography** — the default Urdu font stack.
-- **Inbuilt spell-checker** — real-time Urdu tokenization and misspelling highlighting.
+- **Noto typography** — a configurable font stack defaulting to Noto Naskh Arabic.
+- **Visible whitespace** — tabs and spaces rendered as visible characters.
+- **Configurable formatting** — a dedicated rule-based syntax highlighter.
 
-Do not assume these work yet.
+The **inbuilt spell-checker** (real-time Urdu tokenization and misspelling highlighting) is **roadmap** and *not yet implemented*. Do not assume it works yet.
 
 ------------------------------
 ## Key Features
 
-* **Plug-and-Play Qt Component** *(available)*: Drop it instantly into any Qt user interface (currently PySide6 only).
-* **Native RTL Layout** *(roadmap)*: Automatic Right-to-Left alignment and paragraph handling.
-* **Streamlined Noto Typography** *(roadmap)*: Default font stack built on Noto Nastaliq Urdu.
+* **Plug-and-Play Qt Component** *(available)*: A drop-in `QPlainTextEdit` for any Qt user interface (currently PySide6 only).
+* **Native RTL Layout** *(available)*: Right-to-left alignment and paragraph handling.
+* **Streamlined Noto Typography** *(available)*: Configurable font stack defaulting to Noto Naskh Arabic, with Noto Nastaliq Urdu and other fallbacks.
+* **Visible Whitespace** *(available)*: Tabs and spaces rendered as visible characters.
+* **Configurable Formatting** *(available)*: A dedicated rule-based highlighter for Urdu and mixed-script text.
 * **Inbuilt Spell-Checker** *(roadmap)*: Real-time tokenization and highlighting of misspelled Urdu words.
 * **Multilingual Harmony** *(roadmap)*: Smooth rendering when blending Nastaliq prose with English text strings.
 
