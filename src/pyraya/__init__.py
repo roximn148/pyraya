@@ -11,9 +11,9 @@ import sys
 from PySide6.QtWidgets import QApplication
 
 from .pyraya_widget import PyRaya, PyRayaHighlighter
-from .regions import REGION_COLORS, RegionType, TextRegion
+from .regions import RegionColors, RegionType, TextRegion
 
-__all__ = ["PyRaya", "PyRayaHighlighter", "REGION_COLORS", "RegionType", "TextRegion", "main"]
+__all__ = ["PyRaya", "PyRayaHighlighter", "RegionColors", "RegionType", "TextRegion", "main"]
 
 
 # ******************************************************************************
@@ -25,7 +25,7 @@ def main() -> None:
     """
     app = QApplication(sys.argv)
     editor = PyRaya()
-    editor.set_font_size(24)
+    editor.setFontSize(24)
     editor.show()
     sys.exit(app.exec())
 

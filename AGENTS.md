@@ -5,7 +5,7 @@ Guidance for AI coding agents working in this repository.
 ## What this project is
 PyRaya (پیرایہ) is a **reusable, self-contained PySide6 (Qt) text editor widget** for Urdu / Nastaliq (right-to-left) text. It is a drop-in `QWidget` for embedding Urdu text editing in Qt applications — currently PySide6 only.
 
-Current status: **alpha (0.1.0-alpha.1)**. The widget is a `QPlainTextEdit` with RTL layout, right-aligned paragraphs, a configurable Noto font stack (default `Noto Naskh Arabic`), visible whitespace, a dedicated rule-based formatting highlighter, and text regions implemented: spans tagged as `latin` or `roman urdu` (:class:`RegionType`) and rendered with a subtle, type-specific background color, tagged from the right-click context menu, the `Ctrl+1` / `Ctrl+2` keyboard shortcuts, or `set_region_type`. The built-in spell-checker remains on the **roadmap** (see `README.md`) and is *not yet implemented*. Do not assume it works.
+Current status: **alpha (0.1.0-alpha.2)**. The widget is a `QPlainTextEdit` with RTL layout, right-aligned paragraphs, a configurable Noto font stack (default `Noto Naskh Arabic`), visible whitespace, a dedicated rule-based formatting highlighter, and text regions implemented: spans tagged as `latin` or `roman urdu` (:class:`RegionType`) and rendered with a subtle, type-specific background color, tagged from the right-click context menu, the `Ctrl+1` / `Ctrl+2` keyboard shortcuts, or `setRegionType`. The built-in spell-checker remains on the **roadmap** (see `README.md`) and is *not yet implemented*. Do not assume it works.
 
 ## Repository layout
 ```
@@ -20,7 +20,7 @@ pyraya/
 │   └── pyraya/
 │       ├── __init__.py       # public API + main() demo entry point
 │       ├── py.typed          # typed-package marker
-│       ├── regions.py        # region model: RegionType, TextRegion, REGION_COLORS
+│       ├── regions.py        # region model: RegionType, TextRegion, regionColors
 │       └── pyraya_widget.py  # the PyRaya widget (QPlainTextEdit) + formatting highlighter
 └── tests/
     └── test_pyraya.py      # offscreen widget + text-region tests
@@ -46,6 +46,7 @@ Bare `pyraya` only works with the `.venv` activated; `uv run pyraya` always work
 
 ## Conventions
 - Use the `src/` layout. The importable package is `pyraya` — import from `pyraya`, **not** `src.pyraya`.
+- Naming follows the Qt toolkit: `camelCase` for variables, functions, methods, and signals; `PascalCase` for classes and enum members.
 - Type hints are required on public functions and classes; the whole project must pass `pyrefly check`.
 - Public API must have docstrings (Google-style sections such as `Args:`, with reST cross-references like `:class:`).
 - New public symbols must be re-exported from `pyraya/__init__.py` and added to `__all__`.

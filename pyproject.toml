@@ -1,6 +1,6 @@
 [project]
 name = "pyraya"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 license = "MIT"
 license-files = ["LICENSE"]
 description = "PyRaya is a reusable, self-contained Qt text editor widget written in Python (PySide6)"

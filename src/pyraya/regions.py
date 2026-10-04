@@ -14,7 +14,7 @@ from enum import Enum
 
 from PySide6.QtGui import QColor
 
-__all__ = ["REGION_COLORS", "RegionType", "TextRegion"]
+__all__ = ["RegionColors", "RegionType", "TextRegion"]
 
 
 # ******************************************************************************
@@ -22,15 +22,15 @@ class RegionType(Enum):
     """Semantic region types for tagged text spans.
 
     Members:
-        LATIN: Latin-script text that is not Roman Urdu (e.g. English); no
+        Latin: Latin-script text that is not Roman Urdu (e.g. English); no
             Urdu-specific processing.
-        ROMAN_URDU: Roman-script Urdu — Urdu semantics written in the Latin
+        RomanUrdu: Roman-script Urdu — Urdu semantics written in the Latin
             script. Future per-type processing (spell-check, Roman Urdu to
             Nastaliq) will be hooked to these regions.
     """
 
-    LATIN = "latin"
-    ROMAN_URDU = "roman_urdu"
+    Latin = "latin"
+    RomanUrdu = "roman_urdu"
 
 
 # ******************************************************************************
@@ -50,9 +50,9 @@ class TextRegion:
 
 
 # ******************************************************************************
-REGION_COLORS: dict[RegionType, QColor] = {
-    RegionType.LATIN: QColor(0x60, 0xA5, 0xFA, 30),
-    RegionType.ROMAN_URDU: QColor(0xF5, 0x9E, 0x0B, 30),
+RegionColors: dict[RegionType, QColor] = {
+    RegionType.Latin: QColor(0x60, 0xA5, 0xFA, 30),
+    RegionType.RomanUrdu: QColor(0xF5, 0x9E, 0x0B, 30),
 }
 
 
