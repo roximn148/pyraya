@@ -21,7 +21,14 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QApplication, QMenu, QPlainTextEdit
 
-from pyraya import PyRaya, PyRayaHighlighter, RegionType, TextRegion, RegionColors
+from pyraya import (
+    PyRaya,
+    PyRayaHighlighter,
+    RegionColors,
+    RegionType,
+    TextRegion,
+    defaultRegionKind,
+)
 
 
 # ******************************************************************************
@@ -119,134 +126,171 @@ def testRegionsStartEmpty(app: QApplication) -> None:
 
 # ******************************************************************************
 def testSetRegionTypeFromSelection(app: QApplication) -> None:
-    """Tagging the current selection creates a region span."""
+    """Tagging the current selection retags it; the surrounding text
+    belongs to the default kind."""
     widget = PyRaya()
     widget.setPlainText("abcd")
     _select(widget, 1, 3)
     widget.setRegionType(RegionType.RomanUrdu)
-    assert widget.regions() == [TextRegion(1, 3, RegionType.RomanUrdu)]
+    assert widget.regions() == [
+        TextRegion(0, 1, defaultRegionKind),
+        TextRegion(1, 3, RegionType.RomanUrdu),
+        TextRegion(3, 4, defaultRegionKind),
+    ]
 
 
 # ******************************************************************************
 def testSetRegionTypeExplicitRange(app: QApplication) -> None:
-    """Tagging an explicit character range creates a region span."""
+    """Tagging an explicit range with the default kind leaves one default
+    span covering the whole text."""
     widget = PyRaya()
     widget.setPlainText("abcdefghij")
     widget.setRegionType(RegionType.Latin, 2, 5)
-    assert widget.regions() == [TextRegion(2, 5, RegionType.Latin)]
+    assert widget.regions() == [TextRegion(0, 10, defaultRegionKind)]
 
 
 # ******************************************************************************
 def testSetRegionTypeNoSelectionIsNoop(app: QApplication) -> None:
-    """Tagging without a selection or explicit range is a no-op."""
+    """Tagging without a selection or explicit range is a no-op; the text
+    still belongs to the default kind."""
     widget = PyRaya()
     widget.setPlainText("abcd")
     widget.setRegionType(RegionType.Latin)
-    assert widget.regions() == []
+    assert widget.regions() == [TextRegion(0, 4, defaultRegionKind)]
 
 
 # ******************************************************************************
 def testSetRegionTypeSplitsAndRetags(app: QApplication) -> None:
-    """Retagging part of a region splits it and merges around the new span."""
+    """Retagging part of the text splits it; the surrounding text belongs
+    to the default kind."""
     widget = PyRaya()
     widget.setPlainText("abcdefghij")
-    widget.setRegionType(RegionType.Latin, 0, 5)
     widget.setRegionType(RegionType.RomanUrdu, 2, 7)
     assert widget.regions() == [
-        TextRegion(0, 2, RegionType.Latin),
+        TextRegion(0, 2, defaultRegionKind),
         TextRegion(2, 7, RegionType.RomanUrdu),
+        TextRegion(7, 10, defaultRegionKind),
     ]
 
 
 # ******************************************************************************
 def testSetRegionTypeMergesAdjacent(app: QApplication) -> None:
-    """Adjacent same-type spans merge into one region."""
+    """Adjacent same-type spans merge into one region; with the default
+    kind the merged span covers the whole text."""
     widget = PyRaya()
     widget.setPlainText("abcdefghij")
     widget.setRegionType(RegionType.Latin, 0, 3)
     widget.setRegionType(RegionType.Latin, 3, 6)
-    assert widget.regions() == [TextRegion(0, 6, RegionType.Latin)]
+    assert widget.regions() == [TextRegion(0, 10, defaultRegionKind)]
 
 
 # ******************************************************************************
 def testRegionSpansBlocks(app: QApplication) -> None:
-    """A region may span multiple text blocks."""
+    """A region may span multiple text blocks; the surrounding text
+    belongs to the default kind."""
     widget = PyRaya()
     widget.setPlainText("ab\ncd")
     widget.setRegionType(RegionType.RomanUrdu, 1, 4)
-    assert widget.regions() == [TextRegion(1, 4, RegionType.RomanUrdu)]
+    assert widget.regions() == [
+        TextRegion(0, 1, defaultRegionKind),
+        TextRegion(1, 4, RegionType.RomanUrdu),
+        TextRegion(4, 5, defaultRegionKind),
+    ]
 
 
 # ******************************************************************************
 def testRegionPersistsThroughInsertion(app: QApplication) -> None:
-    """Inserting text before a region shifts the span."""
+    """Inserting text before a region shifts the span; the inserted text
+    belongs to the default kind."""
     widget = PyRaya()
     widget.setPlainText("abcd")
-    widget.setRegionType(RegionType.Latin, 1, 3)
+    widget.setRegionType(RegionType.RomanUrdu, 1, 3)
     cursor = widget.textCursor()
     cursor.setPosition(0)
     cursor.insertText("X")
-    assert widget.regions() == [TextRegion(2, 4, RegionType.Latin)]
+    assert widget.regions() == [
+        TextRegion(0, 2, defaultRegionKind),
+        TextRegion(2, 4, RegionType.RomanUrdu),
+        TextRegion(4, 5, defaultRegionKind),
+    ]
 
 
 # ******************************************************************************
 def testRegionPersistsThroughDeletion(app: QApplication) -> None:
-    """Deleting text before a region shifts the span."""
+    """Deleting text before a region shifts the span; the remaining text
+    belongs to the default kind."""
     widget = PyRaya()
     widget.setPlainText("abcd")
-    widget.setRegionType(RegionType.Latin, 1, 3)
+    widget.setRegionType(RegionType.RomanUrdu, 1, 3)
     cursor = widget.textCursor()
     cursor.setPosition(0)
     cursor.deleteChar()
-    assert widget.regions() == [TextRegion(0, 2, RegionType.Latin)]
+    assert widget.regions() == [
+        TextRegion(0, 2, RegionType.RomanUrdu),
+        TextRegion(2, 3, defaultRegionKind),
+    ]
 
 
 # ******************************************************************************
 def testRegionPersistsThroughUndoRedo(app: QApplication) -> None:
-    """Region state survives undo and redo because it lives in the document."""
+    """Region state survives undo and redo because it lives in the
+    document."""
     widget = PyRaya()
     widget.setPlainText("abcd")
-    widget.setRegionType(RegionType.Latin, 1, 3)
+    widget.setRegionType(RegionType.RomanUrdu, 1, 3)
     cursor = widget.textCursor()
     cursor.setPosition(4)
     cursor.insertText("e")
-    assert widget.regions() == [TextRegion(1, 3, RegionType.Latin)]
+    assert widget.regions() == [
+        TextRegion(0, 1, defaultRegionKind),
+        TextRegion(1, 3, RegionType.RomanUrdu),
+        TextRegion(3, 5, defaultRegionKind),
+    ]
     widget.undo()
-    assert widget.regions() == [TextRegion(1, 3, RegionType.Latin)]
+    assert widget.regions() == [
+        TextRegion(0, 1, defaultRegionKind),
+        TextRegion(1, 3, RegionType.RomanUrdu),
+        TextRegion(3, 4, defaultRegionKind),
+    ]
     widget.redo()
-    assert widget.regions() == [TextRegion(1, 3, RegionType.Latin)]
+    assert widget.regions() == [
+        TextRegion(0, 1, defaultRegionKind),
+        TextRegion(1, 3, RegionType.RomanUrdu),
+        TextRegion(3, 5, defaultRegionKind),
+    ]
 
 
 # ******************************************************************************
-def testSetTextClearsRegions(app: QApplication) -> None:
-    """Replacing the document text removes its region state."""
+def testSetTextRetagsAsDefault(app: QApplication) -> None:
+    """Replacing the document text retags all text with the default kind."""
     widget = PyRaya()
     widget.setPlainText("abcd")
-    widget.setRegionType(RegionType.Latin, 0, 4)
+    widget.setRegionType(RegionType.RomanUrdu, 0, 4)
     widget.setPlainText("efgh")
-    assert widget.regions() == []
+    assert widget.regions() == [TextRegion(0, 4, defaultRegionKind)]
 
 
 # ******************************************************************************
 def testRegionTypeAt(app: QApplication) -> None:
-    """regionTypeAt reports the kind covering each offset."""
+    """regionTypeAt reports the kind covering each offset; untagged text
+    reports the default kind."""
     widget = PyRaya()
     widget.setPlainText("abcd")
     widget.setRegionType(RegionType.RomanUrdu, 1, 3)
-    assert widget.regionTypeAt(0) is None
+    assert widget.regionTypeAt(0) is defaultRegionKind
     assert widget.regionTypeAt(1) is RegionType.RomanUrdu
     assert widget.regionTypeAt(2) is RegionType.RomanUrdu
-    assert widget.regionTypeAt(3) is None
+    assert widget.regionTypeAt(3) is defaultRegionKind
 
 
 # ******************************************************************************
-def testClearRegions(app: QApplication) -> None:
-    """clearRegions removes every region."""
+def testClearRegionsResetsToDefault(app: QApplication) -> None:
+    """clearRegions resets all text to the default kind."""
     widget = PyRaya()
     widget.setPlainText("abcd")
-    widget.setRegionType(RegionType.Latin, 0, 4)
+    widget.setRegionType(RegionType.RomanUrdu, 1, 3)
     widget.clearRegions()
-    assert widget.regions() == []
+    assert widget.regions() == [TextRegion(0, 4, defaultRegionKind)]
 
 
 # ******************************************************************************
@@ -284,15 +328,17 @@ def testPopupMenuRegionActions(app: QApplication) -> None:
     assert byText["Clear all regions"].isEnabled()
 
     byText["Clear region under cursor"].trigger()
-    assert widget.regions() == []
+    assert widget.regions() == [TextRegion(0, 4, defaultRegionKind)]
 
 
 # ******************************************************************************
 def testPopupMenuDisabledWithoutSelection(app: QApplication) -> None:
-    """Region actions are disabled without a selection; clearing tracks state."""
+    """Region actions are disabled without a selection; clearing resets the
+    text to the default kind, so clear-all stays enabled for non-empty
+    text."""
     widget = PyRaya()
     widget.setPlainText("abcd")
-    widget.setRegionType(RegionType.Latin, 0, 4)
+    widget.setRegionType(RegionType.RomanUrdu, 1, 3)
 
     menu = widget.createPopupMenu()
     byText = {action.text(): action for action in menu.actions()}
@@ -301,9 +347,10 @@ def testPopupMenuDisabledWithoutSelection(app: QApplication) -> None:
     assert byText["Clear all regions"].isEnabled()
 
     widget.clearRegions()
+    assert widget.regions() == [TextRegion(0, 4, defaultRegionKind)]
     menu2 = widget.createPopupMenu()
     byText2 = {action.text(): action for action in menu2.actions()}
-    assert not byText2["Clear all regions"].isEnabled()
+    assert byText2["Clear all regions"].isEnabled()
 
 
 # ******************************************************************************
@@ -405,33 +452,156 @@ def testRegionTypeAtTerminatorOffsetIsNone(app: QApplication) -> None:
 
 # ******************************************************************************
 def testKeyboardShortcutsAssignRegions(app: QApplication) -> None:
-    """Ctrl+1 and Ctrl+2 tag the current selection as Latin or Roman Urdu."""
+    """Ctrl+1 and Ctrl+2 tag the current selection as Latin or Roman
+    Urdu; the surrounding text belongs to the default kind."""
     widget = PyRaya()
     widget.setPlainText("abcdefghij")
     _select(widget, 1, 3)
-    _keyPress(widget, Qt.Key.Key_1, Qt.KeyboardModifier.ControlModifier)
-    assert widget.regions() == [TextRegion(1, 3, RegionType.Latin)]
-    assert widget.toPlainText() == "abcdefghij"
-
-    _select(widget, 4, 6)
     _keyPress(widget, Qt.Key.Key_2, Qt.KeyboardModifier.ControlModifier)
     assert widget.regions() == [
-        TextRegion(1, 3, RegionType.Latin),
-        TextRegion(4, 6, RegionType.RomanUrdu),
+        TextRegion(0, 1, defaultRegionKind),
+        TextRegion(1, 3, RegionType.RomanUrdu),
+        TextRegion(3, 10, defaultRegionKind),
+    ]
+    assert widget.toPlainText() == "abcdefghij"
+
+    _select(widget, 2, 6)
+    _keyPress(widget, Qt.Key.Key_1, Qt.KeyboardModifier.ControlModifier)
+    assert widget.regions() == [
+        TextRegion(0, 1, defaultRegionKind),
+        TextRegion(1, 2, RegionType.RomanUrdu),
+        TextRegion(2, 10, defaultRegionKind),
     ]
     assert widget.toPlainText() == "abcdefghij"
 
 
 # ******************************************************************************
 def testKeyboardShortcutsIgnoredWithoutSelection(app: QApplication) -> None:
-    """Ctrl+1 / Ctrl+2 do nothing without a selection; typing is unaffected."""
+    """Ctrl+1 / Ctrl+2 do nothing without a selection; typing is unaffected
+    and typed text belongs to the default kind."""
     widget = PyRaya()
     widget.setPlainText("abcd")
     _keyPress(widget, Qt.Key.Key_1, Qt.KeyboardModifier.ControlModifier)
-    assert widget.regions() == []
+    assert widget.regions() == [TextRegion(0, 4, defaultRegionKind)]
 
     _keyPress(widget, Qt.Key.Key_1, Qt.KeyboardModifier.NoModifier, "1")
     assert widget.toPlainText() == "1abcd"
+    assert widget.regions() == [TextRegion(0, 5, defaultRegionKind)]
+
+
+# ******************************************************************************
+def testDefaultRegionKindIsDefined() -> None:
+    """defaultRegionKind is a RegionType member."""
+    assert defaultRegionKind in set(RegionType)
+    assert defaultRegionKind is RegionType.Latin
+
+
+# ******************************************************************************
+def testSetPlainTextTagsAllTextAsDefault(app: QApplication) -> None:
+    """Text set on the widget belongs to the default kind immediately."""
+    widget = PyRaya()
+    widget.setPlainText("abcd")
+    assert widget.regions() == [TextRegion(0, 4, defaultRegionKind)]
+    assert all(widget.regionTypeAt(p) is defaultRegionKind for p in range(4))
+
+
+# ******************************************************************************
+def testFirstTypedCharacterGetsDefaultKind(app: QApplication) -> None:
+    """A first character typed into an empty document belongs to the
+    default kind."""
+    widget = PyRaya()
+    cursor = widget.textCursor()
+    cursor.insertText("a")
+    assert widget.regions() == [TextRegion(0, 1, defaultRegionKind)]
+
+
+# ******************************************************************************
+def testRegionsChangedFiresForDefaultRepaint(app: QApplication) -> None:
+    """regionsChanged fires when a document change requires the default-kind
+    repaint, and not when the text already carries region backgrounds."""
+    widget = PyRaya()
+    fired: list[int] = []
+    widget.regionsChanged.connect(lambda: fired.append(1))
+    widget.setPlainText("abcd")
+    assert len(fired) == 1
+    widget.setPlainText("efgh")
+    assert len(fired) == 2
+
+
+# ******************************************************************************
+def testFreshWidgetHasNoUndoHistory(app: QApplication) -> None:
+    """A fresh PyRaya widget has no undoable commands behind it."""
+    widget = PyRaya()
+    assert not widget.document().isUndoAvailable()
+
+
+# ******************************************************************************
+def testUndoOfTypedTextIsClean(app: QApplication) -> None:
+    """Undoing a typed character restores the previous text; the
+    maintenance repaint does not leave an undo command that buries the edit
+    (undo/redo ping-pong)."""
+    widget = PyRaya()
+    widget.setPlainText("abcd")
+    cursor = widget.textCursor()
+    cursor.setPosition(4)
+    cursor.insertText("e")
+    assert widget.document().isUndoAvailable()
+    widget.undo()
+    assert widget.toPlainText() == "abcd"
+    assert not widget.document().isUndoAvailable()
+    widget.redo()
+    assert widget.toPlainText() == "abcde"
+
+
+# ******************************************************************************
+def testUndoOfFirstTypedCharacterDeletesIt(app: QApplication) -> None:
+    """Undoing the first character typed into an empty document deletes it."""
+    widget = PyRaya()
+    cursor = widget.textCursor()
+    cursor.insertText("a")
+    widget.undo()
+    assert widget.toPlainText() == ""
+    assert not widget.document().isUndoAvailable()
+    widget.redo()
+    assert widget.toPlainText() == "a"
+
+
+# ******************************************************************************
+def testSetRegionColorRejectsDuplicateColor(app: QApplication) -> None:
+    """setRegionColor rejects a color equal to another kind's color,
+    including the alpha channel, and leaves the state unchanged."""
+    widget = PyRaya()
+    widget.setPlainText("abcd")
+    widget.setRegionType(RegionType.RomanUrdu, 2, 4)
+    originalRoman = RegionColors[RegionType.RomanUrdu]
+    try:
+        assert widget.setRegionColor(RegionType.RomanUrdu, QColor(0x60, 0xA5, 0xFA, 30)) is False
+        assert widget.regions() == [
+            TextRegion(0, 2, defaultRegionKind),
+            TextRegion(2, 4, RegionType.RomanUrdu),
+        ]
+    finally:
+        RegionColors[RegionType.RomanUrdu] = originalRoman
+
+
+# ******************************************************************************
+def testSetRegionColorAlphaIsIdentity(app: QApplication) -> None:
+    """Colors are unique identities including the alpha channel: two kinds
+    may share RGB values when their alpha values differ."""
+    widget = PyRaya()
+    widget.setPlainText("abcd")
+    widget.setRegionType(RegionType.RomanUrdu, 2, 4)
+    originalRoman = RegionColors[RegionType.RomanUrdu]
+    try:
+        assert widget.setRegionColor(RegionType.RomanUrdu, QColor(0x60, 0xA5, 0xFA, 100)) is True
+        assert widget.regions() == [
+            TextRegion(0, 2, defaultRegionKind),
+            TextRegion(2, 4, RegionType.RomanUrdu),
+        ]
+        assert widget.regionTypeAt(3) is RegionType.RomanUrdu
+        assert widget.regionTypeAt(1) is defaultRegionKind
+    finally:
+        RegionColors[RegionType.RomanUrdu] = originalRoman
 
 
 # ******************************************************************************

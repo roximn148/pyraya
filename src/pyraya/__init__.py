@@ -11,9 +11,17 @@ import sys
 from PySide6.QtWidgets import QApplication
 
 from .pyraya_widget import PyRaya, PyRayaHighlighter
-from .regions import RegionColors, RegionType, TextRegion
+from .regions import RegionColors, RegionType, TextRegion, defaultRegionKind
 
-__all__ = ["PyRaya", "PyRayaHighlighter", "RegionColors", "RegionType", "TextRegion", "main"]
+__all__ = [
+    "PyRaya",
+    "PyRayaHighlighter",
+    "RegionColors",
+    "RegionType",
+    "TextRegion",
+    "defaultRegionKind",
+    "main",
+]
 
 
 # ******************************************************************************

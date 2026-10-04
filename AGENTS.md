@@ -5,7 +5,7 @@ Guidance for AI coding agents working in this repository.
 ## What this project is
 PyRaya (پیرایہ) is a **reusable, self-contained PySide6 (Qt) text editor widget** for Urdu / Nastaliq (right-to-left) text. It is a drop-in `QWidget` for embedding Urdu text editing in Qt applications — currently PySide6 only.
 
-Current status: **alpha (0.1.0-alpha.2)**. The widget is a `QPlainTextEdit` with RTL layout, right-aligned paragraphs, a configurable Noto font stack (default `Noto Naskh Arabic`), visible whitespace, a dedicated rule-based formatting highlighter, and text regions implemented: spans tagged as `latin` or `roman urdu` (:class:`RegionType`) and rendered with a subtle, type-specific background color, tagged from the right-click context menu, the `Ctrl+1` / `Ctrl+2` keyboard shortcuts, or `setRegionType`. The built-in spell-checker remains on the **roadmap** (see `README.md`) and is *not yet implemented*. Do not assume it works.
+Current status: **alpha (0.1.0-alpha.3)**. The widget is a `QPlainTextEdit` with RTL layout, right-aligned paragraphs, a configurable Noto font stack (default `Noto Naskh Arabic`), visible whitespace, a dedicated rule-based formatting highlighter, and text regions implemented: spans tagged as `latin` or `roman urdu` (:class:`RegionType`) and rendered with a subtle, type-specific background color, tagged from the right-click context menu, the `Ctrl+1` / `Ctrl+2` keyboard shortcuts, or `setRegionType`. Every character belongs to exactly one region kind at all times — untagged text belongs to `defaultRegionKind` (Latin) — each kind's identity is its unique background color (compared including the alpha channel), and clearing regions resets the text to `defaultRegionKind`. The built-in spell-checker remains on the **roadmap** (see `README.md`) and is *not yet implemented*. Do not assume it works.
 
 ## Repository layout
 ```
@@ -20,7 +20,7 @@ pyraya/
 │   └── pyraya/
 │       ├── __init__.py       # public API + main() demo entry point
 │       ├── py.typed          # typed-package marker
-│       ├── regions.py        # region model: RegionType, TextRegion, regionColors
+│       ├── regions.py        # region model: RegionType, TextRegion, RegionColors, defaultRegionKind
 │       └── pyraya_widget.py  # the PyRaya widget (QPlainTextEdit) + formatting highlighter
 └── tests/
     └── test_pyraya.py      # offscreen widget + text-region tests
@@ -59,7 +59,7 @@ Bare `pyraya` only works with the `.venv` activated; `uv run pyraya` always work
 
 ## Testing
 - This is a **GUI** app. Automated checks must run headless — use the offscreen Qt platform so tests do not open a window. The test sets `QT_QPA_PLATFORM=offscreen`.
-- The suite instantiates `PyRaya` under an offscreen `QApplication` and covers widget defaults plus the text-region API (tagging, span reconstruction, persistence through edits and undo/redo, popup-menu actions, keyboard shortcuts, and the custom-context-menu trigger).
+- The suite instantiates `PyRaya` under an offscreen `QApplication` and covers widget defaults plus the text-region API (tagging, span reconstruction, persistence through edits and undo/redo, popup-menu actions, keyboard shortcuts, the custom-context-menu trigger, the `regionsChanged` signal contract, and undo/redo cleanliness — no phantom command on a fresh widget, no undo/redo ping-pong).
 - New tests must reuse the single offscreen `QApplication` (see the `app` fixture); never call `QApplication.exec()` inside a test.
 
 ## Gotchas
@@ -70,6 +70,8 @@ Bare `pyraya` only works with the `.venv` activated; `uv run pyraya` always work
 - **Never stage IDE/editor files** — `.idea/`, `.vscode/`, and other IDE-specific files are git-ignored and must not be committed.
 - Do not hand-edit `uv.lock` — regenerate it with `uv lock`.
 - The demo (`uv run pyraya`) opens a real window; automated verification stays limited to the offscreen test suite.
-- Qt documents keep an implicit trailing terminator character, so `characterCount()` is one greater than the visible text length. Character-format merges spanning that character are silently dropped — region ranges are clamped to `characterCount() - 1`, and cursor-based region lookups guard the same boundary so a right-click on an empty document, or with the cursor at the end of the text, never requests an out-of-range `QTextCursor` position. Region state lives in the document's character formats (background colors), which is why spans survive edits and undo/redo; cleared characters are repainted with the widget's background color because a merge cannot restore a `NoBrush` background.
+- Qt documents keep an implicit trailing terminator character, so `characterCount()` is one greater than the visible text length. Character-format merges spanning that character are silently dropped — region ranges are clamped to `characterCount() - 1`, and cursor-based region lookups guard the same boundary so a right-click on an empty document, or with the cursor at the end of the text, never requests an out-of-range `QTextCursor` position. Region state lives in the document's character formats (background colors), which is why spans survive edits and undo/redo; cleared characters are repainted with the `defaultRegionKind` background color because a merge cannot restore a `NoBrush` background.
+- `QSyntaxHighlighter.setFormat` applies formats to the text **layout**, which Qt merges with the document's character formats at display time — it never modifies the document's character formats (invisible to `QTextCursor.charFormat()` and `QTextBlock.charFormat()`), is re-applied on every re-highlight, and is never recorded in the undo stack. The highlighter's region-maintenance pass therefore only paints the `defaultRegionKind` background into the layout for untagged runs; region state itself is stored in the document's character formats (cursor merges). `QSyntaxHighlighter.currentBlock()` is the block accessor in Qt 6 (`current()` does not exist).
+- Never make a repaint in response to a document change undoable: undoing it exposes untagged text, the repaint pushes a new command, and Qt clears the redo stack on any new edit, so the original edit becomes unreachable behind an undo/redo ping-pong. The initial block-alignment merge in `__init__` is wrapped in `document().setUndoRedoEnabled(False)` / `(True)` so a fresh widget has no phantom undo command; Qt's `setPlainText` replacement is likewise not recorded in the undo stack.
 - PySide6 does not dispatch `QWidget.createPopupMenu` or `QWidget.contextMenuEvent` to Python overrides on `QPlainTextEdit` subclasses (both work only on plain `QWidget`), and does not expose `QClipboard.hasText`. The context menu is therefore handled by connecting to `QAbstractScrollArea.customContextMenuRequested` — emitted by the scroll area's viewport event filter when the policy is `CustomContextMenu` (set in the constructor, which also suppresses Qt's automatic empty popup). The request position arrives in viewport coordinates and is converted with `viewport().mapToGlobal()`. The menu is built on `createStandardContextMenu()` plus the region actions. `QTextCursor.MoveMode.KeepAnchor` is the stub-correct spelling.
 - If you add features, update `AGENTS.md` and `README.md` so the documented state stays accurate.

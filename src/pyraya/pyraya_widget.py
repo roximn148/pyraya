@@ -9,7 +9,12 @@ right-to-left (Nastaliq) Urdu text in Qt applications — currently PySide6 only
 PyRaya ships with a configurable, dedicated :class:`PyRayaHighlighter` that
 provides rule-based formatting for Urdu and mixed-script text, and supports
 text regions: spans tagged with a :class:`~pyraya.regions.RegionType` and
-rendered with a subtle, type-specific background color.
+rendered with a subtle, type-specific background color. Every character of
+the document belongs to exactly one region kind at all times — text without
+an explicit tag carries the background color of
+:data:`~pyraya.regions.defaultRegionKind` — and each region kind is
+identified by a unique background color, compared including its alpha
+channel.
 """
 
 from collections.abc import Sequence
@@ -31,7 +36,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QMenu, QPlainTextEdit, QWidget
 
-from .regions import RegionColors, RegionType, TextRegion
+from .regions import RegionColors, RegionType, TextRegion, defaultRegionKind
 
 __all__ = ["PyRaya", "PyRayaHighlighter"]
 
@@ -58,6 +63,14 @@ class PyRayaHighlighter(QSyntaxHighlighter):
     QTextCharFormat)`` rules. Rules are applied in order, and later rules
     override earlier ones for overlapping matches, so broad rules should
     precede specific ones.
+
+    The highlighter also keeps the region invariant: on every re-highlight,
+    runs whose background matches no region color are painted with the
+    :data:`~pyraya.regions.defaultRegionKind` background in the text
+    layout, which Qt merges with the document's character formats at
+    display time. That maintenance paints the layout rather than editing
+    the document, so it is not recorded in the document's undo stack and
+    cannot bury user edits behind it.
 
     Args:
         document: The document to highlight.
@@ -106,6 +119,11 @@ class PyRayaHighlighter(QSyntaxHighlighter):
     def highlightBlock(self, block: str) -> None:
         """Apply the formatting rules to a single text block.
 
+        After the rules, runs of characters without a recognized region
+        background are painted with the
+        :data:`~pyraya.regions.defaultRegionKind` background in the text
+        layout.
+
         Args:
             block: The text of the block to highlight.
         """
@@ -116,6 +134,46 @@ class PyRayaHighlighter(QSyntaxHighlighter):
                 start = match.capturedStart(0)
                 length = match.capturedLength(0)
                 self.setFormat(start, length, charFormat)
+        self._paintDefaultRegions(block)
+
+    # ==========================================================================
+    def _paintDefaultRegions(self, block: str) -> None:
+        """Paint runs without a recognized region background.
+
+        Runs are painted with the
+        :data:`~pyraya.regions.defaultRegionKind` background in the text
+        layout; the document's character formats are not modified.
+
+        Args:
+            block: The text of the block being highlighted.
+        """
+        current = self.currentBlock()
+        base = current.position()
+        limit = len(block)
+        cursor = QTextCursor(self.document())
+        position = 0
+        while position < limit:
+            cursor.setPosition(base + position + 1)
+            if self._hasRegionBackground(cursor.charFormat()):
+                position += 1
+                continue
+            start = position
+            while position < limit:
+                cursor.setPosition(base + position + 1)
+                if not self._hasRegionBackground(cursor.charFormat()):
+                    position += 1
+                else:
+                    break
+            fmt = QTextCharFormat()
+            fmt.setBackground(QBrush(RegionColors[defaultRegionKind]))
+            self.setFormat(start, position - start, fmt)
+
+    # ==========================================================================
+    @staticmethod
+    def _hasRegionBackground(charFormat: QTextCharFormat) -> bool:
+        """Return True if the format carries a recognized region background."""
+        color = charFormat.background().color()
+        return any(color == regionColor for regionColor in RegionColors.values())
 
     # ==========================================================================
     def _installDefaultRules(self) -> None:
@@ -166,7 +224,10 @@ class PyRaya(QPlainTextEdit):
     Noto font stack (default ``Noto Naskh Arabic``), visible whitespace, a
     dedicated rule-based :class:`PyRayaHighlighter` for formatting, and text
     regions: spans tagged with a :class:`~pyraya.regions.RegionType` and
-    rendered with a subtle, type-specific background color.
+    rendered with a subtle, type-specific background color. All text belongs
+    to exactly one region kind at any time — untagged text is the
+    :data:`~pyraya.regions.defaultRegionKind` kind — and clearing regions
+    resets the text to that kind.
     """
 
     regionsChanged = Signal()
@@ -186,7 +247,12 @@ class PyRaya(QPlainTextEdit):
         self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self.setShowWhitespace(True)
         self._highlighter = PyRayaHighlighter(self.document())
+        # Aligning the initial (empty) document records an undo command;
+        # disable undo/redo around it so no phantom command is left behind.
+        document = self.document()
+        document.setUndoRedoEnabled(False)
         self.setAlignment(Qt.AlignmentFlag.AlignRight)
+        document.setUndoRedoEnabled(True)
         # PySide6 does not dispatch QWidget.createPopupMenu or
         # QWidget.contextMenuEvent to Python overrides on QPlainTextEdit
         # subclasses, so the context menu is handled via the
@@ -270,6 +336,23 @@ class PyRaya(QPlainTextEdit):
         self.document().setDefaultTextOption(option)
 
     # ==========================================================================
+    def setPlainText(self, text: str) -> None:
+        """Replace the entire document text.
+
+        The replacement text carries no region tags: all of it belongs to
+        the :data:`~pyraya.regions.defaultRegionKind` kind (the
+        highlighter paints untagged runs with the default background at
+        display time), and ``regionsChanged`` is emitted for a non-empty
+        replacement.
+
+        Args:
+            text: The new document text.
+        """
+        super().setPlainText(text)
+        if self.document().characterCount() > 1:
+            self.regionsChanged.emit()
+
+    # ==========================================================================
     def addFormatRule(self, pattern: QRegularExpression, charFormat: QTextCharFormat) -> None:
         """Add a formatting rule to the highlighter.
 
@@ -296,6 +379,11 @@ class PyRaya(QPlainTextEdit):
     # ==========================================================================
     def regions(self) -> list[TextRegion]:
         """Return the document's text regions as sorted, non-overlapping spans.
+
+        The spans always partition the whole text: text without a
+        non-default tag carries the background color of
+        :data:`~pyraya.regions.defaultRegionKind` and is reported as a span
+        of that kind.
 
         Returns:
             A list of :class:`~pyraya.regions.TextRegion` spans ordered by
@@ -338,7 +426,10 @@ class PyRaya(QPlainTextEdit):
 
         Returns:
             The :class:`~pyraya.regions.RegionType` of the region containing
-            the offset, or None if the offset is outside any region.
+            the offset. Every text offset belongs to exactly one kind (text
+            without a non-default tag belongs to
+            :data:`~pyraya.regions.defaultRegionKind`), so None is returned
+            only for offsets at or past the document's trailing terminator.
         """
         if not 0 <= position < self.document().characterCount() - 1:
             return None
@@ -346,36 +437,63 @@ class PyRaya(QPlainTextEdit):
 
     # ==========================================================================
     def clearRegions(self) -> None:
-        """Remove all region tags from the document."""
+        """Reset all text to :data:`~pyraya.regions.defaultRegionKind`.
+
+        Every region tag is removed and the text is repainted with the
+        default kind's background color, so the whole document becomes a
+        single default-kind region.
+        """
         if not self._regionSpans():
             return
         self._clearRange(0, self.document().characterCount())
         self.regionsChanged.emit()
 
     # ==========================================================================
-    def setRegionColor(self, kind: RegionType, color: QColor) -> None:
+    def setRegionColor(self, kind: RegionType, color: QColor) -> bool:
         """Change the background color used for a region type.
 
-        Existing regions of that type are recoloured immediately.
+        Existing regions of that type are recoloured immediately. Because a
+        color is a kind's identity, colors are compared — and must remain
+        unique — including the alpha channel; a color equal to another
+        kind's color is rejected.
 
         Args:
             kind: The region type to recolour.
             color: The new background color; its alpha controls subtlety.
+
+        Returns:
+            True if the color was applied; False if it equals another
+            kind's color (including its alpha channel).
         """
+        color = QColor(color)
+        for otherKind, otherColor in RegionColors.items():
+            if otherKind == kind or color != otherColor:
+                continue
+            return False
         oldColor = RegionColors[kind]
-        if QColor(color) == oldColor:
-            return
-        oldName = oldColor.name()
-        for position in range(self.document().characterCount() - 1):
-            if self._charFormatAt(position).background().color().name() == oldName:
-                cursor = self.textCursor()
-                cursor.setPosition(position)
-                cursor.setPosition(position + 1, QTextCursor.MoveMode.KeepAnchor)
-                fmt = QTextCharFormat()
-                fmt.setBackground(QBrush(color))
-                cursor.mergeCharFormat(fmt)
-        RegionColors[kind] = QColor(color)
+        if color == oldColor:
+            return True
+        # Block the document signals while the characters are recoloured: a
+        # re-highlight mid-loop would treat the new color as unrecognized (it
+        # is not in RegionColors yet) and repaint the recoloured characters
+        # back to the default kind.
+        document = self.document()
+        document.blockSignals(True)
+        try:
+            for position in range(document.characterCount() - 1):
+                if self._charFormatAt(position).background().color() == oldColor:
+                    cursor = self.textCursor()
+                    cursor.setPosition(position)
+                    cursor.setPosition(position + 1, QTextCursor.MoveMode.KeepAnchor)
+                    fmt = QTextCharFormat()
+                    fmt.setBackground(QBrush(color))
+                    cursor.mergeCharFormat(fmt)
+        finally:
+            document.blockSignals(False)
+        RegionColors[kind] = color
+        self.viewport().update()
         self.regionsChanged.emit()
+        return True
 
     # ==========================================================================
     def createPopupMenu(self) -> QMenu:
@@ -468,11 +586,12 @@ class PyRaya(QPlainTextEdit):
 
     # ==========================================================================
     def _clearRange(self, start: int, end: int) -> None:
-        """Remove region backgrounds over a character range.
+        """Reset a character range to :data:`~pyraya.regions.defaultRegionKind`.
 
-        Cleared characters are repainted with the widget's own background
-        color, because a format merge cannot restore a ``NoBrush``
-        background once one has been set.
+        Cleared characters are repainted with the default kind's background
+        color, because a format merge cannot restore a ``NoBrush`` background
+        once one has been set and the document must never contain untagged
+        text.
         """
         start, end = self._clampRange(start, end)
         if start >= end:
@@ -481,7 +600,7 @@ class PyRaya(QPlainTextEdit):
         cursor.setPosition(start)
         cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
         fmt = QTextCharFormat()
-        fmt.setBackground(QBrush(self.palette().color(self.backgroundRole())))
+        fmt.setBackground(QBrush(RegionColors[defaultRegionKind]))
         cursor.mergeCharFormat(fmt)
         self.viewport().update()
 
@@ -500,17 +619,17 @@ class PyRaya(QPlainTextEdit):
     def _regionSpans(self) -> list[TextRegion]:
         """Reconstruct region spans from the document's character formats.
 
-        The trailing terminator character of the last block is never part of
-        a region, so the scan stops before it.
+        Every character belongs to exactly one region kind — text without a
+        recognized region background counts as
+        :data:`~pyraya.regions.defaultRegionKind` — so the spans partition
+        the whole text. The trailing terminator character of the last block
+        is never part of a region, so the scan stops before it.
         """
         spans: list[TextRegion] = []
         limit = self.document().characterCount() - 1
         position = 0
         while position < limit:
             kind = self._regionKindAt(position)
-            if kind is None:
-                position += 1
-                continue
             start = position
             while position < limit and self._regionKindAt(position) == kind:
                 position += 1
@@ -518,13 +637,18 @@ class PyRaya(QPlainTextEdit):
         return spans
 
     # ==========================================================================
-    def _regionKindAt(self, position: int) -> RegionType | None:
-        """Return the region kind stored at a character offset, or None."""
+    def _regionKindAt(self, position: int) -> RegionType:
+        """Return the region kind stored at a character offset.
+
+        A character whose background matches no region color belongs to
+        :data:`~pyraya.regions.defaultRegionKind`, keeping the invariant
+        that every character belongs to exactly one kind.
+        """
         color = self._charFormatAt(position).background().color()
         for kind, regionColor in RegionColors.items():
             if color == regionColor:
                 return kind
-        return None
+        return defaultRegionKind
 
     # ==========================================================================
     def _regionAt(self, position: int) -> TextRegion | None:
@@ -536,8 +660,6 @@ class PyRaya(QPlainTextEdit):
         cursor out of range).
         """
         if not 0 <= position < self.document().characterCount() - 1:
-            return None
-        if self._regionKindAt(position) is None:
             return None
         for span in self._regionSpans():
             if span.start <= position < span.end:
