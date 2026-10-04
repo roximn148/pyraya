@@ -7,17 +7,21 @@ The public entry point is :class:`PyRaya`, a drop-in ``QPlainTextEdit`` for
 right-to-left (Nastaliq) Urdu text in Qt applications — currently PySide6 only.
 
 PyRaya ships with a configurable, dedicated :class:`PyRayaHighlighter` that
-provides rule-based formatting for Urdu and mixed-script text.
+provides rule-based formatting for Urdu and mixed-script text, and supports
+text regions: spans tagged with a :class:`~pyraya.regions.RegionType` and
+rendered with a subtle, type-specific background color.
 """
 
 from collections.abc import Sequence
 
-from PySide6.QtCore import QRegularExpression, Qt
+from PySide6.QtCore import QPoint, QRegularExpression, Qt, Signal
 from PySide6.QtGui import (
+    QAction,
     QBrush,
     QColor,
     QFont,
     QFontDatabase,
+    QKeyEvent,
     QSyntaxHighlighter,
     QTextBlockFormat,
     QTextCharFormat,
@@ -25,10 +29,13 @@ from PySide6.QtGui import (
     QTextDocument,
     QTextOption,
 )
-from PySide6.QtWidgets import QPlainTextEdit, QWidget
+from PySide6.QtWidgets import QMenu, QPlainTextEdit, QWidget
+
+from .regions import REGION_COLORS, RegionType, TextRegion
 
 __all__ = ["PyRaya", "PyRayaHighlighter"]
 
+# ******************************************************************************
 #: Preferred font stack, in order of preference. The first entry is the default.
 PYRAYA_FONTS: tuple[str, ...] = (
     "Noto Naskh Arabic",
@@ -43,6 +50,7 @@ PYRAYA_FONTS: tuple[str, ...] = (
 DEFAULT_FONT_SIZE: float = 14.0
 
 
+# ******************************************************************************
 class PyRayaHighlighter(QSyntaxHighlighter):
     """Rule-based formatting highlighter for Urdu and mixed-script text.
 
@@ -141,15 +149,21 @@ class PyRayaHighlighter(QSyntaxHighlighter):
         return fmt
 
 
+# ******************************************************************************
 class PyRaya(QPlainTextEdit):
     """Self-contained PySide6 text editor widget for Urdu/Nastaliq text.
 
     A drop-in ``QPlainTextEdit`` for embedding Urdu text editing in a Qt UI.
     Configures right-to-left layout, right-aligned paragraphs, a configurable
-    Noto font stack (default ``Noto Naskh Arabic``), visible whitespace, and a
-    dedicated rule-based :class:`PyRayaHighlighter` for formatting.
+    Noto font stack (default ``Noto Naskh Arabic``), visible whitespace, a
+    dedicated rule-based :class:`PyRayaHighlighter` for formatting, and text
+    regions: spans tagged with a :class:`~pyraya.regions.RegionType` and
+    rendered with a subtle, type-specific background color.
     """
 
+    regions_changed = Signal()
+
+    # ==========================================================================
     def __init__(self, parent: QWidget | None = None) -> None:
         """Initialize the widget.
 
@@ -165,6 +179,14 @@ class PyRaya(QPlainTextEdit):
         self.set_show_whitespace(True)
         self._highlighter = PyRayaHighlighter(self.document())
         self.set_alignment(Qt.AlignmentFlag.AlignRight)
+        # PySide6 does not dispatch QWidget.createPopupMenu or
+        # QWidget.contextMenuEvent to Python overrides on QPlainTextEdit
+        # subclasses, so the context menu is handled via the
+        # customContextMenuRequested signal below. This policy makes Qt
+        # emit that signal (instead of an automatic empty popup) when the
+        # context menu event reaches the widget's viewport.
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._on_custom_context_menu_requested)
 
     @property
     def highlighter(self) -> PyRayaHighlighter:
@@ -253,6 +275,272 @@ class PyRaya(QPlainTextEdit):
     def clear_format_rules(self) -> None:
         """Remove all formatting rules from the highlighter."""
         self._highlighter.clear_rules()
+
+    def regions(self) -> list[TextRegion]:
+        """Return the document's text regions as sorted, non-overlapping spans.
+
+        Returns:
+            A list of :class:`~pyraya.regions.TextRegion` spans ordered by
+            start offset.
+        """
+        return self._region_spans()
+
+    def set_region_type(
+        self, kind: RegionType, start: int | None = None, end: int | None = None
+    ) -> None:
+        """Tag a character range (or the current selection) with a region type.
+
+        Existing regions overlapping the range are split and the range is
+        retagged; adjacent same-type regions merge.
+
+        Args:
+            kind: The region type to apply.
+            start: Start offset; defaults to the selection start.
+            end: End offset (exclusive); defaults to the selection end.
+        """
+        if start is None or end is None:
+            cursor = self.textCursor()
+            if not cursor.hasSelection():
+                return
+            start, end = cursor.selectionStart(), cursor.selectionEnd()
+        start = max(0, start)
+        end = min(end, self.document().characterCount())
+        if start >= end:
+            return
+        self._apply_region_format(start, end, kind)
+        self.regions_changed.emit()
+
+    def region_type_at(self, position: int) -> RegionType | None:
+        """Return the region kind covering a character offset.
+
+        Args:
+            position: The character offset to query.
+
+        Returns:
+            The :class:`~pyraya.regions.RegionType` of the region containing
+            the offset, or None if the offset is outside any region.
+        """
+        if not 0 <= position < self.document().characterCount() - 1:
+            return None
+        return self._region_kind_at(position)
+
+    def clear_regions(self) -> None:
+        """Remove all region tags from the document."""
+        if not self._region_spans():
+            return
+        self._clear_range(0, self.document().characterCount())
+        self.regions_changed.emit()
+
+    def set_region_color(self, kind: RegionType, color: QColor) -> None:
+        """Change the background color used for a region type.
+
+        Existing regions of that type are recoloured immediately.
+
+        Args:
+            kind: The region type to recolour.
+            color: The new background color; its alpha controls subtlety.
+        """
+        old_color = REGION_COLORS[kind]
+        if QColor(color) == old_color:
+            return
+        old_name = old_color.name()
+        for position in range(self.document().characterCount() - 1):
+            if self._char_format_at(position).background().color().name() == old_name:
+                cursor = self.textCursor()
+                cursor.setPosition(position)
+                cursor.setPosition(position + 1, QTextCursor.MoveMode.KeepAnchor)
+                fmt = QTextCharFormat()
+                fmt.setBackground(QBrush(color))
+                cursor.mergeCharFormat(fmt)
+        REGION_COLORS[kind] = QColor(color)
+        self.regions_changed.emit()
+
+    def createPopupMenu(self) -> QMenu:
+        """Create the context menu with editing and region actions.
+
+        Builds on Qt's standard text-editing context menu (Undo, Redo, Cut,
+        Copy, Paste, Delete and Select All, with their usual enable states)
+        and appends the region actions.
+
+        Returns:
+            The context menu with editing and region actions.
+        """
+        menu = self.createStandardContextMenu(QPoint())
+        menu.addSeparator()
+
+        cursor = self.textCursor()
+        has_selection = cursor.hasSelection()
+
+        for kind, label in (
+            (RegionType.LATIN, "Region: Latin"),
+            (RegionType.ROMAN_URDU, "Region: Roman Urdu"),
+        ):
+            action = QAction(label, self)
+            action.setEnabled(has_selection)
+            action.triggered.connect(lambda _checked, k=kind: self.set_region_type(k))
+            menu.addAction(action)
+
+        region = self._region_under_cursor()
+        clear_one = QAction("Clear region under cursor", self)
+        clear_one.setEnabled(region is not None)
+        if region is not None:
+            clear_one.triggered.connect(
+                lambda _checked, s=region.start, e=region.end: self._clear_range(s, e)
+            )
+        menu.addAction(clear_one)
+
+        clear_all = QAction("Clear all regions", self)
+        clear_all.setEnabled(bool(self._region_spans()))
+        clear_all.triggered.connect(self.clear_regions)
+        menu.addAction(clear_all)
+        return menu
+
+    def _on_custom_context_menu_requested(self, position: QPoint) -> None:
+        """Show the context menu where it was requested.
+
+        Args:
+            position: The request position in viewport coordinates.
+        """
+        self._show_popup(self.createPopupMenu(), self.viewport().mapToGlobal(position))
+
+    def _show_popup(self, menu: QMenu, position: QPoint) -> None:
+        """Show the widget's context menu at the given global position."""
+        menu.exec(position)
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        """Assign region types via keyboard shortcuts.
+
+        ``Ctrl+1`` tags the current selection as Latin and ``Ctrl+2`` tags
+        it as Roman Urdu. Without a selection the shortcuts are ignored and
+        the event falls through to the default handler.
+
+        Args:
+            event: The key-press event.
+        """
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            if event.key() == Qt.Key.Key_1 and self.textCursor().hasSelection():
+                self.set_region_type(RegionType.LATIN)
+                return
+            if event.key() == Qt.Key.Key_2 and self.textCursor().hasSelection():
+                self.set_region_type(RegionType.ROMAN_URDU)
+                return
+        super().keyPressEvent(event)
+
+    def _apply_region_format(self, start: int, end: int, kind: RegionType) -> None:
+        """Merge the region's background format over a character range."""
+        start, end = self._clamp_range(start, end)
+        if start >= end:
+            return
+        cursor = self.textCursor()
+        cursor.setPosition(start)
+        cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+        fmt = QTextCharFormat()
+        fmt.setBackground(QBrush(REGION_COLORS[kind]))
+        cursor.mergeCharFormat(fmt)
+        self.viewport().update()
+
+    def _clear_range(self, start: int, end: int) -> None:
+        """Remove region backgrounds over a character range.
+
+        Cleared characters are repainted with the widget's own background
+        color, because a format merge cannot restore a ``NoBrush``
+        background once one has been set.
+        """
+        start, end = self._clamp_range(start, end)
+        if start >= end:
+            return
+        cursor = self.textCursor()
+        cursor.setPosition(start)
+        cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+        fmt = QTextCharFormat()
+        fmt.setBackground(QBrush(self.palette().color(self.backgroundRole())))
+        cursor.mergeCharFormat(fmt)
+        self.viewport().update()
+
+    def _clamp_range(self, start: int, end: int) -> tuple[int, int]:
+        """Clamp a character range to the document's real text offsets.
+
+        The document's trailing terminator character — which Qt keeps at the
+        end of the last block and which ``characterCount()`` includes — must
+        never be formatted: merges spanning it are silently dropped.
+        """
+        limit = self.document().characterCount() - 1
+        return max(0, start), min(limit, end)
+
+    def _region_spans(self) -> list[TextRegion]:
+        """Reconstruct region spans from the document's character formats.
+
+        The trailing terminator character of the last block is never part of
+        a region, so the scan stops before it.
+        """
+        spans: list[TextRegion] = []
+        limit = self.document().characterCount() - 1
+        position = 0
+        while position < limit:
+            kind = self._region_kind_at(position)
+            if kind is None:
+                position += 1
+                continue
+            start = position
+            while position < limit and self._region_kind_at(position) == kind:
+                position += 1
+            spans.append(TextRegion(start, position, kind))
+        return spans
+
+    def _region_kind_at(self, position: int) -> RegionType | None:
+        """Return the region kind stored at a character offset, or None."""
+        color = self._char_format_at(position).background().color()
+        for kind, region_color in REGION_COLORS.items():
+            if color == region_color:
+                return kind
+        return None
+
+    def _region_at(self, position: int) -> TextRegion | None:
+        """Return the full region span containing a character offset, or None.
+
+        The document's trailing terminator character is never part of a
+        region, so offsets at or past it return None instead of reading the
+        terminator's format (``_char_format_at`` would otherwise place the
+        cursor out of range).
+        """
+        if not 0 <= position < self.document().characterCount() - 1:
+            return None
+        if self._region_kind_at(position) is None:
+            return None
+        for span in self._region_spans():
+            if span.start <= position < span.end:
+                return span
+        return None
+
+    def _region_under_cursor(self) -> TextRegion | None:
+        """Return the region span under the cursor, accounting for selection.
+
+        When the cursor has a selection, the region overlapping the selection
+        is returned; otherwise the region containing the cursor position.
+        """
+        cursor = self.textCursor()
+        if cursor.hasSelection():
+            start = cursor.selectionStart()
+            end = cursor.selectionEnd()
+            for span in self._region_spans():
+                if span.start < end and start < span.end:
+                    return span
+        return self._region_at(cursor.position())
+
+    def _char_format_at(self, position: int) -> QTextCharFormat:
+        """Return the character format stored at a document offset.
+
+        ``QTextCursor.charFormat()`` reports the format of the character
+        before the cursor, so the cursor is placed one offset past the
+        target. The offset must therefore stay below
+        ``characterCount() - 1`` so the cursor never lands past the trailing
+        terminator; region lookups guard that boundary. A fresh,
+        document-bound cursor is used because the widget cursor can report
+        stale formats while it carries a selection.
+        """
+        cursor = QTextCursor(self.document())
+        cursor.setPosition(position + 1)
+        return cursor.charFormat()
 
     def _resolve_default_font(self) -> str:
         """Pick the first font in the stack that is installed on the system.

@@ -1,3 +1,6 @@
+# ******************************************************************************
+# Copyright (c) 2026, RoXimn. All rights reserved.
+# ******************************************************************************
 """PyRaya: a reusable, self-contained Qt (PySide6) text editor widget for Urdu.
 
 Drop-in component for Urdu/Nastaliq text in Qt applications — currently PySide6 only.
@@ -8,10 +11,12 @@ import sys
 from PySide6.QtWidgets import QApplication
 
 from .pyraya_widget import PyRaya, PyRayaHighlighter
+from .regions import REGION_COLORS, RegionType, TextRegion
 
-__all__ = ["PyRaya", "PyRayaHighlighter", "main"]
+__all__ = ["PyRaya", "PyRayaHighlighter", "REGION_COLORS", "RegionType", "TextRegion", "main"]
 
 
+# ******************************************************************************
 def main() -> None:
     """Run the PyRaya demo application.
 
@@ -25,5 +30,9 @@ def main() -> None:
     sys.exit(app.exec())
 
 
+# ******************************************************************************
 if __name__ == "__main__":
     main()
+
+
+# ******************************************************************************

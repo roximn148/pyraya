@@ -5,7 +5,7 @@ Guidance for AI coding agents working in this repository.
 ## What this project is
 PyRaya (پیرایہ) is a **reusable, self-contained PySide6 (Qt) text editor widget** for Urdu / Nastaliq (right-to-left) text. It is a drop-in `QWidget` for embedding Urdu text editing in Qt applications — currently PySide6 only.
 
-Current status: **alpha (0.1.0-alpha.0)**. The widget is a `QPlainTextEdit` with RTL layout, right-aligned paragraphs, a configurable Noto font stack (default `Noto Naskh Arabic`), visible whitespace, and a dedicated rule-based formatting highlighter implemented. The built-in spell-checker remains on the **roadmap** (see `README.md`) and is *not yet implemented*. Do not assume it works.
+Current status: **alpha (0.1.0-alpha.1)**. The widget is a `QPlainTextEdit` with RTL layout, right-aligned paragraphs, a configurable Noto font stack (default `Noto Naskh Arabic`), visible whitespace, a dedicated rule-based formatting highlighter, and text regions implemented: spans tagged as `latin` or `roman urdu` (:class:`RegionType`) and rendered with a subtle, type-specific background color, tagged from the right-click context menu, the `Ctrl+1` / `Ctrl+2` keyboard shortcuts, or `set_region_type`. The built-in spell-checker remains on the **roadmap** (see `README.md`) and is *not yet implemented*. Do not assume it works.
 
 ## Repository layout
 ```
@@ -20,9 +20,10 @@ pyraya/
 │   └── pyraya/
 │       ├── __init__.py       # public API + main() demo entry point
 │       ├── py.typed          # typed-package marker
+│       ├── regions.py        # region model: RegionType, TextRegion, REGION_COLORS
 │       └── pyraya_widget.py  # the PyRaya widget (QPlainTextEdit) + formatting highlighter
 └── tests/
-    └── test_pyraya.py      # minimal offscreen smoke test
+    └── test_pyraya.py      # offscreen widget + text-region tests
 ```
 
 ## Environment
@@ -57,7 +58,7 @@ Bare `pyraya` only works with the `.venv` activated; `uv run pyraya` always work
 
 ## Testing
 - This is a **GUI** app. Automated checks must run headless — use the offscreen Qt platform so tests do not open a window. The test sets `QT_QPA_PLATFORM=offscreen`.
-- The smoke test imports `PyRaya` under an offscreen `QApplication` and verifies it instantiates.
+- The suite instantiates `PyRaya` under an offscreen `QApplication` and covers widget defaults plus the text-region API (tagging, span reconstruction, persistence through edits and undo/redo, popup-menu actions, keyboard shortcuts, and the custom-context-menu trigger).
 - New tests must reuse the single offscreen `QApplication` (see the `app` fixture); never call `QApplication.exec()` inside a test.
 
 ## Gotchas
@@ -67,5 +68,7 @@ Bare `pyraya` only works with the `.venv` activated; `uv run pyraya` always work
 - `pydantic` and `romanalfaz` are declared dependencies but are currently unused — reserved for roadmap work; do not build the current API on them.
 - **Never stage IDE/editor files** — `.idea/`, `.vscode/`, and other IDE-specific files are git-ignored and must not be committed.
 - Do not hand-edit `uv.lock` — regenerate it with `uv lock`.
-- The demo (`uv run pyraya`) opens a real window; automated verification stays limited to the offscreen smoke test.
+- The demo (`uv run pyraya`) opens a real window; automated verification stays limited to the offscreen test suite.
+- Qt documents keep an implicit trailing terminator character, so `characterCount()` is one greater than the visible text length. Character-format merges spanning that character are silently dropped — region ranges are clamped to `characterCount() - 1`, and cursor-based region lookups guard the same boundary so a right-click on an empty document, or with the cursor at the end of the text, never requests an out-of-range `QTextCursor` position. Region state lives in the document's character formats (background colors), which is why spans survive edits and undo/redo; cleared characters are repainted with the widget's background color because a merge cannot restore a `NoBrush` background.
+- PySide6 does not dispatch `QWidget.createPopupMenu` or `QWidget.contextMenuEvent` to Python overrides on `QPlainTextEdit` subclasses (both work only on plain `QWidget`), and does not expose `QClipboard.hasText`. The context menu is therefore handled by connecting to `QAbstractScrollArea.customContextMenuRequested` — emitted by the scroll area's viewport event filter when the policy is `CustomContextMenu` (set in the constructor, which also suppresses Qt's automatic empty popup). The request position arrives in viewport coordinates and is converted with `viewport().mapToGlobal()`. The menu is built on `createStandardContextMenu()` plus the region actions. `QTextCursor.MoveMode.KeepAnchor` is the stub-correct spelling.
 - If you add features, update `AGENTS.md` and `README.md` so the documented state stays accurate.
