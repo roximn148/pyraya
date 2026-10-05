@@ -553,3 +553,70 @@ def testDeactivatesWhenCursorLeaves(app: QApplication) -> None:
     _moveCursor(widget, 1)  # off the word, into "hello"
     assert not overlay.isVisible()
     assert widget.toPlainText() == "hello خوش world دوست"
+
+
+# ******************************************************************************
+def testRomanKeystrokeInterceptedInSpan(app: QApplication) -> None:
+    """A roman keystroke inside a RomanUrdu span seeds the overlay, not the doc."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello خوش world")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 10)  # word plus trailing space
+    _moveCursor(widget, 9)  # the space inside the span (a non-word position)
+    _assertNoOverlay(widget)
+    _sendKey(widget, Qt.Key.Key_K, "k")
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    assert overlay.lineEdit().text() == "k"
+    assert widget.toPlainText() == "hello خوش world"  # the char was not inserted
+
+
+# ******************************************************************************
+def testLatinKeystrokeNotIntercepted(app: QApplication) -> None:
+    """Outside a RomanUrdu span (or feature off), roman keys type normally."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello world")
+    widget.setRomanInputEnabled(True)
+    _moveCursor(widget, 0)
+    _sendKey(widget, Qt.Key.Key_K, "k")
+    assert widget.toPlainText() == "khello world"
+    _assertNoOverlay(widget)
+
+    widget2 = PyRaya()
+    widget2.show()
+    widget2.setPlainText("hello خوش world")
+    widget2.setRomanInputEnabled(False)
+    widget2.setRegionType(RegionType.RomanUrdu, 6, 11)  # word plus trailing space
+    _moveCursor(widget2, 9)  # the space inside the span
+    _sendKey(widget2, Qt.Key.Key_K, "k")
+    assert widget2.toPlainText() == "hello خوشk world"
+    _assertNoOverlay(widget2)
+    # punctuation is never intercepted, even inside the span with feature on
+    widget2.setRomanInputEnabled(True)
+    _moveCursor(widget2, 10)  # the space inside the span, after the "k"
+    _sendKey(widget2, Qt.Key.Key_Comma, ",")
+    assert widget2.toPlainText() == "hello خوشk, world"
+    _assertNoOverlay(widget2)
+
+
+# ******************************************************************************
+def testReactivationAfterCommit(app: QApplication) -> None:
+    """Once the overlay deactivates, the next roman keystroke re-activates it."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello خوش world")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 10)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    # simulate the post-commit state: cursor inside the span, no active word
+    _moveCursor(widget, 9)
+    _assertNoOverlay(widget)
+    _sendKey(widget, Qt.Key.Key_K, "k")
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    assert overlay.lineEdit().text() == "k"
+    assert widget.toPlainText() == "hello خوش world"

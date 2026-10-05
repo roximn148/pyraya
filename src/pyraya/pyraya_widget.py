@@ -670,26 +670,58 @@ class PyRaya(QPlainTextEdit):
         """Place and size the overlay over the word's rectangle.
 
         The overlay's right edge is anchored to the word's right edge (so the
-        right-aligned line edit grows leftward, matching the document flow)
-        and the overlay is clamped to stay inside the viewport, flipping
-        above the word when the suggestion list would overflow the bottom.
+        right-aligned line edit grows leftward, matching the document flow).
+        """
+        wordRect = self._wordRect(word[0], word[1])
+        # QRect.right() is inclusive; the exclusive right edge is +1, so the
+        # overlay's right border sits exactly on the word's right edge.
+        self._placeOverlay(wordRect.right() + 1, wordRect.top())
+
+    # ==========================================================================
+    def _placeOverlay(self, rightX: int, top: int) -> None:
+        """Place and size the overlay with its right edge at ``rightX``.
+
+        The right-aligned line edit grows leftward from ``rightX``, matching
+        the document flow; the overlay is clamped to stay inside the
+        viewport, flipping above the anchor when the suggestion list would
+        overflow the bottom.
         """
         overlay = self._overlay
         if overlay is None:
             return
-        wordRect = self._wordRect(word[0], word[1])
         hint = overlay.sizeHint()
         viewport = self.viewport()
-        # QRect.right() is inclusive; the exclusive right edge is +1, so the
-        # overlay's right border sits exactly on the word's right edge.
-        x = wordRect.right() + 1 - hint.width()
-        y = wordRect.top()
+        x = rightX - hint.width()
+        y = top
         if y + hint.height() > viewport.height():
-            y = wordRect.bottom() - hint.height()
+            y = top - hint.height()
         x = max(0, min(x, viewport.width() - hint.width()))
         y = max(0, y)
         overlay.move(x, y)
         overlay.resize(hint.width(), hint.height())
+
+    # ==========================================================================
+    def _cursorAnchor(self, position: int) -> tuple[int, int]:
+        """The cursor's (right x, line top) anchor in viewport coordinates.
+
+        ``rightX`` is the exclusive right edge of the cursor position, so a
+        right-aligned overlay anchored there grows leftward as the user
+        types the new word.
+        """
+        document = self.document()
+        offset = self.contentOffset()
+        cursor = QTextCursor(document)
+        cursor.setPosition(position)
+        block = cursor.block()
+        layout = block.layout()
+        line = layout.lineForTextPosition(position)
+        if line is None:
+            rect = layout.boundingRect()
+            return (round(rect.right() + offset.x()), round(rect.top() + offset.y()))
+        # PySide6 types cursorToX as returning an untyped point, which is a
+        # plain (x, y) tuple at runtime; cast to the actual shape.
+        point = cast("tuple[float, float]", line.cursorToX(position))
+        return (round(point[0] + offset.x()), round(line.rect().top() + offset.y()))
 
     # ==========================================================================
     def _activateOverlay(self, word: tuple[int, int]) -> None:
@@ -717,6 +749,30 @@ class PyRaya(QPlainTextEdit):
         overlay.lineEdit().setFocus()
 
     # ==========================================================================
+    def _activateOverlayAt(self, text: str, position: int) -> None:
+        """Show the overlay at the cursor with ``text`` as its initial text.
+
+        Scenario 1 (a new word): the typed character seeds the overlay and
+        ``position`` is stored as the commit anchor; the character is never
+        written to the document.
+        """
+        engine = self.romanEngine()
+        if engine is None:
+            return
+        overlay = self._overlay
+        if overlay is None:
+            overlay = RomanOverlay(engine, self.font(), self.viewport())
+            overlay.canceled.connect(self._deactivateOverlay)
+            self._overlay = overlay
+        overlay.setText(text)
+        self._activeWord = None
+        self._anchorPosition = position
+        rightX, top = self._cursorAnchor(position)
+        self._placeOverlay(rightX, top)
+        overlay.show()
+        overlay.lineEdit().setFocus()
+
+    # ==========================================================================
     def _deactivateOverlay(self) -> None:
         """Hide the overlay, clear the overlay state, and refocus the document."""
         if self._overlay is not None:
@@ -724,6 +780,11 @@ class PyRaya(QPlainTextEdit):
         self._activeWord = None
         self._anchorPosition = None
         self.setFocus()
+
+    # ==========================================================================
+    def _overlayActive(self) -> bool:
+        """Whether the overlay is currently shown over the document."""
+        return self._overlay is not None and self._overlay.isVisible()
 
     # ==========================================================================
     def createPopupMenu(self) -> QMenu:
@@ -782,15 +843,29 @@ class PyRaya(QPlainTextEdit):
 
     # ==========================================================================
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        """Assign region types via keyboard shortcuts.
+        """Handle region shortcuts and intercept roman-input keystrokes.
 
         ``Ctrl+1`` tags the current selection as Latin and ``Ctrl+2`` tags
-        it as Roman Urdu. Without a selection the shortcuts are ignored and
-        the event falls through to the default handler.
+        it as Roman Urdu. While the roman-input feature is enabled and the
+        overlay is inactive, an ASCII alphanumeric key pressed with the
+        cursor inside a RomanUrdu region seeds the overlay with that
+        character (scenario 1); the character never reaches the document.
+        Everything else falls through to the default handler.
 
         Args:
             event: The key-press event.
         """
+        if (
+            self._romanInputEnabled
+            and not self._overlayActive()
+            and not (event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+        ):
+            text = event.text()
+            if len(text) == 1 and text.isascii() and text.isalnum():
+                region = self._regionUnderCursor()
+                if region is not None and region.kind is RegionType.RomanUrdu:
+                    self._activateOverlayAt(text, self.textCursor().position())
+                    return
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             if event.key() == Qt.Key.Key_1 and self.textCursor().hasSelection():
                 self.setRegionType(RegionType.Latin)
