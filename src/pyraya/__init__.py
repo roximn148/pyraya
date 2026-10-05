@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QApplication
 
 from .pyraya_widget import PyRaya, PyRayaHighlighter
 from .regions import RegionColors, RegionType, TextRegion, defaultRegionKind
+from .roman_input import RomanInputEngine, RomanOverlay
 
 __all__ = [
     "PyRaya",
@@ -20,6 +21,8 @@ __all__ = [
     "RegionType",
     "TextRegion",
     "defaultRegionKind",
+    "RomanInputEngine",
+    "RomanOverlay",
     "main",
 ]
 
