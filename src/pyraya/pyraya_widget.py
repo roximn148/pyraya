@@ -35,8 +35,10 @@ from PySide6.QtGui import (
     QTextOption,
 )
 from PySide6.QtWidgets import QMenu, QPlainTextEdit, QWidget
+from romanalfaz.engine import Vocabulary
 
 from .regions import RegionColors, RegionType, TextRegion, defaultRegionKind
+from .roman_input import RomanInputEngine
 
 __all__ = ["PyRaya", "PyRayaHighlighter"]
 
@@ -232,6 +234,11 @@ class PyRaya(QPlainTextEdit):
 
     regionsChanged = Signal()
 
+    #: Emitted when a roman-input commit writes a word to the document:
+    #: ``(word, roman)`` — the word committed (the selected Arabic word, or
+    #: the typed roman for a placeholder commit) and the typed roman.
+    romanWordCommitted = Signal(str, str)
+
     # ==========================================================================
     def __init__(self, parent: QWidget | None = None) -> None:
         """Initialize the widget.
@@ -261,6 +268,17 @@ class PyRaya(QPlainTextEdit):
         # context menu event reaches the widget's viewport.
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._onCustomContextMenuRequested)
+        # Roman-input overlay state: the feature is off by default so the
+        # existing drop-in behavior is unchanged; the dictionary and engine
+        # are owned by the widget (the engine is created lazily on demand).
+        self._romanInputEnabled = False
+        self._localDictionary = Vocabulary()
+        self._romanEngine: RomanInputEngine | None = None
+        self._activeWord: tuple[int, int] | None = None
+        self._anchorPosition: int | None = None
+        self._committing = False
+        document.cursorPositionChanged.connect(self._syncOverlay)
+        document.contentsChanged.connect(self._syncOverlay)
 
     # ==========================================================================
     @property
@@ -494,6 +512,71 @@ class PyRaya(QPlainTextEdit):
         self.viewport().update()
         self.regionsChanged.emit()
         return True
+
+    # ==========================================================================
+    def setRomanInputEnabled(self, enabled: bool) -> None:
+        """Enable or disable the roman-script overlay input feature.
+
+        Disabled by default so the existing drop-in behavior is unchanged:
+        while disabled, roman keystrokes type into the document as before and
+        no overlay machinery runs. Enabling the feature only marks it ready —
+        the :class:`~pyraya.roman_input.RomanInputEngine` (and its dictionary
+        load) happens on first overlay activation.
+
+        Args:
+            enabled: Whether the overlay input feature is active.
+        """
+        self._romanInputEnabled = enabled
+        if not enabled:
+            self._activeWord = None
+            self._anchorPosition = None
+
+    # ==========================================================================
+    def isRomanInputEnabled(self) -> bool:
+        """Whether the roman-script overlay input feature is enabled."""
+        return self._romanInputEnabled
+
+    # ==========================================================================
+    def localDictionary(self) -> Vocabulary:
+        """The document-local in-memory :class:`romanalfaz.Vocabulary`.
+
+        Owned by the widget and passed to the engine on lazy load. It is the
+        hook for the future ``learnRomanWord`` update;
+        ``Vocabulary.save``/``Vocabulary.load`` exist for persistence, and it
+        is never mutated in this session.
+
+        Returns:
+            The same in-memory :class:`Vocabulary` instance, every time.
+        """
+        return self._localDictionary
+
+    # ==========================================================================
+    def romanEngine(self) -> RomanInputEngine | None:
+        """The roman-input engine, or ``None`` while the feature is disabled.
+
+        Lazily creates the engine (with its ~0.2 s dictionary cold load) on
+        first call while the feature is enabled; subsequent calls return the
+        same instance.
+
+        Returns:
+            The engine when the feature is enabled; ``None`` otherwise.
+        """
+        if not self._romanInputEnabled:
+            return None
+        if self._romanEngine is None:
+            self._romanEngine = RomanInputEngine(self._localDictionary)
+        return self._romanEngine
+
+    # ==========================================================================
+    def _syncOverlay(self) -> None:
+        """Activate, reposition, or deactivate the overlay for the cursor.
+
+        Returns early while the feature is disabled or a commit is in
+        progress; otherwise the overlay state is reconciled with the word
+        under the document cursor.
+        """
+        if not self._romanInputEnabled or self._committing:
+            return
 
     # ==========================================================================
     def createPopupMenu(self) -> QMenu:

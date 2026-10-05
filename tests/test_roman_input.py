@@ -16,6 +16,7 @@ from PySide6.QtWidgets import QApplication, QPlainTextEdit, QWidget
 from romanalfaz import DictionaryNotFoundError
 from romanalfaz.engine import Suggestion, Vocabulary
 
+from pyraya import PyRaya
 from pyraya.roman_input import RomanInputEngine, RomanOverlay
 
 # Verified zero-match roman strings (no suggestions at distance 0..2).
@@ -368,3 +369,59 @@ def testOverlayWheelForwardsToScrollArea(
     assert host.forwarded[0].angleDelta() == QPoint(0, -120)
     # inverted vbar: a -120 notch from 0 scrolls three lines down.
     assert host.verticalScrollBar().value() == 3
+
+
+# ******************************************************************************
+def testRomanInputFeatureOffByDefault(app: QApplication) -> None:
+    """The feature is off by default and roman keystrokes type into the document."""
+    widget = PyRaya()
+    assert widget.isRomanInputEnabled() is False
+    _sendKey(widget, Qt.Key.Key_K, "k")
+    assert widget.toPlainText() == "k"
+    _sendKey(widget, Qt.Key.Key_O, "o")
+    assert widget.toPlainText() == "ko"
+
+
+# ******************************************************************************
+def testRomanInputFeatureSwitch(app: QApplication) -> None:
+    """setRomanInputEnabled toggles the feature; romanEngine is None while off."""
+    widget = PyRaya()
+    widget.setRomanInputEnabled(True)
+    assert widget.isRomanInputEnabled() is True
+    engine = widget.romanEngine()
+    assert isinstance(engine, RomanInputEngine)
+    widget.setRomanInputEnabled(False)
+    assert widget.isRomanInputEnabled() is False
+    assert widget.romanEngine() is None
+
+
+# ******************************************************************************
+def testRomanEngineLazyAndStable(app: QApplication) -> None:
+    """romanEngine returns the same lazily-created engine across calls."""
+    widget = PyRaya()
+    widget.setRomanInputEnabled(True)
+    engine = widget.romanEngine()
+    assert isinstance(engine, RomanInputEngine)
+    assert widget.romanEngine() is engine
+
+
+# ******************************************************************************
+def testLocalDictionaryStableAndRoundTrips(app: QApplication, tmp_path) -> None:
+    """localDictionary returns the same Vocabulary and save/load round-trips."""
+    widget = PyRaya()
+    first = widget.localDictionary()
+    assert widget.localDictionary() is first
+    first.add("khosh", 1)
+    first.setCompleted("khosh", True)
+    path = str(tmp_path / "vocab.txt")
+    first.save(path)
+    loaded = Vocabulary.load(path)
+    assert loaded.counter["khosh"] == 1
+
+
+# ******************************************************************************
+def testNoPhantomUndoWithFeatureEnabled(app: QApplication) -> None:
+    """Enabling the feature performs no document work (no phantom undo)."""
+    widget = PyRaya()
+    widget.setRomanInputEnabled(True)
+    assert widget.document().isUndoAvailable() is False
