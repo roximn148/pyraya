@@ -11,15 +11,32 @@ cursor is inside an Arabic-script Urdu word that belongs to a `RomanUrdu` text r
 **frameless, non-modal popup** appears over the word. It contains a `QLineEdit` pre-filled with
 the word's roman-script equivalent (produced by `romanalfaz`) and, below it, a **suggestion
 list** of Arabic-script words ranked by `romanalfaz`. All editing happens in the `QLineEdit`;
-the document stays untouched until the user commits (Space, Enter, or an arrow key at a text
-edge). On commit, the word span in the document is replaced with the selected Arabic word and
-the overlay moves to the next/previous word, repeating the cycle. The suggestion list is
+the document stays untouched until the user commits. On commit, the word — and, for separator-key commits (space, Enter, or
+punctuation), the typed separator character — is written to the document as a
+single undoable command, and the overlay disappears; it reappears when the
+cursor lands on an eligible word or when the user begins typing the next word. The suggestion
+list is
 color-coded by edit-distance tier (green / orange / red hues), and when `romanalfaz` yields no
 suggestion a **placeholder row** appears in place of the (empty) suggestion list; committing it
 teaches the typed word to the document-local, in-memory dictionary (a `romanalfaz`
 `Vocabulary`). Editing/integrating a custom romanalfaz dictionary is a **future addition** and
 out of scope here — only the in-place placeholder option and its local-dictionary learning
 ship now.
+
+Two input scenarios are handled:
+
+1. **Typing a new word** (no existing word under the cursor): the overlay shows the first
+   typed character and its suggestions, and any selection can be committed — the Arabic word
+   is inserted at the cursor position.
+2. **An existing word under the cursor** (during keyboard/mouse navigation): the overlay
+   offers roman-script editing of that word, and committing replaces the word span.
+
+Commit is also triggered by **typed separator characters** — space, Enter (newline),
+and punctuation (full stop, comma, brackets, hyphen, and the rest of the
+punctuation set) — so the overlay stays least intrusive to continuous typing:
+the user types a stream — word, separator, word, … — and each word commits at
+its natural boundary, with the separator character written to the document
+along with the word.
 
 Overlay editing is gated to `RomanUrdu` regions only. `Latin` regions (the default, untagged
 kind) have no processing mechanism. Future region types will hook their own processing the same
@@ -28,30 +45,51 @@ way.
 ## 2. End-to-end user flow
 
 1. The user tags a span as Roman Urdu (existing mechanisms: context menu, `Ctrl+2`,
-   `setRegionType`).
-2. The cursor lands inside an Arabic-script word within that span. The overlay auto-appears
-   over the word's visual rectangle: the `QLineEdit` is pre-filled with the word's romanized
-   form (e.g. `خوش` → `khosh`, `میری` → `myry`), and the suggestion list is populated below it.
-   The `QLineEdit` takes focus.
-3. The user edits the roman text: typing, Backspace, Home/End, and Left/Right move the text
+   `setRegionType`). With the feature enabled the overlay machinery is ready; the
+   `romanalfaz` engine is lazy-loaded on first activation.
+
+2. **Activation — existing word (scenario 2):** the cursor lands inside an Arabic-script
+   word within that span (keyboard or mouse navigation). The overlay auto-appears over the
+   word's visual rectangle: the `QLineEdit` is pre-filled with the word's romanized form
+   (e.g. `خوش` → `khosh`, `میری` → `myry`), the suggestion list is populated below it, and
+   the `QLineEdit` takes focus.
+
+3. **Activation — new word (scenario 1):** the cursor is in the span but not on an existing
+   word (between words or at an empty position). The user begins typing a roman character;
+   the widget intercepts the keystroke (it does not enter the document) and the overlay
+   appears with that character as its initial text and its suggestions populated.
+
+4. The user edits the roman text: typing, Backspace, Home/End, and Left/Right move the text
    cursor inside the `QLineEdit`. The suggestion list refreshes synchronously on every
    keystroke (lookups are < 1 ms).
-4. **Up / Down** moves the highlighted suggestion (wrapping). Row 0 is highlighted by default,
+
+5. **Up / Down** moves the highlighted suggestion (wrapping). Row 0 is highlighted by default,
    so committing the top suggestion costs no extra keys.
-5. **Commit** (Space, Enter, or Right with the text cursor at the end of the text):
-   - the word span in the document is replaced with the selected suggestion's Arabic word;
-   - the span keeps its `RomanUrdu` tag;
-   - the document cursor moves past the committed word (skipping trailing whitespace) and the
-     overlay loads the next word under the cursor automatically — the cycle repeats;
-   - `romanWordCommitted(arabic, roman)` is emitted.
-   **Left with the text cursor at the start of the text** commits and moves the cursor back to
-   the previous word (skipping leading whitespace); the overlay loads that word.
-6. **Esc** cancels: the overlay hides, the document word is unchanged, focus returns to the
-   document.
-7. **No suggestions** for the typed text: the list shows a single placeholder row,
-   `+ <typed roman> → <original arabic word>  (add to local dictionary)`. Committing it
-   records the pair in the document-local vocabulary (making the typed roman a real match
-   going forward) and advances the cycle exactly like a normal commit.
+
+6. **Separator-key commit** (Space, Enter, or typed punctuation): these keys are ordinary
+   main-document characters — they contribute nothing to the suggestion. Committing writes
+   the selected suggestion's Arabic word followed by the key's character (space, newline, or
+   the punctuation mark) to the document as a single undoable command; the committed text
+   keeps the `RomanUrdu` tag. The overlay disappears and focus returns to the document, with
+   the cursor after the inserted character. Typing the next roman word re-activates the
+   overlay (scenario 1). `romanWordCommitted(arabic, roman)` is emitted.
+
+7. **Edge commit** (Left with the text cursor at the start of the text, or Right with it at
+   the end): the selected suggestion is committed **without inserting a character**; the
+   document cursor moves to the previous / next word (skipping whitespace). If that word is
+   an eligible word in a `RomanUrdu` span the overlay reloads it (the walk repeats);
+   otherwise the overlay disappears and focus returns to the document.
+
+8. **Esc** cancels: the overlay hides, the document word is unchanged, and focus returns to
+   the document.
+
+9. **No suggestions** for the typed text — **scenario 2 only**: the list shows a single
+   placeholder row, `+ <typed roman> → <original arabic word> (add to local dictionary)`.
+   Committing it records the pair in the document-local vocabulary (making the typed roman
+   a real match going forward) and commits the word exactly like a normal commit. The
+   placeholder exists only in scenario 2 because learning requires an original Arabic word
+   to pair with; in scenario 1 a word with no suggestion has no row and cannot be
+   committed (see §9).
 
 ## 3. Region gating
 
@@ -117,7 +155,10 @@ The placeholder row (learning) renders in a distinct dashed/gray style with the 
 `+ <typed> → <original arabic> (add to local dictionary)`.
 
 The overlay emits internal signals consumed by `PyRaya`:
-`committed(typedRoman: str, selected: Suggestion | None, placeholder: bool)` and
+`committed(typedRoman: str, selected: Suggestion | None, placeholder: bool,
+separator: str)` — where `separator` is the character written to the document
+alongside the Arabic word (space, newline, or the typed punctuation) for a
+separator-key commit, and the empty string for an edge commit — and
 `canceled()`.
 
 ### 4.3 `PyRaya` integration
@@ -125,12 +166,20 @@ The overlay emits internal signals consumed by `PyRaya`:
 - `PyRaya.setRomanInputEnabled(enabled: bool)` — feature switch, **default False** so the
   existing drop-in behavior is unchanged.
 - Activation logic in `PyRaya`:
-  - on `cursorPositionChanged` / document change: find the word under the cursor (maximal
-    run of U+0600–U+06FF inside a `RomanUrdu` span, fully within the span); if found and the
-    overlay is inactive → activate (romanize, position over the word rect, focus the
-    `QLineEdit`); if the cursor leaves the active word → deactivate (hide, refocus document).
-  - on commit: perform the document edit (see §8), move the cursor per §6, and auto-load the
-    next/previous word (cycle repeats) or hide the overlay.
+  - **Cursor-based (scenario 2):** on `cursorPositionChanged` / document change: find the
+    word under the cursor (maximal run of U+0600–U+06FF inside a `RomanUrdu` span, fully
+    within the span); if found and the overlay is inactive → activate (romanize, position
+    over the word rect, focus the `QLineEdit`); if the cursor leaves the active word without
+    a commit → deactivate (hide, refocus document).
+  - **Keystroke-based (scenario 1):** in `keyPressEvent`, when the feature is on, the cursor
+    is inside a `RomanUrdu` span, the overlay is inactive, and the key is a roman character
+    (a–z, A–Z, 0–9) → intercept the key (it is **not** inserted into the document), activate
+    the overlay with that character as the initial `QLineEdit` text, and focus the
+    `QLineEdit`.
+  - **On commit:** perform the document edit (see §8) — a separator-key commit inserts the
+    Arabic word plus the separator character; an edge commit inserts the Arabic word alone —
+    then either reload the adjacent word (edge commit) or hide the overlay (separator-key
+    commit, or when the new cursor position is not an eligible word).
 - Public accessors:
   - `PyRaya.romanEngine() -> RomanInputEngine | None`
   - `PyRaya.localDictionary() -> Vocabulary` — the document-local in-memory
@@ -146,8 +195,9 @@ All new public symbols are re-exported from `pyraya/__init__.py` and added to `_
 - `RomanInputEngine.suggest` → merged, deduplicated, capped list of `Suggestion`
   (`arabic`, `encodedRoman`, `frequency`).
 - Empty overlay text → list hidden (no rows, no placeholder).
-- Non-empty overlay text with **zero** matches → single placeholder row (the learning affordance,
-  §2.7).
+- Non-empty overlay text with **zero** matches → a single placeholder row **in scenario 2**
+  (the learning affordance, §2.9); in scenario 1 the list is simply empty (no row, no
+  placeholder) because learning requires an original Arabic word to pair with.
 - Refresh is synchronous per keystroke; measured lookup time is < 1 ms, so no debouncing or
   background threads are needed.
 
@@ -156,25 +206,31 @@ All new public symbols are re-exported from `pyraya/__init__.py` and added to `_
 | Key | Behavior |
 | --- | --- |
 | letters / digits / Backspace / Delete / Home / End / Left / Right inside the text | normal `QLineEdit` editing / text-cursor movement |
-| **Right** with text cursor at end of text | commit selected suggestion; document cursor → past the word (skip trailing whitespace); auto-load next word |
-| **Left** with text cursor at start of text | commit; document cursor → previous word (skip leading whitespace); auto-load it |
-| **Space** | commit; cursor → past the word (skip trailing whitespace); auto-load next word |
-| **Enter** | same as Space |
+| **Space** | **separator-key commit**: write the selected Arabic word **plus a space** to the document; overlay disappears; cursor lands after the space |
+| **Enter** | **separator-key commit**: write the selected Arabic word **plus a newline** to the document; overlay disappears; cursor lands after the newline |
+| **typed punctuation** (full stop, comma, brackets, hyphen, …) | **separator-key commit**: write the selected Arabic word **plus the punctuation character** to the document; overlay disappears; cursor lands after it |
+| **Right** with text cursor at end of text | **edge commit**: commit the selected Arabic word **without inserting a character**; document cursor → past the word (skip trailing whitespace); reload the next word if eligible, else overlay disappears |
+| **Left** with text cursor at start of text | **edge commit**: commit the selected Arabic word **without inserting a character**; document cursor → previous word (skip leading whitespace); reload if eligible, else overlay disappears |
 | **Up / Down** | move highlighted suggestion (wrapping); no commit |
 | **Esc** | cancel: hide overlay, document unchanged, focus → document |
 | **wheel** | forwarded to document scrolling |
 
 Notes:
+- A separator-key commit inserts the separator character (space / newline / punctuation)
+  into the document **together with** the Arabic word — a single undoable command; an edge
+  commit inserts no character.
 - Committing replaces only the original word span `[start, end)` that was active when the
-  overlay loaded.
-- Committing with **empty** overlay text deletes the word span; the cursor lands at the
-  original span start and the overlay hides.
+  overlay loaded (scenario 2); in scenario 1 the word is **inserted** at the cursor position
+  (no span is replaced).
+- Committing with **empty** overlay text (scenario 2, the word was cleared): the word span is
+  deleted and the separator character is inserted (edge commit inserts nothing); the cursor
+  lands at the original span start and the overlay disappears.
 - Committing on the **placeholder** row: `learnWord(originalArabicWord)`, then the span is
-  replaced with the original Arabic word (textually a no-op) and the cycle advances; the typed
-  roman now yields a real match on subsequent lookups.
-- After any commit, if the next/previous position is not a word in a `RomanUrdu` span
-  (start/end of document, only whitespace left), the overlay hides and the cursor simply
-  lands there.
+  replaced with the original Arabic word (textually a no-op) plus the separator character and
+  the overlay disappears; the typed roman now yields a real match on subsequent lookups.
+- After a separator-key commit the overlay does **not** follow the cursor; it reappears only
+  when the user begins typing the next roman word (scenario 1) or the cursor lands on an
+  eligible word (scenario 2).
 
 ## 7. Geometry and rendering
 
@@ -202,10 +258,12 @@ Notes:
 
 - The document is **never modified during overlay editing** (positioning, focus, popup repaint
   are all non-document operations).
-- A commit is a **single undoable command**: `QTextCursor.insertText(arabic, fmt)` where `fmt`
-  carries the `RomanUrdu` background color (`RegionColors[RegionType.RomanUrdu]`), so the
-  region invariant (every character belongs to exactly one kind) holds and the region span
-  survives with unchanged boundaries.
+- A commit is a **single undoable command**: select the active word's span (or select nothing
+  for a new-word insertion) and `QTextCursor.insertText(text, fmt)`, where `text` is the
+  selected Arabic word **plus, for separator-key commits, the separator character** (space /
+  newline / punctuation), and `fmt` carries the `RomanUrdu` background color
+  (`RegionColors[RegionType.RomanUrdu]`) — so the region invariant (every character belongs to
+  exactly one kind) holds and the committed word and separator stay inside the `RomanUrdu` span.
 - A text-replacing commit leaves region boundaries and kind unchanged, so `regionsChanged` is
   **not** emitted for it; the normal document-change path still runs. An empty-text commit
   (word deletion) does change the span, so `regionsChanged` **is** emitted there.
@@ -223,6 +281,10 @@ Notes:
   loads (pass-through roman) and suggestions still work, but the placeholder row is **not**
   offered (learning is refused by the engine guard).
 - Latin-region words, and Latin-letter runs inside RomanUrdu spans → no overlay.
+- **Scenario 1, no suggestion** for the typed word → no placeholder row (learning requires an
+  original Arabic word); a separator-key commit is a **no-op** (the separator is not written
+  to the document and the overlay stays); the user must extend the word until a suggestion
+  appears, or press Esc to cancel.
 - Clicking the document while the overlay is active → overlay hides; the next cursor move
   re-activates it if inside an eligible word.
 - Dictionary not yet loaded (first activation) → engine loads on demand (~0.2 s, one-time);
@@ -243,7 +305,7 @@ class RomanInputEngine:
     def learnWord(self, arabicWord: str) -> bool
 
 class RomanOverlay(QWidget):
-    committed: Signal[str, object, bool]  # typedRoman, selected Suggestion | None, isPlaceholder
+    committed: Signal[str, object, bool, str]  # typedRoman, selected Suggestion | None, isPlaceholder, separator char ("" = edge commit)
     canceled: Signal[]
 
 class PyRaya:
@@ -265,11 +327,23 @@ New `tests/test_roman_input.py` reusing the single offscreen `app` fixture; no
 - `suggest` ordering/dedup/cap; tier membership (exact vs d1 vs d2); no matches → empty.
 - Overlay activates on an Arabic word inside a RomanUrdu region; not on whitespace, digits,
   Latin-region words, or a partially-contained word; not when the feature is disabled.
-- Commit: span replaced by the selected Arabic word; region span unchanged (still RomanUrdu,
-  same boundaries); single undoable edit (undo restores the original word exactly, no phantom
-  commands, no ping-pong); `romanWordCommitted` emitted with correct arguments.
-- Cursor advancement: Space/Enter → next word auto-loads; Left at text start → previous word
-  auto-loads; start/end-of-document commits land correctly with the overlay hidden.
+- Commit (scenario 2, replacement): the span is replaced by the selected Arabic word; the
+  region span is unchanged (still RomanUrdu, same boundaries); a single undoable edit (undo
+  restores the original word exactly, no phantom commands, no ping-pong);
+  `romanWordCommitted` emitted with correct arguments.
+- Separator-key commit: Space → document contains the Arabic word **plus a space**; Enter →
+  word **plus a newline**; punctuation → word **plus the punctuation character**; the
+  committed word and separator both carry the `RomanUrdu` background; the overlay disappears
+  and the cursor lands after the separator.
+- Edge commit: Right/Left at the text edges commits **without inserting a character**; the
+  cursor moves to the adjacent word and the overlay reloads it if eligible, else disappears;
+  start/end-of-document commits land with the overlay hidden.
+- Keystroke-based activation: a roman keystroke inside a `RomanUrdu` span (overlay inactive)
+  is intercepted (not inserted into the document) and the overlay appears with that
+  character; after a separator-key commit the overlay is hidden and the next roman keystroke
+  re-activates it.
+- Scenario 1, no suggestion: no placeholder row; a separator-key commit is a no-op (document
+  unchanged, overlay stays).
 - Keys: Up/Down wraps selection; Esc cancels with document untouched; empty-text commit
   deletes the span.
 - Learning: placeholder offered only when zero matches; committing it adds the word to
