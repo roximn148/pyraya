@@ -18,14 +18,16 @@ channel.
 """
 
 from collections.abc import Sequence
+from typing import cast
 
-from PySide6.QtCore import QPoint, QRegularExpression, Qt, Signal
+from PySide6.QtCore import QPoint, QRect, QRegularExpression, Qt, Signal
 from PySide6.QtGui import (
     QAction,
     QBrush,
     QColor,
     QFont,
     QFontDatabase,
+    QFontMetrics,
     QKeyEvent,
     QSyntaxHighlighter,
     QTextBlockFormat,
@@ -38,7 +40,7 @@ from PySide6.QtWidgets import QMenu, QPlainTextEdit, QWidget
 from romanalfaz.engine import Vocabulary
 
 from .regions import RegionColors, RegionType, TextRegion, defaultRegionKind
-from .roman_input import RomanInputEngine
+from .roman_input import RomanInputEngine, RomanOverlay
 
 __all__ = ["PyRaya", "PyRayaHighlighter"]
 
@@ -55,6 +57,11 @@ pyrayaFonts: tuple[str, ...] = (
 
 #: Default point size applied to the default font.
 defaultFontSize: float = 14.0
+
+
+def _isArabicChar(char: str) -> bool:
+    """Whether a character belongs to the Arabic script block (U+0600–U+06FF)."""
+    return "\u0600" <= char <= "\u06ff"
 
 
 # ******************************************************************************
@@ -277,7 +284,12 @@ class PyRaya(QPlainTextEdit):
         self._activeWord: tuple[int, int] | None = None
         self._anchorPosition: int | None = None
         self._committing = False
-        document.cursorPositionChanged.connect(self._syncOverlay)
+        self._overlay: RomanOverlay | None = None
+        # PySide6 emits the widget's cursorPositionChanged without its
+        # position argument to Python slots, so the sync handler must be
+        # argument-free; the document's cursorPositionChanged is not emitted
+        # at all by cursor moves, hence the widget-level signal.
+        self.cursorPositionChanged.connect(self._syncOverlay)
         document.contentsChanged.connect(self._syncOverlay)
 
     # ==========================================================================
@@ -528,8 +540,7 @@ class PyRaya(QPlainTextEdit):
         """
         self._romanInputEnabled = enabled
         if not enabled:
-            self._activeWord = None
-            self._anchorPosition = None
+            self._deactivateOverlay()
 
     # ==========================================================================
     def isRomanInputEnabled(self) -> bool:
@@ -572,11 +583,147 @@ class PyRaya(QPlainTextEdit):
         """Activate, reposition, or deactivate the overlay for the cursor.
 
         Returns early while the feature is disabled or a commit is in
-        progress; otherwise the overlay state is reconciled with the word
-        under the document cursor.
+        progress; otherwise the overlay state is reconciled with the maximal
+        Arabic word containing the document cursor — a new word activates the
+        overlay with that word's romanization, the same word merely
+        repositions it, and no word hides it.
         """
         if not self._romanInputEnabled or self._committing:
             return
+        word = self._wordUnderCursor()
+        if word is None:
+            self._deactivateOverlay()
+        elif self._overlay is None or self._activeWord != word:
+            self._activateOverlay(word)
+        else:
+            self._positionOverlay(word)
+
+    # ==========================================================================
+    def _wordUnderCursor(self) -> tuple[int, int] | None:
+        """The maximal Arabic-script word run containing the document cursor.
+
+        The cursor must sit at the start of the run or inside it (``s <= p < e``);
+        a cursor past the run's end — including the document's trailing
+        terminator — belongs to no word. The run must be fully contained in a
+        RomanUrdu region; otherwise no word is returned.
+        """
+        document = self.document()
+        limit = document.characterCount() - 1
+        position = min(self.textCursor().position(), limit)
+        text = document.toPlainText()
+        start = position
+        while start > 0 and _isArabicChar(text[start - 1]):
+            start -= 1
+        end = position
+        while end < len(text) and _isArabicChar(text[end]):
+            end += 1
+        if not (start <= position < end):
+            return None
+        if (
+            self._regionKindAt(start) is not RegionType.RomanUrdu
+            or self._regionKindAt(end - 1) is not RegionType.RomanUrdu
+        ):
+            return None
+        return (start, end)
+
+    # ==========================================================================
+    def _wordRect(self, start: int, end: int) -> QRect:
+        """The word's rectangle in viewport coordinates.
+
+        Uses the text layout's line geometry — ``cursorToX`` at the word's
+        start and end (translated by ``contentOffset()``) — with a
+        ``QFontMetrics`` advance fallback when the layout cannot resolve the
+        line.
+        """
+        document = self.document()
+        offset = self.contentOffset()
+        cursor = QTextCursor(document)
+        cursor.setPosition(start)
+        block = cursor.block()
+        layout = block.layout()
+        line = layout.lineForTextPosition(start)
+        if line is None:
+            rect = layout.boundingRect()
+            metrics = QFontMetrics(self.font())
+            width = metrics.horizontalAdvance(document.toPlainText()[start:end])
+            return QRect(
+                round(rect.left() + offset.x()),
+                round(rect.top() + offset.y()),
+                max(1, width),
+                int(rect.height()),
+            )
+        # PySide6 types cursorToX as returning an untyped point, which is a
+        # plain (x, y) tuple at runtime; cast to the actual shape.
+        pointStart = cast("tuple[float, float]", line.cursorToX(start))
+        pointEnd = cast("tuple[float, float]", line.cursorToX(end))
+        left = min(pointStart[0], pointEnd[0])
+        right = max(pointStart[0], pointEnd[0])
+        return QRect(
+            round(left + offset.x()),
+            round(line.rect().top() + offset.y()),
+            max(1, round(right - left)),
+            int(line.rect().height()),
+        )
+
+    # ==========================================================================
+    def _positionOverlay(self, word: tuple[int, int]) -> None:
+        """Place and size the overlay over the word's rectangle.
+
+        The overlay's right edge is anchored to the word's right edge (so the
+        right-aligned line edit grows leftward, matching the document flow)
+        and the overlay is clamped to stay inside the viewport, flipping
+        above the word when the suggestion list would overflow the bottom.
+        """
+        overlay = self._overlay
+        if overlay is None:
+            return
+        wordRect = self._wordRect(word[0], word[1])
+        hint = overlay.sizeHint()
+        viewport = self.viewport()
+        # QRect.right() is inclusive; the exclusive right edge is +1, so the
+        # overlay's right border sits exactly on the word's right edge.
+        x = wordRect.right() + 1 - hint.width()
+        y = wordRect.top()
+        if y + hint.height() > viewport.height():
+            y = wordRect.bottom() - hint.height()
+        x = max(0, min(x, viewport.width() - hint.width()))
+        y = max(0, y)
+        overlay.move(x, y)
+        overlay.resize(hint.width(), hint.height())
+
+    # ==========================================================================
+    def _activateOverlay(self, word: tuple[int, int]) -> None:
+        """Show the overlay over the word with its romanization as text.
+
+        The overlay is created lazily as a child of the viewport, so it
+        scrolls with the text automatically. Focus moves into the overlay's
+        line edit, where all subsequent typing happens; the document is left
+        untouched until a commit.
+        """
+        engine = self.romanEngine()
+        if engine is None:
+            return
+        overlay = self._overlay
+        if overlay is None:
+            overlay = RomanOverlay(engine, self.font(), self.viewport())
+            overlay.canceled.connect(self._deactivateOverlay)
+            self._overlay = overlay
+        document = self.document()
+        overlay.setText(engine.romanizeArabic(document.toPlainText()[word[0] : word[1]]))
+        self._activeWord = word
+        self._anchorPosition = word[0]
+        self._positionOverlay(word)
+        overlay.show()
+        overlay.lineEdit().setFocus()
+
+    # ==========================================================================
+    def _deactivateOverlay(self) -> None:
+        """Hide the overlay, clear the overlay state, and refocus the document."""
+        if self._overlay is not None:
+            self._overlay.hide()
+        self._activeWord = None
+        self._anchorPosition = None
+        self.setFocus()
 
     # ==========================================================================
     def createPopupMenu(self) -> QMenu:

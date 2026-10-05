@@ -8,15 +8,17 @@ Runs headless via the offscreen Qt platform so no window is opened.
 
 import os
 from collections.abc import Generator
+from typing import cast
 
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent, QPoint, Qt
-from PySide6.QtGui import QKeyEvent, QWheelEvent
+from PySide6.QtGui import QKeyEvent, QTextCursor, QWheelEvent
 from PySide6.QtWidgets import QApplication, QPlainTextEdit, QWidget
 from romanalfaz import DictionaryNotFoundError
 from romanalfaz.engine import Suggestion, Vocabulary
 
 from pyraya import PyRaya
+from pyraya.regions import RegionType
 from pyraya.roman_input import RomanInputEngine, RomanOverlay
 
 # Verified zero-match roman strings (no suggestions at distance 0..2).
@@ -425,3 +427,129 @@ def testNoPhantomUndoWithFeatureEnabled(app: QApplication) -> None:
     widget = PyRaya()
     widget.setRomanInputEnabled(True)
     assert widget.document().isUndoAvailable() is False
+
+
+# ******************************************************************************
+def _moveCursor(widget: PyRaya, position: int) -> None:
+    """Move the widget's document cursor to a character offset."""
+    cursor = widget.textCursor()
+    cursor.setPosition(position)
+    widget.setTextCursor(cursor)
+
+
+# ******************************************************************************
+def _assertNoOverlay(widget: PyRaya) -> None:
+    """The overlay is absent or hidden."""
+    assert widget._overlay is None or not widget._overlay.isVisible()
+
+
+# ******************************************************************************
+def testActivatesOnArabicWordInRomanUrduSpan(app: QApplication) -> None:
+    """The cursor inside a RomanUrdu-tagged Arabic word activates the overlay."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello خوش world دوست")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None
+    assert overlay.isVisible()
+    assert overlay.lineEdit().text() == "khosh"
+
+
+# ******************************************************************************
+def testNoOverlayOnWhitespaceDigitsLatin(app: QApplication) -> None:
+    """No overlay on whitespace, digits, a Latin-region word, or feature off."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello 123 خوش world")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 10, 13)
+    _moveCursor(widget, 5)  # whitespace
+    _assertNoOverlay(widget)
+    _moveCursor(widget, 7)  # digits
+    _assertNoOverlay(widget)
+    _moveCursor(widget, 11)  # inside the Arabic word
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+
+    widget.setPlainText("hello خوش world")
+    widget.setRegionType(RegionType.Latin, 6, 9)
+    _moveCursor(widget, 7)  # Arabic word inside a Latin region
+    _assertNoOverlay(widget)
+
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    widget.setRomanInputEnabled(False)
+    _moveCursor(widget, 7)  # feature off
+    _assertNoOverlay(widget)
+
+
+# ******************************************************************************
+def testNoOverlayOnPartialContainment(app: QApplication) -> None:
+    """A word not fully contained in a RomanUrdu span does not activate."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello خوش world")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 7, 9)  # only part of the word
+    _moveCursor(widget, 8)
+    _assertNoOverlay(widget)
+
+
+# ******************************************************************************
+def testNoOverlayAtTrailingTerminator(app: QApplication) -> None:
+    """A cursor on the trailing terminator never activates the overlay."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello خوش")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 9)  # the trailing terminator position
+    _assertNoOverlay(widget)
+    _moveCursor(widget, 0)  # back to a valid position: still no crash
+    _assertNoOverlay(widget)
+
+
+# ******************************************************************************
+def testGeometryBounds(app: QApplication) -> None:
+    """The overlay is anchored to the word rect and stays inside the viewport."""
+    widget = PyRaya()
+    widget.resize(640, 480)
+    widget.show()
+    widget.setPlainText("hello خوش world دوست")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None
+    geom = overlay.geometry()
+    assert geom.width() > 0 and geom.height() > 0
+    cursor = QTextCursor(widget.document())
+    cursor.setPosition(6)
+    line = cursor.block().layout().lineForTextPosition(6)
+    offset = widget.contentOffset()
+    rightPoint = cast("tuple[float, float]", line.cursorToX(9))
+    wordRight = round(rightPoint[0] + offset.x())
+    wordTop = round(line.rect().top() + offset.y())
+    # QRect.right() is inclusive; the exclusive right edge is +1.
+    assert geom.right() + 1 == wordRight  # right edge anchored to the word
+    assert geom.top() == wordTop
+    assert geom.left() >= 0
+    assert geom.bottom() <= widget.viewport().height()
+
+
+# ******************************************************************************
+def testDeactivatesWhenCursorLeaves(app: QApplication) -> None:
+    """Leaving the word hides the overlay; the document is untouched."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello خوش world دوست")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    _moveCursor(widget, 1)  # off the word, into "hello"
+    assert not overlay.isVisible()
+    assert widget.toPlainText() == "hello خوش world دوست"
