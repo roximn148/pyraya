@@ -17,11 +17,13 @@ single undoable command, and the overlay disappears; it reappears when the
 cursor lands on an eligible word or when the user begins typing the next word. The suggestion
 list is
 color-coded by edit-distance tier (green / orange / red hues), and when `romanalfaz` yields no
-suggestion a **placeholder row** appears in place of the (empty) suggestion list; committing it
-teaches the typed word to the document-local, in-memory dictionary (a `romanalfaz`
-`Vocabulary`). Editing/integrating a custom romanalfaz dictionary is a **future addition** and
-out of scope here — only the in-place placeholder option and its local-dictionary learning
-ship now.
+suggestion a **placeholder row** appears in place of the (empty) suggestion list (in **both**
+scenarios): a `+ Learn <typed roman>` option mapped to `learnRomanWord(word)`.
+`learnRomanWord` is a **no-op** for this session — it simply returns the same word as-is —
+and the returned word is committed to the document exactly like any normal commit. Converting
+the typed word to an Arabic-script word and teaching it to the document-local, in-memory
+dictionary (a `romanalfaz` `Vocabulary`) is a **future addition** and out of scope here, as
+is editing/integrating a custom romanalfaz dictionary.
 
 Two input scenarios are handled:
 
@@ -72,7 +74,7 @@ way.
    the punctuation mark) to the document as a single undoable command; the committed text
    keeps the `RomanUrdu` tag. The overlay disappears and focus returns to the document, with
    the cursor after the inserted character. Typing the next roman word re-activates the
-   overlay (scenario 1). `romanWordCommitted(arabic, roman)` is emitted.
+   overlay (scenario 1). `romanWordCommitted(word, roman)` is emitted.
 
 7. **Edge commit** (Left with the text cursor at the start of the text, or Right with it at
    the end): the selected suggestion is committed **without inserting a character**; the
@@ -83,13 +85,15 @@ way.
 8. **Esc** cancels: the overlay hides, the document word is unchanged, and focus returns to
    the document.
 
-9. **No suggestions** for the typed text — **scenario 2 only**: the list shows a single
-   placeholder row, `+ <typed roman> → <original arabic word> (add to local dictionary)`.
-   Committing it records the pair in the document-local vocabulary (making the typed roman
-   a real match going forward) and commits the word exactly like a normal commit. The
-   placeholder exists only in scenario 2 because learning requires an original Arabic word
-   to pair with; in scenario 1 a word with no suggestion has no row and cannot be
-   committed (see §9).
+9. **No suggestions** for the typed text — **both scenarios**: the list shows a single
+   placeholder row, `+ Learn <typed roman>` (the Learn option). Committing it maps to
+   `learnRomanWord(<typed roman>)` — a no-op for this session that simply returns the same
+   word — and the returned word is committed exactly like a normal commit: the word span is
+   replaced (scenario 2) or the word is inserted at the cursor (scenario 1), plus the
+   separator character for a separator-key commit. The overlay disappears, focus returns to
+   the document, and `romanWordCommitted(word, roman)` is emitted (the committed word is the
+   typed roman for this session). Converting the typed word to an Arabic-script word and
+   updating the dictionary is a **future addition**.
 
 ## 3. Region gating
 
@@ -104,6 +108,9 @@ way.
   feature.
 - The design treats region types as processing hooks: `RomanUrdu` is the first type with
   attached processing; the wiring is isolated so future types can attach their own.
+- Note for this session: a placeholder (Learn) commit writes the no-op `learnRomanWord`
+  return value — the typed roman — into the span; once `learnRomanWord` is expanded,
+  committed words will be Arabic-script.
 
 ## 4. Architecture and components
 
@@ -118,7 +125,9 @@ Thin wrapper around `romanalfaz.RomanAlfaz`.
   overlay activation, never during widget construction.
 - Construction: `RomanAlfaz()` (loads the default wordlist) followed by
   `addVocabulary(localVocabulary)` so the local document dictionary is attached and monitored
-  (romanalfaz auto-recompiles the lookup index on every local mutation).
+  (romanalfaz auto-recompiles the lookup index on every local mutation). The local
+  vocabulary is never mutated in this session — `learnRomanWord` is a no-op; it is the hook
+  for the future learning feature.
 - Public methods:
   - `suggest(romanWord) -> list[Suggestion]` — calls `RomanAlfaz.suggest` using the
     constructor configuration (tiers: exact / edit-distance-1 / edit-distance-2), merges the
@@ -129,10 +138,12 @@ Thin wrapper around `romanalfaz.RomanAlfaz`.
     derived from ی/ہ/ے when present (`میری` → `myry`) and drops them otherwise (`دوست` →
     `dost`); this is the romanalfaz-native convention the lookup consumes, so it
     round-trips exactly.
-  - `learnWord(arabicWord) -> bool` — adds the Arabic word to the local vocabulary
-    (`Vocabulary.add(word, 1)` + `setCompleted(word, True)`); returns False (and does nothing)
-    if the word is already present or is not fully mappable (`tafseerUrduAr2Rm` undef count > 0,
-    which would trip `recompileLookup`'s assertion).
+  - `learnRomanWord(word: str) -> str` — **no-op for this session**: it simply returns the
+    same word as-is (the typed roman). It is the hook the placeholder (Learn) commit maps
+    to; in the future it will return the Arabic-script word for the typed roman and update
+    the local vocabulary (`Vocabulary.add(word, 1)` + `setCompleted(word, True)`), guarded
+    by full mappability (`tafseerUrduAr2Rm` undef count > 0 would trip
+    `recompileLookup`'s assertion).
 - Configuration parameters (constructor): `distance: int = 2`,
   `maxPredictions: int = 5` (per tier), `maxSuggestions: int = 10` (merged cap).
 
@@ -151,13 +162,13 @@ The suggestion list is a **passive display**: it never takes focus. Each row ren
 Arabic word in the document's font, the lowercased roman (muted), and the frequency (muted).
 Rows are color-coded by tier: **green hue** = exact match, **orange hue** = edit distance 1,
 **red hue** = edit distance 2; the selected row is emphasized (stronger tint + accent border).
-The placeholder row (learning) renders in a distinct dashed/gray style with the label
-`+ <typed> → <original arabic> (add to local dictionary)`.
+The placeholder row (the Learn option) renders in a distinct dashed/gray style with the
+label `+ Learn <typed roman>`.
 
 The overlay emits internal signals consumed by `PyRaya`:
 `committed(typedRoman: str, selected: Suggestion | None, placeholder: bool,
 separator: str)` — where `separator` is the character written to the document
-alongside the Arabic word (space, newline, or the typed punctuation) for a
+alongside the committed word (space, newline, or the typed punctuation) for a
 separator-key commit, and the empty string for an edge commit — and
 `canceled()`.
 
@@ -177,15 +188,19 @@ separator-key commit, and the empty string for an edge commit — and
     the overlay with that character as the initial `QLineEdit` text, and focus the
     `QLineEdit`.
   - **On commit:** perform the document edit (see §8) — a separator-key commit inserts the
-    Arabic word plus the separator character; an edge commit inserts the Arabic word alone —
-    then either reload the adjacent word (edge commit) or hide the overlay (separator-key
-    commit, or when the new cursor position is not an eligible word).
+    committed word plus the separator character; an edge commit inserts the committed word
+    alone — then either reload the adjacent word (edge commit) or hide the overlay
+    (separator-key commit, or when the new cursor position is not an eligible word).
 - Public accessors:
   - `PyRaya.romanEngine() -> RomanInputEngine | None`
   - `PyRaya.localDictionary() -> Vocabulary` — the document-local in-memory
-    `romanalfaz.Vocabulary` (the hook for the future custom-dictionary integration;
-    `Vocabulary.save`/`Vocabulary.load` already exist for that, no integration UX ships now).
-- New public signal: `PyRaya.romanWordCommitted(arabic: str, roman: str)`.
+    `romanalfaz.Vocabulary`, owned by the widget and passed to the engine on lazy load
+    (the hook for the future `learnRomanWord` update; `Vocabulary.save`/`Vocabulary.load`
+    already exist for persistence, no integration UX ships now; never mutated in this
+    session).
+- New public signal: `PyRaya.romanWordCommitted(word: str, roman: str)` — the word
+  committed to the document (the selected Arabic word, or `learnRomanWord`'s return value
+  for a placeholder commit — the typed roman for this session) and the typed roman.
 
 All new public symbols are re-exported from `pyraya/__init__.py` and added to `__all__`.
 
@@ -195,9 +210,8 @@ All new public symbols are re-exported from `pyraya/__init__.py` and added to `_
 - `RomanInputEngine.suggest` → merged, deduplicated, capped list of `Suggestion`
   (`arabic`, `encodedRoman`, `frequency`).
 - Empty overlay text → list hidden (no rows, no placeholder).
-- Non-empty overlay text with **zero** matches → a single placeholder row **in scenario 2**
-  (the learning affordance, §2.9); in scenario 1 the list is simply empty (no row, no
-  placeholder) because learning requires an original Arabic word to pair with.
+- Non-empty overlay text with **zero** matches → a single placeholder row **in both
+  scenarios** (the Learn option, §2.9).
 - Refresh is synchronous per keystroke; measured lookup time is < 1 ms, so no debouncing or
   background threads are needed.
 
@@ -225,9 +239,10 @@ Notes:
 - Committing with **empty** overlay text (scenario 2, the word was cleared): the word span is
   deleted and the separator character is inserted (edge commit inserts nothing); the cursor
   lands at the original span start and the overlay disappears.
-- Committing on the **placeholder** row: `learnWord(originalArabicWord)`, then the span is
-  replaced with the original Arabic word (textually a no-op) plus the separator character and
-  the overlay disappears; the typed roman now yields a real match on subsequent lookups.
+- Committing on the **placeholder** (Learn) row: `learnRomanWord(<typed roman>)` — a no-op
+  for this session, returning the same word — and the returned word is committed exactly
+  like a normal commit (span replaced in scenario 2, inserted at the cursor in scenario 1,
+  plus the separator character for a separator-key commit); the overlay disappears.
 - After a separator-key commit the overlay does **not** follow the cursor; it reappears only
   when the user begins typing the next roman word (scenario 1) or the cursor lands on an
   eligible word (scenario 2).
@@ -260,8 +275,10 @@ Notes:
   are all non-document operations).
 - A commit is a **single undoable command**: select the active word's span (or select nothing
   for a new-word insertion) and `QTextCursor.insertText(text, fmt)`, where `text` is the
-  selected Arabic word **plus, for separator-key commits, the separator character** (space /
-  newline / punctuation), and `fmt` carries the `RomanUrdu` background color
+  committed word (the selected Arabic word, or `learnRomanWord`'s return value for a
+  placeholder commit — the typed roman for this session) **plus, for separator-key commits,
+  the separator character** (space / newline / punctuation), and `fmt` carries the
+  `RomanUrdu` background color
   (`RegionColors[RegionType.RomanUrdu]`) — so the region invariant (every character belongs to
   exactly one kind) holds and the committed word and separator stay inside the `RomanUrdu` span.
 - A text-replacing commit leaves region boundaries and kind unchanged, so `regionsChanged` is
@@ -278,20 +295,23 @@ Notes:
   → no overlay.
 - Word only partially inside a `RomanUrdu` span → no overlay (word must be fully contained).
 - Original word contains unmapped characters (`tafseerUrduAr2Rm` undef > 0) → overlay still
-  loads (pass-through roman) and suggestions still work, but the placeholder row is **not**
-  offered (learning is refused by the engine guard).
+  loads (pass-through roman) and suggestions still work; the placeholder row is still
+  offered (this session's `learnRomanWord` is a no-op and performs no mappability check;
+  mappability guarding is a future `learnRomanWord` detail).
 - Latin-region words, and Latin-letter runs inside RomanUrdu spans → no overlay.
-- **Scenario 1, no suggestion** for the typed word → no placeholder row (learning requires an
-  original Arabic word); a separator-key commit is a **no-op** (the separator is not written
-  to the document and the overlay stays); the user must extend the word until a suggestion
-  appears, or press Esc to cancel.
+- **No suggestion** for the typed word (both scenarios) → the placeholder (Learn) row is
+  offered as the highlighted row; committing it (separator-key or edge) calls
+  `learnRomanWord(<typed roman>)` — a no-op returning the same word — and commits that word
+  to the document (inserted in scenario 1, span replaced in scenario 2, plus the separator
+  character for a separator-key commit); the overlay disappears.
 - Clicking the document while the overlay is active → overlay hides; the next cursor move
   re-activates it if inside an eligible word.
 - Dictionary not yet loaded (first activation) → engine loads on demand (~0.2 s, one-time);
   the overlay activates after the engine is ready.
 - Default wordlist unavailable (`romanalfaz.DictionaryNotFoundError`) → the engine surfaces an
   unavailable state; the overlay offers no suggestions and no placeholder row rather than
-  raising during editing.
+  raising during editing; a commit in that state is a no-op (document unchanged) and the
+  overlay disappears.
 - The feature is inert (off by default) until `setRomanInputEnabled(True)`.
 
 ## 10. Public API
@@ -302,7 +322,7 @@ class RomanInputEngine:
                  distance: int = 2, maxPredictions: int = 5, maxSuggestions: int = 10) -> None
     def suggest(self, romanWord: str) -> list[Suggestion]
     def romanizeArabic(self, arabicWord: str) -> str
-    def learnWord(self, arabicWord: str) -> bool
+    def learnRomanWord(self, word: str) -> str
 
 class RomanOverlay(QWidget):
     committed: Signal[str, object, bool, str]  # typedRoman, selected Suggestion | None, isPlaceholder, separator char ("" = edge commit)
@@ -312,7 +332,7 @@ class PyRaya:
     def setRomanInputEnabled(self, enabled: bool) -> None
     def romanEngine(self) -> RomanInputEngine | None
     def localDictionary(self) -> Vocabulary
-    romanWordCommitted: Signal[str, str]
+    romanWordCommitted: Signal[str, str]  # (word committed to the document, typed roman)
 ```
 
 Re-exported from `pyraya/__init__.py`; added to `__all__`; Google-style docstrings with
@@ -342,13 +362,15 @@ New `tests/test_roman_input.py` reusing the single offscreen `app` fixture; no
   is intercepted (not inserted into the document) and the overlay appears with that
   character; after a separator-key commit the overlay is hidden and the next roman keystroke
   re-activates it.
-- Scenario 1, no suggestion: no placeholder row; a separator-key commit is a no-op (document
-  unchanged, overlay stays).
+- Placeholder (Learn) commit, both scenarios: zero matches → the `+ Learn <typed>` row is
+  offered; committing it commits `learnRomanWord(<typed>)` (the same word for this session)
+  to the document — inserted in scenario 1, span replaced in scenario 2, plus the separator
+  character for a separator-key commit — the overlay disappears, and `romanWordCommitted` is
+  emitted with the committed word.
 - Keys: Up/Down wraps selection; Esc cancels with document untouched; empty-text commit
   deletes the span.
-- Learning: placeholder offered only when zero matches; committing it adds the word to
-  `localDictionary()` (and `setCompleted`), and the typed roman then yields a real
-  suggestion; unmapped original word → no placeholder, `learnWord` returns False.
+- `learnRomanWord` no-op: returns the same word; committing the placeholder does not mutate
+  `localDictionary()` (it stays in its initial state for this session).
 - `localDictionary().save(tmp)` writes a SymSpell-format file and `Vocabulary.load` restores it.
 - Geometry: overlay rect is non-empty and aligned to the word rect in the RTL layout
   (assert bounds/containment rather than pixel-exactness, since offscreen fonts may be
@@ -357,7 +379,8 @@ New `tests/test_roman_input.py` reusing the single offscreen `app` fixture; no
 ## 12. Documentation and release
 
 - `AGENTS.md`: describe the overlay subsystem, the updated `RomanUrdu` region semantics, and
-  the new gotchas (viewport-child overlay, single-command commits, learning guards).
+  the new gotchas (viewport-child overlay, single-command commits, placeholder/Learn commit
+  semantics).
 - `README.md`: move the feature from roadmap framing into implemented status; document the
   `RomanUrdu` region semantics, the feature switch, and the local-dictionary hook.
 - Version bump `0.1.0-alpha.3` → `0.1.0-alpha.4` in `pyproject.toml`, re-lock with `uv lock`,
@@ -365,8 +388,11 @@ New `tests/test_roman_input.py` reusing the single offscreen `app` fixture; no
 
 ## 13. Future work (out of scope for this spec)
 
+- Learning: `learnRomanWord` currently returns the typed roman as-is; in the future it will
+  return the Arabic-script word for the typed roman and update the local `romanalfaz`
+  `Vocabulary` (mappability guarding, `Vocabulary.add`/`setCompleted`).
 - Custom romanalfaz dictionary editing: exporting/merging the local document dictionary into a
-  custom dictionary file and any UX around it. Only the in-memory placeholder + local
-  dictionary learning ships now; `Vocabulary.save`/`Vocabulary.load` are the future hooks.
+  custom dictionary file and any UX around it; `Vocabulary.save`/`Vocabulary.load` are the
+  future hooks.
 - Per-type processing for additional region types (spell-check, etc.) using the same
   region-gating wiring.
