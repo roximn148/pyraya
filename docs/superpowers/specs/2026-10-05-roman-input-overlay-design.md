@@ -82,10 +82,10 @@ Thin wrapper around `romanalfaz.RomanAlfaz`.
   `addVocabulary(localVocabulary)` so the local document dictionary is attached and monitored
   (romanalfaz auto-recompiles the lookup index on every local mutation).
 - Public methods:
-  - `suggest(romanWord, distance=2, maxPredictions=5) -> list[Suggestion]` — calls
-    `RomanAlfaz.suggest` (tiers: exact / edit-distance-1 / edit-distance-2), merges the three
-    tiers in tier order, deduplicates globally by Arabic word (earlier tier wins), and caps
-    the list (default cap: 10 rows).
+  - `suggest(romanWord) -> list[Suggestion]` — calls `RomanAlfaz.suggest` using the
+    constructor configuration (tiers: exact / edit-distance-1 / edit-distance-2), merges the
+    three tiers in tier order, deduplicates globally by Arabic word (earlier tier wins), and
+    caps the list (default cap: 10 rows).
   - `romanizeArabic(arabicWord) -> str` — lowercased encoded roman via
     `tafseerUrduAr2Rm` (e.g. `KHOSH` → `khosh`). The encoded form keeps vowel-like marks
     derived from ی/ہ/ے when present (`میری` → `myry`) and drops them otherwise (`دوست` →
@@ -206,8 +206,9 @@ Notes:
   carries the `RomanUrdu` background color (`RegionColors[RegionType.RomanUrdu]`), so the
   region invariant (every character belongs to exactly one kind) holds and the region span
   survives with unchanged boundaries.
-- Because region boundaries and kind are unchanged by a commit, `regionsChanged` is **not**
-  emitted for a same-span commit; the normal document-change path still runs.
+- A text-replacing commit leaves region boundaries and kind unchanged, so `regionsChanged` is
+  **not** emitted for it; the normal document-change path still runs. An empty-text commit
+  (word deletion) does change the span, so `regionsChanged` **is** emitted there.
 - No overlay operation is recorded in the undo stack; a fresh widget with the feature enabled
   performs no document work at construction (no phantom undo command).
 - `characterCount() - 1` trailing-terminator guards from the existing region code are reused
@@ -226,6 +227,9 @@ Notes:
   re-activates it if inside an eligible word.
 - Dictionary not yet loaded (first activation) → engine loads on demand (~0.2 s, one-time);
   the overlay activates after the engine is ready.
+- Default wordlist unavailable (`romanalfaz.DictionaryNotFoundError`) → the engine surfaces an
+  unavailable state; the overlay offers no suggestions and no placeholder row rather than
+  raising during editing.
 - The feature is inert (off by default) until `setRomanInputEnabled(True)`.
 
 ## 10. Public API
