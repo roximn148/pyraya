@@ -167,9 +167,10 @@ class RomanInputEngine:
             The tiered, globally deduplicated, capped list; empty when the
             engine is unavailable or nothing matches.
         """
-        if self._alfaz is None:
+        alfaz = self._alfaz
+        if not self.available or alfaz is None:
             return []
-        tierLists = self._alfaz.suggest(
+        tierLists = alfaz.suggest(
             romanWord,
             distance=self._distance,
             maxPredictions=self._maxPredictions,

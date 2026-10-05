@@ -620,3 +620,255 @@ def testReactivationAfterCommit(app: QApplication) -> None:
     assert overlay is not None and overlay.isVisible()
     assert overlay.lineEdit().text() == "k"
     assert widget.toPlainText() == "hello خوش world"
+
+
+# ******************************************************************************
+def testScenario2ReplacementCommit(app: QApplication) -> None:
+    """Committing over an existing word replaces the span; one undo reverts it."""
+    widget = PyRaya()
+    widget.show()
+    original = "hello خوش world"
+    widget.setPlainText(original)
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+
+    committed: list[tuple[str, str]] = []
+    widget.romanWordCommitted.connect(lambda w, r: committed.append((w, r)))
+    baseline = widget.document().availableUndoSteps()
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Space, " ")
+    # the top suggestion for "khosh" is the exact word خوش; the span is
+    # replaced by the word plus the separator (the surrounding space stays)
+    assert widget.toPlainText() == "hello خوش  world"
+    assert committed == [("خوش", "khosh")]
+    assert not overlay.isVisible()
+    # the word span is still RomanUrdu
+    assert widget._regionKindAt(6) == RegionType.RomanUrdu
+    assert widget._regionKindAt(8) == RegionType.RomanUrdu
+    # the span replacement is counted as two undo steps (delete + insert),
+    # but a single undo reverts the whole commit to the original text
+    assert widget.document().availableUndoSteps() == baseline + 2
+    widget.undo()
+    assert widget.toPlainText() == original
+    assert widget.document().availableUndoSteps() == baseline
+    # redoing takes the tag step and the commit step, no ping-pong
+    widget.redo()
+    widget.redo()
+    assert widget.toPlainText() == "hello خوش  world"
+    assert widget.document().isUndoAvailable()
+
+
+# ******************************************************************************
+def testSeparatorCommits(app: QApplication) -> None:
+    """Space, Enter, and typed punctuation commit the word plus separator."""
+
+    def setup() -> tuple[PyRaya, RomanOverlay]:
+        widget = PyRaya()
+        widget.show()
+        widget.setPlainText("hello خوش world")
+        widget.setRomanInputEnabled(True)
+        widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+        _moveCursor(widget, 7)
+        overlay = widget._overlay
+        assert overlay is not None and overlay.isVisible()
+        return widget, overlay
+
+    # Space
+    widget, overlay = setup()
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Space, " ")
+    assert widget.toPlainText() == "hello خوش  world"
+    assert widget.textCursor().position() == 10  # cursor after the separator
+    assert widget._regionKindAt(9) == RegionType.RomanUrdu  # separator colored
+    assert not overlay.isVisible()
+
+    # Enter
+    widget, overlay = setup()
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Return, "\n")
+    assert widget.toPlainText() == "hello خوش\n world"
+    assert widget.textCursor().position() == 10
+    # a block-terminator character cannot carry a character format, so the
+    # newline stays untagged; the committed word characters are RomanUrdu
+    assert widget._regionKindAt(8) == RegionType.RomanUrdu
+    assert not overlay.isVisible()
+
+    # Comma
+    widget, overlay = setup()
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Comma, ",")
+    assert widget.toPlainText() == "hello خوش, world"
+    assert widget.textCursor().position() == 10
+    assert widget._regionKindAt(9) == RegionType.RomanUrdu
+    assert not overlay.isVisible()
+
+
+# ******************************************************************************
+def testEdgeCommits(app: QApplication) -> None:
+    """Edge commits insert nothing and jump to the adjacent word."""
+    widget = PyRaya()
+    widget.show()
+    text = "hello خوش world دوست"
+    widget.setPlainText(text)
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 20)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+
+    # Right at the end of the overlay text -> the next Arabic word (دوست)
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Right, "")
+    assert widget.toPlainText() == text  # nothing inserted
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()  # reloaded on the word
+    assert overlay.lineEdit().text() == "dost"
+
+    # Left at the start of the overlay text -> the previous Arabic word (خوش)
+    overlay.lineEdit().setCursorPosition(0)
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Left, "")
+    assert widget.toPlainText() == text
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    assert overlay.lineEdit().text() == "khosh"
+
+    # No next word at the end of the document -> the overlay hides
+    widget2 = PyRaya()
+    widget2.show()
+    widget2.setPlainText("world خوش")
+    widget2.setRomanInputEnabled(True)
+    widget2.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget2, 7)
+    overlay2 = widget2._overlay
+    assert overlay2 is not None and overlay2.isVisible()
+    _sendKey(overlay2.lineEdit(), Qt.Key.Key_Right, "")
+    assert widget2.toPlainText() == "world خوش"
+    _assertNoOverlay(widget2)
+
+
+# ******************************************************************************
+def testEmptyTextCommitDeletesSpan(app: QApplication) -> None:
+    """An empty overlay text deletes the span and emits regionsChanged."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello خوش world")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    overlay.setText("")  # clear the overlay text
+
+    changed = []
+    widget.regionsChanged.connect(lambda: changed.append(1))
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Space, " ")
+    # span deleted, the separator takes its place (the surrounding spaces stay)
+    assert widget.toPlainText() == "hello   world"
+    assert changed == [1]  # regionsChanged emitted for the span-deleting commit
+    assert widget.textCursor().position() == 7  # cursor after the separator
+    _assertNoOverlay(widget)
+
+    # a normal (non-empty) text-replacing commit does not emit regionsChanged
+    widget2 = PyRaya()
+    widget2.show()
+    widget2.setPlainText("hello خوش world")
+    widget2.setRomanInputEnabled(True)
+    widget2.setRegionType(RegionType.RomanUrdu, 6, 9)
+    changed2 = []
+    widget2.regionsChanged.connect(lambda: changed2.append(1))
+    _moveCursor(widget2, 7)
+    overlay2 = widget2._overlay
+    assert overlay2 is not None and overlay2.isVisible()
+    _sendKey(overlay2.lineEdit(), Qt.Key.Key_Space, " ")
+    assert widget2.toPlainText() == "hello خوش  world"
+    assert changed2 == []
+
+
+# ******************************************************************************
+def testPlaceholderCommitScenario1And2(app: QApplication) -> None:
+    """Committing the placeholder learns and commits the typed roman word."""
+    # scenario 1: typed at the cursor inside the span
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello خوش world")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 10)
+    committed: list[tuple[str, str]] = []
+    widget.romanWordCommitted.connect(lambda w, r: committed.append((w, r)))
+    _moveCursor(widget, 9)  # the space inside the span
+    _sendKey(widget, Qt.Key.Key_X, "x")
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    overlay.setText("xqwzrty")  # zero matches -> placeholder row
+    row = overlay.suggestionList().selectedRow()
+    assert row is not None and row.isPlaceholder
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Space, " ")
+    assert widget.toPlainText() == "hello خوشxqwzrty  world"
+    assert committed == [("xqwzrty", "xqwzrty")]
+    assert widget.textCursor().position() == 17
+    _assertNoOverlay(widget)
+    # localDictionary is unchanged (learnRomanWord is a no-op this session)
+    assert list(widget.localDictionary().counter) == []
+
+    # scenario 2: the span is replaced by the learned word
+    widget2 = PyRaya()
+    widget2.show()
+    widget2.setPlainText("hello خوش world")
+    widget2.setRomanInputEnabled(True)
+    widget2.setRegionType(RegionType.RomanUrdu, 6, 9)
+    committed2: list[tuple[str, str]] = []
+    widget2.romanWordCommitted.connect(lambda w, r: committed2.append((w, r)))
+    _moveCursor(widget2, 7)
+    overlay2 = widget2._overlay
+    assert overlay2 is not None and overlay2.isVisible()
+    overlay2.setText("xqwzrty")  # zero matches -> placeholder row
+    row2 = overlay2.suggestionList().selectedRow()
+    assert row2 is not None and row2.isPlaceholder
+    _sendKey(overlay2.lineEdit(), Qt.Key.Key_Space, " ")
+    assert widget2.toPlainText() == "hello xqwzrty  world"
+    assert committed2 == [("xqwzrty", "xqwzrty")]
+    _assertNoOverlay(widget2)
+
+
+# ******************************************************************************
+def testUnavailableEngineCommitIsNoOp(app: QApplication) -> None:
+    """With an unavailable engine, committing does not touch the document."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello خوش world")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    engine = widget.romanEngine()
+    assert engine is not None
+    engine.available = False  # simulate DictionaryNotFoundError
+    committed: list[tuple[str, str]] = []
+    widget.romanWordCommitted.connect(lambda w, r: committed.append((w, r)))
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    assert overlay.suggestionList().rowCount() == 0  # no rows, no placeholder
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Space, " ")
+    assert widget.toPlainText() == "hello خوش world"
+    assert committed == []
+    _assertNoOverlay(widget)
+
+
+# ******************************************************************************
+def testUpAndDownSelectionThenCommit(app: QApplication) -> None:
+    """Up/Down moves the selection, and the committed word follows it."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello خوش world")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    overlay.setText("khos")  # six distance-1 suggestions
+    first = overlay.suggestionList().selectedRow()
+    assert first is not None
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Down, "")
+    second = overlay.suggestionList().selectedRow()
+    assert second is not None
+    assert second.arabic != first.arabic
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Space, " ")
+    assert widget.toPlainText() == "hello " + second.arabic + "  world"
+    _assertNoOverlay(widget)

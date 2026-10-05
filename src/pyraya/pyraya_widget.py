@@ -37,7 +37,7 @@ from PySide6.QtGui import (
     QTextOption,
 )
 from PySide6.QtWidgets import QMenu, QPlainTextEdit, QWidget
-from romanalfaz.engine import Vocabulary
+from romanalfaz.engine import Suggestion, Vocabulary
 
 from .regions import RegionColors, RegionType, TextRegion, defaultRegionKind
 from .roman_input import RomanInputEngine, RomanOverlay
@@ -724,22 +724,32 @@ class PyRaya(QPlainTextEdit):
         return (round(point[0] + offset.x()), round(line.rect().top() + offset.y()))
 
     # ==========================================================================
-    def _activateOverlay(self, word: tuple[int, int]) -> None:
-        """Show the overlay over the word with its romanization as text.
+    def _ensureOverlay(self, engine: RomanInputEngine) -> RomanOverlay:
+        """Return the overlay, creating and wiring it lazily on demand.
 
-        The overlay is created lazily as a child of the viewport, so it
-        scrolls with the text automatically. Focus moves into the overlay's
-        line edit, where all subsequent typing happens; the document is left
-        untouched until a commit.
+        The overlay is created at most once, as a child of the viewport so it
+        scrolls with the text automatically; its ``canceled`` and ``committed``
+        signals are wired at creation.
         """
-        engine = self.romanEngine()
-        if engine is None:
-            return
         overlay = self._overlay
         if overlay is None:
             overlay = RomanOverlay(engine, self.font(), self.viewport())
             overlay.canceled.connect(self._deactivateOverlay)
+            overlay.committed.connect(self._onOverlayCommitted)
             self._overlay = overlay
+        return overlay
+
+    # ==========================================================================
+    def _activateOverlay(self, word: tuple[int, int]) -> None:
+        """Show the overlay over the word with its romanization as text.
+
+        Focus moves into the overlay's line edit, where all subsequent typing
+        happens; the document is left untouched until a commit.
+        """
+        engine = self.romanEngine()
+        if engine is None:
+            return
+        overlay = self._ensureOverlay(engine)
         document = self.document()
         overlay.setText(engine.romanizeArabic(document.toPlainText()[word[0] : word[1]]))
         self._activeWord = word
@@ -759,11 +769,7 @@ class PyRaya(QPlainTextEdit):
         engine = self.romanEngine()
         if engine is None:
             return
-        overlay = self._overlay
-        if overlay is None:
-            overlay = RomanOverlay(engine, self.font(), self.viewport())
-            overlay.canceled.connect(self._deactivateOverlay)
-            self._overlay = overlay
+        overlay = self._ensureOverlay(engine)
         overlay.setText(text)
         self._activeWord = None
         self._anchorPosition = position
@@ -785,6 +791,107 @@ class PyRaya(QPlainTextEdit):
     def _overlayActive(self) -> bool:
         """Whether the overlay is currently shown over the document."""
         return self._overlay is not None and self._overlay.isVisible()
+
+    # ==========================================================================
+    def _onOverlayCommitted(
+        self, typedRoman: str, selected: object, isPlaceholder: bool, separator: str
+    ) -> None:
+        """Handle the overlay's commit and write to the document.
+
+        A separator-key commit (Space, Enter, typed punctuation) inserts the
+        committed word plus the separator character as a single undoable edit:
+        over an existing word (scenario 2) the word's span is replaced, at a
+        bare cursor (scenario 1) the text is inserted at the anchor position.
+        The word and the separator both carry the :class:`RomanUrdu` region
+        background. An edge commit (Left at the start / Right at the end of the
+        overlay text) writes nothing and moves the cursor to the adjacent
+        Arabic word, or hides the overlay when there is none.
+
+        ``romanWordCommitted`` is emitted for a non-empty committed word, and
+        ``regionsChanged`` only for an empty-text scenario-2 commit, which
+        deletes the word's span.
+        """
+        engine = self.romanEngine()
+        overlay = self._overlay
+        if engine is None or not engine.available or overlay is None:
+            self._deactivateOverlay()
+            return
+        self._committing = True
+        resync = True
+        try:
+            word = ""
+            if typedRoman:
+                if isPlaceholder:
+                    word = engine.learnRomanWord(typedRoman)
+                elif isinstance(selected, Suggestion):
+                    word = selected.arabic
+            if separator == "":
+                # Edge commit: nothing is written to the document; move to the
+                # adjacent Arabic word when one exists.
+                atStart = overlay.lineEdit().cursorPosition() == 0
+                if self._activeWord is not None:
+                    reference = self._activeWord[0] if atStart else self._activeWord[1]
+                else:
+                    reference = self._anchorPosition or 0
+                adjacent = self._adjacentWord(reference, atStart)
+                if adjacent is None:
+                    self._deactivateOverlay()
+                    resync = False
+                else:
+                    cursor = self.textCursor()
+                    cursor.setPosition(adjacent[0])
+                    self.setTextCursor(cursor)
+            else:
+                cursor = self.textCursor()
+                fmt = QTextCharFormat()
+                fmt.setBackground(QBrush(RegionColors[RegionType.RomanUrdu]))
+                if self._activeWord is not None:
+                    start, end = self._activeWord
+                    cursor.setPosition(start)
+                    cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+                    if word == "":
+                        # The span is deleted; the region changed.
+                        self.regionsChanged.emit()
+                else:
+                    cursor.setPosition(self._anchorPosition or 0)
+                cursor.insertText(word + separator, fmt)
+                if word:
+                    self.romanWordCommitted.emit(word, typedRoman)
+                self.setTextCursor(cursor)
+                self._deactivateOverlay()
+        finally:
+            self._committing = False
+            if resync:
+                self._syncOverlay()
+
+    # ==========================================================================
+    def _adjacentWord(self, reference: int, atStart: bool) -> tuple[int, int] | None:
+        """The nearest Arabic-script word run adjacent to ``reference``.
+
+        When ``atStart`` is true the run is searched left of ``reference``
+        (the previous word); otherwise right of it (the next word). Non-Arabic
+        characters — whitespace, digits, Latin letters — are skipped.
+        """
+        text = self.document().toPlainText()
+        if atStart:
+            index = reference - 1
+            while index >= 0 and not _isArabicChar(text[index]):
+                index -= 1
+            if index < 0:
+                return None
+            start = index
+            while start > 0 and _isArabicChar(text[start - 1]):
+                start -= 1
+            return (start, index + 1)
+        index = reference
+        while index < len(text) and not _isArabicChar(text[index]):
+            index += 1
+        if index >= len(text):
+            return None
+        end = index
+        while end < len(text) and _isArabicChar(text[end]):
+            end += 1
+        return (index, end)
 
     # ==========================================================================
     def createPopupMenu(self) -> QMenu:
