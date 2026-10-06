@@ -374,10 +374,11 @@ def testOverlayWheelForwardsToScrollArea(
 
 
 # ******************************************************************************
-def testRomanInputFeatureOffByDefault(app: QApplication) -> None:
-    """The feature is off by default and roman keystrokes type into the document."""
+def testRomanInputFeatureOnByDefault(app: QApplication) -> None:
+    """The feature is on by default; keystrokes at the trailing terminator
+    still type into the document."""
     widget = PyRaya()
-    assert widget.isRomanInputEnabled() is False
+    assert widget.isRomanInputEnabled() is True
     _sendKey(widget, Qt.Key.Key_K, "k")
     assert widget.toPlainText() == "k"
     _sendKey(widget, Qt.Key.Key_O, "o")
@@ -492,8 +493,8 @@ def testNoOverlayOnPartialContainment(app: QApplication) -> None:
     widget.show()
     widget.setPlainText("hello خوش world")
     widget.setRomanInputEnabled(True)
-    widget.setRegionType(RegionType.RomanUrdu, 7, 9)  # only part of the word
-    _moveCursor(widget, 8)
+    widget.setRegionType(RegionType.Latin, 6, 8)  # only part of the word
+    _moveCursor(widget, 7)
     _assertNoOverlay(widget)
 
 
@@ -578,6 +579,7 @@ def testLatinKeystrokeNotIntercepted(app: QApplication) -> None:
     widget = PyRaya()
     widget.show()
     widget.setPlainText("hello world")
+    widget.setRegionType(RegionType.Latin, 0, 11)
     widget.setRomanInputEnabled(True)
     _moveCursor(widget, 0)
     _sendKey(widget, Qt.Key.Key_K, "k")

@@ -63,7 +63,7 @@ class TextRegion:
 #: color of this kind, so all text at any time belongs to exactly one region
 #: kind; clearing regions resets the text to this kind rather than leaving
 #: it untagged.
-defaultRegionKind: RegionType = RegionType.Latin
+defaultRegionKind: RegionType = RegionType.RomanUrdu
 
 
 # ******************************************************************************

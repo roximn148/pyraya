@@ -23,8 +23,8 @@ PyRaya is at **version 0.1.0-alpha.4**. The widget is a drop-in `QPlainTextEdit`
 - **Noto typography** — a configurable font stack defaulting to Noto Naskh Arabic.
 - **Visible whitespace** — tabs and spaces rendered as visible characters.
 - **Configurable formatting** — a dedicated rule-based syntax highlighter.
-- **Text regions** — spans tagged as *Latin* or *Roman Urdu* (`RegionType`), rendered with a subtle, type-specific background color; tag a selection from the right-click context menu, via the `Ctrl+1` / `Ctrl+2` keyboard shortcuts, or via `setRegionType`. Every character belongs to exactly one region kind at all times: untagged text belongs to `defaultRegionKind` (Latin), each kind's identity is its unique background color (compared including the alpha channel), and clearing regions resets the text to `defaultRegionKind`.
-- **Roman-script input overlay** — off by default. When enabled, an Arabic-script word inside a *Roman Urdu* region gets a small frameless, non-modal overlay line edit matched to the word's geometry; the typed roman text is edited there (the visual document stays Arabic-script), a tier-colored suggestion list (green = exact, orange = edit distance 1, red = distance 2) hangs below, and committing (Space / Enter / typed punctuation, or Left/Right at the word's text edges) writes the selected Arabic word — plus the separator character, if typed — to the document. A zero-match typed word offers a `+ Learn <word>` placeholder row; committing it commits the typed roman word (a no-op hook for the future learning feature) and leaves the local dictionary unchanged.
+- **Text regions** — spans tagged as *Latin* or *Roman Urdu* (`RegionType`), rendered with a subtle, type-specific background color; tag a selection from the right-click context menu, via the `Ctrl+1` / `Ctrl+2` keyboard shortcuts, or via `setRegionType`. Every character belongs to exactly one region kind at all times: untagged text belongs to `defaultRegionKind` (Roman Urdu), each kind's identity is its unique background color (compared including the alpha channel), and clearing regions resets the text to `defaultRegionKind`.
+- **Roman-script input overlay** — on by default. An Arabic-script word inside a *Roman Urdu* region gets a small frameless, non-modal overlay line edit matched to the word's geometry; the typed roman text is edited there (the visual document stays Arabic-script), a tier-colored suggestion list (green = exact, orange = edit distance 1, red = distance 2) hangs below, and committing (Space / Enter / typed punctuation, or Left/Right at the word's text edges) writes the selected Arabic word — plus the separator character, if typed — to the document. A zero-match typed word offers a `+ Learn <word>` placeholder row; committing it commits the typed roman word (a no-op hook for the future learning feature) and leaves the local dictionary unchanged.
 
 The **inbuilt spell-checker** (real-time Urdu tokenization and misspelling highlighting) is **roadmap** and *not yet implemented*. Do not assume it works yet.
 
@@ -36,7 +36,7 @@ The **inbuilt spell-checker** (real-time Urdu tokenization and misspelling highl
 * **Streamlined Noto Typography** *(available)*: Configurable font stack defaulting to Noto Naskh Arabic, with Noto Nastaliq Urdu and other fallbacks.
 * **Visible Whitespace** *(available)*: Tabs and spaces rendered as visible characters.
 * **Configurable Formatting** *(available)*: A dedicated rule-based highlighter for Urdu and mixed-script text.
-* **Text Regions** *(available)*: Tag a selection (or any character range) as Latin or Roman Urdu from the context menu, the `Ctrl+1` / `Ctrl+2` shortcuts, or `setRegionType`; each type renders with a subtle background color that is its unique identity (including the alpha channel). Every character belongs to exactly one region kind — untagged text belongs to `defaultRegionKind` (Latin) — clearing regions resets the text to that kind, and regions survive edits and undo/redo.
+* **Text Regions** *(available)*: Tag a selection (or any character range) as Latin or Roman Urdu from the context menu, the `Ctrl+1` / `Ctrl+2` shortcuts, or `setRegionType`; each type renders with a subtle background color that is its unique identity (including the alpha channel). Every character belongs to exactly one region kind — untagged text belongs to `defaultRegionKind` (Roman Urdu) — clearing regions resets the text to that kind, and regions survive edits and undo/redo.
 * **Roman-Script Input Overlay** *(available)*: While enabled, editing an Arabic-script word inside a Roman Urdu region happens in a small frameless overlay line edit — the visual document stays Arabic-script until a commit. Suggestions are tier-colored (exact / distance 1 / distance 2); committing writes the selected Arabic word, plus the typed separator character, to the document; zero-match words commit their typed roman via the `+ Learn` placeholder row.
 * **Inbuilt Spell-Checker** *(roadmap)*: Real-time tokenization and highlighting of misspelled Urdu words.
 * **Multilingual Harmony** *(roadmap)*: Smooth rendering when blending Nastaliq prose with English text strings.
@@ -61,10 +61,10 @@ sys.exit(app.exec())
 ------------------------------
 ## Roman-Script Input
 
-The overlay feature is **off by default**; while off, the widget behaves byte-identically to a plain `QPlainTextEdit` (roman keystrokes type straight into the document).
+The overlay feature is **on by default**, so roman Urdu input works out of the box: an ASCII alphanumeric key pressed with the cursor inside a Roman Urdu region (which is every untagged character) seeds the overlay instead of the document. Disabling it restores plain typing — roman keystrokes go straight into the document as in a plain `QPlainTextEdit`.
 
 ```python
-editor.setRomanInputEnabled(True)
+editor.setRomanInputEnabled(False)  # optional: type roman straight into the document
 ```
 
 - `setRomanInputEnabled(enabled)` / `isRomanInputEnabled()` — toggle the overlay feature.

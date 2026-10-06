@@ -275,10 +275,11 @@ class PyRaya(QPlainTextEdit):
         # context menu event reaches the widget's viewport.
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._onCustomContextMenuRequested)
-        # Roman-input overlay state: the feature is off by default so the
-        # existing drop-in behavior is unchanged; the dictionary and engine
-        # are owned by the widget (the engine is created lazily on demand).
-        self._romanInputEnabled = False
+        # Roman-input overlay state: the feature is on by default so the
+        # widget is ready for roman Urdu out of the box; the dictionary and
+        # engine are owned by the widget (the engine is created lazily on
+        # demand).
+        self._romanInputEnabled = True
         self._localDictionary = Vocabulary()
         self._romanEngine: RomanInputEngine | None = None
         self._activeWord: tuple[int, int] | None = None
@@ -529,9 +530,10 @@ class PyRaya(QPlainTextEdit):
     def setRomanInputEnabled(self, enabled: bool) -> None:
         """Enable or disable the roman-script overlay input feature.
 
-        Disabled by default so the existing drop-in behavior is unchanged:
-        while disabled, roman keystrokes type into the document as before and
-        no overlay machinery runs. Enabling the feature only marks it ready —
+        Enabled by default so the widget is ready for roman Urdu out of the
+        box. While disabled, roman keystrokes type into the document as
+        before and no overlay machinery runs. Enabling the feature only marks
+        it ready —
         the :class:`~pyraya.roman_input.RomanInputEngine` (and its dictionary
         load) happens on first overlay activation.
 
