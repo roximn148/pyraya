@@ -32,6 +32,7 @@ from PySide6.QtGui import (
     QPainter,
     QPaintEvent,
     QPen,
+    QResizeEvent,
     QWheelEvent,
 )
 from PySide6.QtWidgets import (
@@ -65,6 +66,10 @@ _ACCENT_BORDER = QColor(0x1D, 0x4E, 0x89)
 #: The dashed gray style of the placeholder (Learn) row.
 _PLACEHOLDER_COLOR = QColor(0x8A, 0x8F, 0x98, 30)
 
+#: The maximum number of suggestion rows shown at once; the list scrolls to
+#: keep the selected row visible while navigating.
+MAX_VISIBLE_ROWS: int = 5
+
 
 # ******************************************************************************
 @dataclass(frozen=True, slots=True)
@@ -76,17 +81,12 @@ class _SuggestionRow:
             placeholder row.
         arabic: The Arabic-script text drawn in the document font; for the
             placeholder row this is the ``+ Learn <typed roman>`` label.
-        roman: The lowercased roman of the suggestion (the typed roman for
-            the placeholder row).
-        frequency: The suggestion's usage count (0 for the placeholder).
         tier: The edit-distance tier (0 = exact, 1, 2); -1 for the placeholder.
         isPlaceholder: True for the ``+ Learn`` placeholder row.
     """
 
     suggestion: Suggestion | None
     arabic: str
-    roman: str
-    frequency: int
     tier: int
     isPlaceholder: bool
 
@@ -229,29 +229,45 @@ class RomanInputEngine:
 class SuggestionList(QWidget):
     """Passive row display for roman-input suggestions.
 
-    A lightweight widget that renders each row with the Arabic word in the
-    document font, the lowercased roman (muted), and the frequency (muted),
-    color-coded by edit-distance tier (green = exact, orange = distance 1,
-    red = distance 2). The selected row is emphasized with a stronger tint and
-    an accent border; the placeholder (Learn) row is drawn in a distinct
-    dashed gray style.
+    A lightweight widget that renders each row with only its Arabic-script
+    text in the document font, color-coded by edit-distance tier (green =
+    exact, orange = distance 1, red = distance 2). The selected row is
+    emphasized with a stronger tint and an accent border; the placeholder
+    (Learn) row is drawn in a distinct dashed gray style. At most
+    ``maxVisibleRows`` rows are shown at once; the list scrolls so the
+    selected row stays visible while navigating. The preferred width covers
+    the widest rendered row with the configurable margin on both sides, so
+    no row's text is clipped.
 
     This widget never takes focus — all key handling lives in the overlay's
     :class:`RomanLineEdit`.
     """
 
-    def __init__(self, font: QFont, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        font: QFont,
+        parent: QWidget | None = None,
+        maxVisibleRows: int = MAX_VISIBLE_ROWS,
+        margin: int = 6,
+    ) -> None:
         """Create the suggestion list.
 
         Args:
             font: The document font used to render the Arabic words.
             parent: The parent widget (the overlay).
+            maxVisibleRows: The maximum number of rows shown at once; the
+                list scrolls to keep the selected row in view.
+            margin: The horizontal margin (in pixels) left on both sides of
+                the widest rendered row.
         """
         super().__init__(parent)
         self._font = font
         self._metrics = QFontMetrics(font)
+        self._maxVisibleRows = maxVisibleRows
+        self._margin = margin
         self._rows: list[_SuggestionRow] = []
         self._selectedIndex: int = -1
+        self._firstRow: int = 0
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
@@ -260,6 +276,7 @@ class SuggestionList(QWidget):
         """Replace the rendered rows and reset the selection to row 0."""
         self._rows = list(rows)
         self._selectedIndex = 0 if self._rows else -1
+        self._firstRow = 0
         self.setVisible(bool(self._rows))
         self.updateGeometry()
         self.update()
@@ -275,10 +292,24 @@ class SuggestionList(QWidget):
         return self._selectedIndex
 
     # ==========================================================================
+    def firstRow(self) -> int:
+        """The index of the topmost visible row."""
+        return self._firstRow
+
+    # ==========================================================================
+    def visibleRowCount(self) -> int:
+        """The number of rows that fit in the widget's current height."""
+        return max(1, self.height() // self._rowHeight())
+
+    # ==========================================================================
     def select(self, index: int) -> None:
-        """Highlight the given row (ignored when out of range)."""
+        """Highlight the given row (ignored when out of range).
+
+        The visible window is scrolled so the highlighted row stays in view.
+        """
         if 0 <= index < len(self._rows):
             self._selectedIndex = index
+            self._scrollToRow(index)
             self.update()
 
     # ==========================================================================
@@ -302,13 +333,19 @@ class SuggestionList(QWidget):
 
     # ==========================================================================
     def sizeHint(self) -> QSize:
-        """The preferred size: the widest row, one row height each."""
+        """The preferred size: the widest row plus margin, up to ``maxVisibleRows`` rows.
+
+        The width covers the widest rendered row with the margin on both
+        sides, so no row's text is clipped; the height is capped at the
+        visible-row limit, so the list scrolls rather than growing with the
+        full suggestion count.
+        """
         if not self._rows:
             return QSize(0, 0)
-        width = 0
-        for row in self._rows:
-            width = max(width, self._rowWidth(row))
-        return QSize(width, self._rowHeight() * len(self._rows))
+        width = max(self._rowWidth(row) for row in self._rows)
+        width += 2 * self._margin
+        visible = min(len(self._rows), self._maxVisibleRows)
+        return QSize(width, self._rowHeight() * visible)
 
     # ==========================================================================
     def _rowHeight(self) -> int:
@@ -318,23 +355,45 @@ class SuggestionList(QWidget):
     # ==========================================================================
     def _rowWidth(self, row: _SuggestionRow) -> int:
         """The row's text width in the document font."""
-        width = self._metrics.horizontalAdvance(row.arabic)
-        if row.isPlaceholder:
-            return width
-        width += 8 + self._metrics.horizontalAdvance(row.roman)
-        width += 8 + self._metrics.horizontalAdvance(str(row.frequency))
-        return width
+        return self._metrics.horizontalAdvance(row.arabic)
+
+    # ==========================================================================
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        """Re-clamp the scroll window and repaint when the widget is resized."""
+        super().resizeEvent(event)
+        if self._selectedIndex >= 0:
+            self._scrollToRow(self._selectedIndex)
+        else:
+            self._firstRow = 0
+        self.update()
+
+    # ==========================================================================
+    def _scrollToRow(self, index: int) -> None:
+        """Scroll the visible window so the row at ``index`` is in view."""
+        count = len(self._rows)
+        visible = self.visibleRowCount()
+        if index < self._firstRow:
+            self._firstRow = index
+        elif index >= self._firstRow + visible:
+            self._firstRow = index - visible + 1
+        self._firstRow = max(0, min(self._firstRow, count - visible))
 
     # ==========================================================================
     def paintEvent(self, event: QPaintEvent) -> None:
-        """Draw the tier-colored rows, the selected-row accent, and text."""
+        """Draw the visible rows: tier tints, the selected-row accent, text.
+
+        Rows outside the visible window — above ``firstRow`` or below the
+        widget's bottom — are not drawn.
+        """
         if not self._rows:
             return
+        last = min(len(self._rows), self._firstRow + self.visibleRowCount())
         painter = QPainter(self)
         rowHeight = self._rowHeight()
-        baseline = (rowHeight + self._metrics.ascent() - self._metrics.height()) // 2
-        for i, row in enumerate(self._rows):
-            y = i * rowHeight
+        baseline = self._metrics.ascent() + (rowHeight - self._metrics.height()) // 2
+        for i in range(self._firstRow, last):
+            y = (i - self._firstRow) * rowHeight
+            row = self._rows[i]
             color = _PLACEHOLDER_COLOR if row.isPlaceholder else _TIER_COLORS[row.tier]
             if i == self._selectedIndex:
                 color = QColor(color.red(), color.green(), color.blue(), _SELECTED_ALPHA)
@@ -350,17 +409,8 @@ class SuggestionList(QWidget):
             painter.setFont(self._font)
             painter.setPen(QPen(Qt.GlobalColor.black))
             arabicWidth = self._metrics.horizontalAdvance(row.arabic)
-            x = self.width() - 6 - arabicWidth
+            x = self.width() - self._margin - arabicWidth
             painter.drawText(x, y + baseline, row.arabic)
-            if not row.isPlaceholder:
-                muted = QColor(0x8A, 0x8F, 0x98)
-                painter.setPen(QPen(muted))
-                romanWidth = self._metrics.horizontalAdvance(row.roman)
-                x = x - 8 - romanWidth
-                painter.drawText(x, y + baseline, row.roman)
-                freqWidth = self._metrics.horizontalAdvance(str(row.frequency))
-                x = x - 8 - freqWidth
-                painter.drawText(x, y + baseline, str(row.frequency))
         painter.end()
 
 
@@ -535,8 +585,6 @@ class RomanOverlay(QWidget):
                 _SuggestionRow(
                     suggestion=suggestion,
                     arabic=suggestion.arabic,
-                    roman=suggestion.encodedRoman.lower(),
-                    frequency=suggestion.frequency,
                     tier=tier,
                     isPlaceholder=False,
                 ),
@@ -546,8 +594,6 @@ class RomanOverlay(QWidget):
                 _SuggestionRow(
                     suggestion=None,
                     arabic=f"+ Learn {text}",
-                    roman=text,
-                    frequency=0,
                     tier=-1,
                     isPlaceholder=True,
                 ),

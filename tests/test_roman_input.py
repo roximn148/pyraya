@@ -12,14 +12,28 @@ from typing import cast
 
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent, QPoint, Qt
-from PySide6.QtGui import QKeyEvent, QTextCursor, QWheelEvent
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QFontMetrics,
+    QImage,
+    QKeyEvent,
+    QPixmap,
+    QTextCursor,
+    QWheelEvent,
+)
 from PySide6.QtWidgets import QApplication, QPlainTextEdit, QWidget
 from romanalfaz import DictionaryNotFoundError
 from romanalfaz.engine import Suggestion, Vocabulary
 
 from pyraya import PyRaya
 from pyraya.regions import RegionType
-from pyraya.roman_input import RomanInputEngine, RomanOverlay
+from pyraya.roman_input import (
+    RomanInputEngine,
+    RomanOverlay,
+    SuggestionList,
+    _SuggestionRow,
+)
 
 # Verified zero-match roman strings (no suggestions at distance 0..2).
 ZERO_MATCH_WORDS = ["xqwzrty", "qzxv", "kzqwxv", "zxrqvz", "qwzxq"]
@@ -171,6 +185,21 @@ def _makeOverlay(app: QApplication, engine: RomanInputEngine) -> tuple[RomanOver
 
 
 # ******************************************************************************
+class _StubEngine(RomanInputEngine):
+    """An engine offering a fixed number of suggestions for the scroll tests."""
+
+    def __init__(self, count: int) -> None:
+        super().__init__()
+        self._count = count
+
+    def suggestTiers(self, romanWord: str) -> list[tuple[Suggestion, int]]:
+        return [
+            (Suggestion(arabic=f"word{i}", encodedRoman=f"word{i}", frequency=i), 0)
+            for i in range(self._count)
+        ]
+
+
+# ******************************************************************************
 def testOverlaySeparatorCommits(app: QApplication, engine: RomanInputEngine) -> None:
     """Space / Enter / punctuation commit the selected suggestion plus the char."""
     overlay, _ = _makeOverlay(app, engine)
@@ -261,6 +290,168 @@ def testOverlayUpDownWrapsSelection(app: QApplication, engine: RomanInputEngine)
     assert suggestionList.selectedIndex() == 0  # wraps
     overlay.moveSelection(-1)
     assert suggestionList.selectedIndex() == count - 1  # wraps
+
+
+# ******************************************************************************
+def testSuggestionListCappedSizeHint(app: QApplication) -> None:
+    """The list's size hint caps at the visible-row limit, not the row count."""
+    overlay, _ = _makeOverlay(app, _StubEngine(12))
+    overlay.setText("x")
+    suggestionList = overlay.suggestionList()
+    assert suggestionList.rowCount() == 12
+    rowHeight = QFontMetrics(overlay.font()).height() + 6
+    assert suggestionList.sizeHint().height() == 5 * rowHeight
+
+
+# ******************************************************************************
+def _stubRows() -> list[_SuggestionRow]:
+    """Two stub rows of different widths for the sizing and paint tests."""
+    return [
+        _SuggestionRow(
+            Suggestion(arabic="word", encodedRoman="word", frequency=0),
+            "word",
+            0,
+            False,
+        ),
+        _SuggestionRow(
+            Suggestion(arabic="wordlonger", encodedRoman="wordlonger", frequency=1),
+            "wordlonger",
+            1,
+            False,
+        ),
+    ]
+
+
+# ******************************************************************************
+def testSuggestionListSizeHintIncludesDefaultMargin(app: QApplication) -> None:
+    """The hint width covers the widest row plus the default margin on both sides."""
+    overlay, _ = _makeOverlay(app, _StubEngine(3))
+    overlay.setText("x")
+    suggestionList = overlay.suggestionList()
+    metrics = QFontMetrics(overlay.font())
+    widest = max(metrics.horizontalAdvance(f"word{i}") for i in range(3))
+    assert suggestionList.sizeHint().width() == widest + 2 * 6
+
+
+# ******************************************************************************
+def testSuggestionListSizeHintWithCustomMargin(app: QApplication) -> None:
+    """The hint width adds the configurable margin to both sides of the widest row."""
+    font = QFont()
+    listWidget = SuggestionList(font, margin=12)
+    rows = _stubRows()
+    listWidget.setRows(rows)
+    metrics = QFontMetrics(font)
+    widest = max(metrics.horizontalAdvance(row.arabic) for row in rows)
+    assert listWidget.sizeHint().width() == widest + 24
+
+
+# ******************************************************************************
+def testSuggestionListTextStaysInsideMargin(app: QApplication) -> None:
+    """At the hint width, the right-aligned text never crosses the left edge."""
+    font = QFont()
+    listWidget = SuggestionList(font)
+    listWidget.setRows(_stubRows())
+    hint = listWidget.sizeHint()
+    listWidget.resize(hint.width(), hint.height())
+    pixmap = QPixmap(hint.width(), hint.height())
+    pixmap.fill(Qt.GlobalColor.white)
+    listWidget.render(pixmap)
+    image = pixmap.toImage()
+    for x in range(6):  # default margin
+        for y in range(hint.height()):
+            assert image.pixelColor(x, y) != QColor(0, 0, 0)
+
+
+# ******************************************************************************
+def _inkSpan(image: QImage, width: int, yStart: int, yEnd: int) -> tuple[int | None, int | None]:
+    """The topmost and bottommost dark pixels (text ink) inside a row band.
+
+    The tier tints and placeholder borders stay above the darkness
+    threshold, so only the black text ink is measured.
+    """
+    top: int | None = None
+    bottom: int | None = None
+    for y in range(yStart, yEnd):
+        for x in range(width):
+            color = image.pixelColor(x, y)
+            if min(color.red(), color.green(), color.blue()) < 200:
+                top = y if top is None else top
+                bottom = y
+    return top, bottom
+
+
+# ******************************************************************************
+def testSuggestionListTextVerticallyCenteredInRows(
+    app: QApplication, engine: RomanInputEngine
+) -> None:
+    """Each unselected row draws its Arabic-script text centered in its band.
+
+    The text ink must not spill past the row's top edge into the row above,
+    nor past the bottom edge into the row below: each word stays inside its
+    own row instead of being pushed up into the one above.
+    """
+    overlay, _ = _makeOverlay(app, engine)
+    overlay.setText("khos")  # six distance-1 suggestions
+    suggestionList = overlay.suggestionList()
+    assert suggestionList.rowCount() >= 3
+    rowHeight = QFontMetrics(overlay.font()).height() + 6
+    hint = suggestionList.sizeHint()
+    suggestionList.resize(hint.width(), hint.height())
+    pixmap = QPixmap(hint.width(), hint.height())
+    pixmap.fill(Qt.GlobalColor.white)
+    suggestionList.render(pixmap)
+    image = pixmap.toImage()
+    visible = min(suggestionList.rowCount(), suggestionList.visibleRowCount())
+    for row in range(1, visible):  # row 0 carries the selected-row accent
+        top, bottom = _inkSpan(image, hint.width(), row * rowHeight, (row + 1) * rowHeight)
+        assert top is not None and bottom is not None
+        assert top >= row * rowHeight + 2  # not pushed into the row above
+        assert bottom <= (row + 1) * rowHeight - 2  # not pushed into the row below
+
+
+# ******************************************************************************
+def testSelectKeepsSelectedRowVisible(app: QApplication) -> None:
+    """select keeps the highlighted row inside the visible window."""
+    overlay, _ = _makeOverlay(app, _StubEngine(12))
+    overlay.setText("x")
+    suggestionList = overlay.suggestionList()
+    for index in range(suggestionList.rowCount()):
+        suggestionList.select(index)
+        first = suggestionList.firstRow()
+        assert first <= index < first + suggestionList.visibleRowCount()
+    # the last row is pinned to the bottom of the window
+    assert suggestionList.firstRow() == (
+        suggestionList.rowCount() - suggestionList.visibleRowCount()
+    )
+    suggestionList.select(0)
+    assert suggestionList.firstRow() == 0
+
+
+# ******************************************************************************
+def testMoveSelectionWrapsAndScrollsBackToTop(app: QApplication) -> None:
+    """Wraparound navigation scrolls the list back to the top row."""
+    overlay, _ = _makeOverlay(app, _StubEngine(12))
+    overlay.setText("x")
+    suggestionList = overlay.suggestionList()
+    suggestionList.select(suggestionList.rowCount() - 1)
+    overlay.moveSelection(1)
+    assert suggestionList.selectedIndex() == 0
+    assert suggestionList.firstRow() == 0
+
+
+# ******************************************************************************
+def testResizeKeepsSelectedRowVisible(app: QApplication) -> None:
+    """Resizing the list re-clamps the scroll so the selected row stays visible."""
+    overlay, _ = _makeOverlay(app, _StubEngine(12))
+    overlay.setText("x")
+    suggestionList = overlay.suggestionList()
+    suggestionList.select(suggestionList.rowCount() - 1)
+    rowHeight = QFontMetrics(overlay.font()).height() + 6
+    suggestionList.resize(suggestionList.width(), 2 * rowHeight)
+    index = suggestionList.selectedIndex()
+    first = suggestionList.firstRow()
+    assert first <= index < first + suggestionList.visibleRowCount()
+    assert suggestionList.firstRow() == suggestionList.rowCount() - 2
 
 
 # ******************************************************************************
