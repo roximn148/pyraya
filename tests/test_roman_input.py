@@ -732,6 +732,45 @@ def testGeometryBounds(app: QApplication) -> None:
 
 
 # ******************************************************************************
+def testOverlayStaysPinnedWhileEditing(app: QApplication) -> None:
+    """The overlay and its line edit keep their activation geometry while the
+    suggestion list's height changes during editing.
+
+    The overlay is sized once at activation; typing, backspacing, and emptying
+    the text change the list's row count and visibility (many rows, one row,
+    hidden). Neither the overlay nor its line edit may move: the line edit
+    stays pinned to the top of the overlay regardless of the list height.
+    """
+    widget = PyRaya()
+    widget.resize(800, 600)
+    widget.show()
+    widget.setPlainText("hello خوش ")
+    widget.setRegionType(RegionType.RomanUrdu, 0, 10)
+    _moveCursor(widget, 9)  # a bare cursor in a RomanUrdu region
+    _sendKey(widget, Qt.Key.Key_D, "d")  # seeds the overlay; several rows
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    line = overlay.lineEdit()
+    app.processEvents()
+    overlayGeom = overlay.geometry()
+    lineGeom = line.geometry()
+    steps = (
+        (Qt.Key.Key_O, "o"),
+        (Qt.Key.Key_S, "s"),
+        (Qt.Key.Key_T, "t"),
+        (Qt.Key.Key_Backspace, ""),
+        (Qt.Key.Key_Backspace, ""),
+        (Qt.Key.Key_Backspace, ""),
+        (Qt.Key.Key_Backspace, ""),  # back to the empty text
+    )
+    for key, text in steps:
+        _sendKey(line, key, text)
+        app.processEvents()
+        assert overlay.geometry() == overlayGeom
+        assert line.geometry() == lineGeom
+
+
+# ******************************************************************************
 def testDeactivatesWhenCursorLeaves(app: QApplication) -> None:
     """Leaving the word hides the overlay; the document is untouched."""
     widget = PyRaya()

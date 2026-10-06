@@ -539,6 +539,12 @@ class RomanOverlay(QWidget):
         layout.setSpacing(4)
         layout.addWidget(self._lineEdit)
         layout.addWidget(self._list)
+        # A trailing stretch absorbs any leftover vertical space when the
+        # suggestion list is shorter than the overlay (or hidden for empty
+        # text). Without it, QBoxLayout splits the leftover across the layout
+        # gaps, and the line edit drifts down away from its top anchor every
+        # time the list's height changes during editing.
+        layout.addStretch()
 
     # ==========================================================================
     def engine(self) -> RomanInputEngine:
