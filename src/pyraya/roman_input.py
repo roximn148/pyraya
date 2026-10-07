@@ -418,11 +418,14 @@ class SuggestionList(QWidget):
 class RomanLineEdit(QLineEdit):
     """The overlay's roman line edit — all key handling lives here.
 
-    Typing letters/digits edits the roman text and refreshes the suggestions
+    The roman text renders in left-to-right character order, so position 0 is
+    the visually left edge and the text end the visually right edge. Typing
+    letters/digits edits the roman text and refreshes the suggestions
     synchronously. Space, Enter, and any typed punctuation character commit
-    the selected suggestion together with the separator character. Left with
-    the text cursor at the start of the text, or Right with it at the end,
-    commits at the edge (no separator character). Up/Down move the highlighted
+    the selected suggestion together with the separator character. Left at
+    the visually left edge, or Right at the visually right edge, commits at
+    the edge (no separator character); in-text Left/Right move the cursor
+    visually left/right without committing. Up/Down move the highlighted
     suggestion with wraparound. Esc cancels. Wheel events are explicitly
     forwarded to the nearest scroll-area ancestor, because
     ``QCoreApplication.sendEvent`` does not bubble to parents.
@@ -501,10 +504,11 @@ class RomanOverlay(QWidget):
         committed: ``(typedRoman: str, selected: Suggestion | None,
             isPlaceholder: bool, separator: str)`` — emitted on a separator-key
             commit (Space, Enter, typed punctuation) or an edge commit (Left at
-            the start / Right at the end of the text); ``separator`` is the
-            character written to the document alongside the committed word —
-            the space, newline, or punctuation mark — and the empty string for
-            an edge commit.
+            the visually left edge, i.e. the start of the text, or Right at the
+            visually right edge, i.e. the end); ``separator`` is the character
+            written to the document alongside the committed word — the space,
+            newline, or punctuation mark — and the empty string for an edge
+            commit.
         canceled: emitted when Esc is pressed.
     """
 
@@ -530,10 +534,10 @@ class RomanOverlay(QWidget):
         self.setFont(font)
         self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self._lineEdit = RomanLineEdit(self)
-        self._lineEdit.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        # self._lineEdit.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self._lineEdit.setAlignment(Qt.AlignmentFlag.AlignRight)
         self._list = SuggestionList(font, self)
-        self._list.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        # self._list.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)

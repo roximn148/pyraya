@@ -233,7 +233,13 @@ def testOverlaySeparatorCommits(app: QApplication, engine: RomanInputEngine) -> 
 
 # ******************************************************************************
 def testOverlayEdgeCommits(app: QApplication, engine: RomanInputEngine) -> None:
-    """Left at the start / Right at the end commit without a separator."""
+    """Left at the start / Right at the end commit without a separator.
+
+    The roman text renders in left-to-right character order, so the text
+    start is the visually left edge and the text end the visually right
+    edge; in-text Left/Right move the cursor visually left/right and never
+    commit.
+    """
     overlay, _ = _makeOverlay(app, engine)
     overlay.setText("khosh")
     captured: list[tuple[str, Suggestion | None, bool, str]] = []
@@ -244,6 +250,14 @@ def testOverlayEdgeCommits(app: QApplication, engine: RomanInputEngine) -> None:
     )
 
     lineEdit = overlay.lineEdit()
+    # In-text movement: one position visually left, then one back right.
+    lineEdit.setCursorPosition(3)
+    _sendKey(lineEdit, Qt.Key.Key_Left)
+    assert lineEdit.cursorPosition() == 2
+    _sendKey(lineEdit, Qt.Key.Key_Right)
+    assert lineEdit.cursorPosition() == 3
+    assert captured == []
+
     lineEdit.setCursorPosition(0)
     _sendKey(lineEdit, Qt.Key.Key_Left)
     assert len(captured) == 1
@@ -936,7 +950,13 @@ def testSeparatorCommits(app: QApplication) -> None:
 
 # ******************************************************************************
 def testEdgeCommits(app: QApplication) -> None:
-    """Edge commits insert nothing and jump to the adjacent word."""
+    """Edge commits insert nothing and jump in visual (screen) order.
+
+    Right at the overlay's visually right edge (the text end) commits to the
+    previous word; Left at its visually left edge (the text start) commits to
+    the next word. With no adjacent word, the overlay hides and the cursor
+    lands at the word's visually left edge.
+    """
     widget = PyRaya()
     widget.show()
     text = "hello خوش world دوست"
@@ -946,23 +966,55 @@ def testEdgeCommits(app: QApplication) -> None:
     _moveCursor(widget, 7)
     overlay = widget._overlay
     assert overlay is not None and overlay.isVisible()
+    assert overlay.lineEdit().text() == "khosh"
+    assert overlay.lineEdit().cursorPosition() == 5  # at the word's right edge
 
-    # Right at the end of the overlay text -> the next Arabic word (دوست)
+    # Right at the visually right edge: no word before خوش -> the overlay
+    # hides and the cursor lands at the word's visually left edge (9).
     _sendKey(overlay.lineEdit(), Qt.Key.Key_Right, "")
     assert widget.toPlainText() == text  # nothing inserted
-    overlay = widget._overlay
-    assert overlay is not None and overlay.isVisible()  # reloaded on the word
-    assert overlay.lineEdit().text() == "dost"
+    assert widget.textCursor().position() == 9
+    _assertNoOverlay(widget)
 
-    # Left at the start of the overlay text -> the previous Arabic word (خوش)
-    overlay.lineEdit().setCursorPosition(0)
-    _sendKey(overlay.lineEdit(), Qt.Key.Key_Left, "")
-    assert widget.toPlainText() == text
+    # Holding Left walks visually leftward through the Latin word and the
+    # space, then into دوست, where the overlay activates.
+    for _ in range(7):
+        _sendKey(widget, Qt.Key.Key_Left, "")
     overlay = widget._overlay
     assert overlay is not None and overlay.isVisible()
-    assert overlay.lineEdit().text() == "khosh"
+    assert overlay.lineEdit().text() == "dost"
 
-    # No next word at the end of the document -> the overlay hides
+    # Continuing Left traverses the roman word and overflows at the visually
+    # left edge; no next word exists, so the overlay hides at the line's
+    # visually left edge (position 20).
+    for _ in range(5):
+        _sendKey(overlay.lineEdit(), Qt.Key.Key_Left, "")
+    assert widget.toPlainText() == text
+    assert widget.textCursor().position() == 20
+    _assertNoOverlay(widget)
+
+    # Mirror: Right from دوست reaches خوش, then Right at its visually right
+    # edge hides the overlay at position 9.
+    widget3 = PyRaya()
+    widget3.show()
+    widget3.setPlainText(text)
+    widget3.setRomanInputEnabled(True)
+    widget3.setRegionType(RegionType.RomanUrdu, 6, 20)
+    _moveCursor(widget3, 17)
+    overlay3 = widget3._overlay
+    assert overlay3 is not None and overlay3.isVisible()
+    assert overlay3.lineEdit().text() == "dost"
+    _sendKey(overlay3.lineEdit(), Qt.Key.Key_Right, "")
+    overlay3 = widget3._overlay
+    assert overlay3 is not None and overlay3.isVisible()
+    assert overlay3.lineEdit().text() == "khosh"
+    _sendKey(overlay3.lineEdit(), Qt.Key.Key_Right, "")
+    assert widget3.toPlainText() == text
+    assert widget3.textCursor().position() == 9
+    _assertNoOverlay(widget3)
+
+    # A single-word document: Left from the visually right edge overflows
+    # with no next word -> the overlay hides at the visually left edge.
     widget2 = PyRaya()
     widget2.show()
     widget2.setPlainText("world خوش")
@@ -971,9 +1023,33 @@ def testEdgeCommits(app: QApplication) -> None:
     _moveCursor(widget2, 7)
     overlay2 = widget2._overlay
     assert overlay2 is not None and overlay2.isVisible()
-    _sendKey(overlay2.lineEdit(), Qt.Key.Key_Right, "")
+    for _ in range(5):
+        _sendKey(overlay2.lineEdit(), Qt.Key.Key_Left, "")
+    assert overlay2.lineEdit().cursorPosition() == 0
+    _sendKey(overlay2.lineEdit(), Qt.Key.Key_Left, "")
     assert widget2.toPlainText() == "world خوش"
+    assert widget2.textCursor().position() == 9
     _assertNoOverlay(widget2)
+
+
+# ******************************************************************************
+def testDocumentVisualArrowKeys(app: QApplication) -> None:
+    """Plain Left/Right move the document cursor in visual (screen) order."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello خوش world دوست")
+    widget.setRomanInputEnabled(False)
+    _moveCursor(widget, 7)
+    _sendKey(widget, Qt.Key.Key_Left, "")
+    assert widget.textCursor().position() == 8  # visually left
+    _sendKey(widget, Qt.Key.Key_Right, "")
+    assert widget.textCursor().position() == 7  # visually right
+    _moveCursor(widget, 0)
+    _sendKey(widget, Qt.Key.Key_Right, "")
+    assert widget.textCursor().position() == 0  # clamped at the start
+    _moveCursor(widget, 20)
+    _sendKey(widget, Qt.Key.Key_Left, "")
+    assert widget.textCursor().position() == 20  # clamped at the end
 
 
 # ******************************************************************************
