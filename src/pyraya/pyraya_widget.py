@@ -29,6 +29,7 @@ from PySide6.QtGui import (
     QFontDatabase,
     QFontMetrics,
     QKeyEvent,
+    QMouseEvent,
     QSyntaxHighlighter,
     QTextBlockFormat,
     QTextCharFormat,
@@ -284,7 +285,9 @@ class PyRaya(QPlainTextEdit):
         self._romanEngine: RomanInputEngine | None = None
         self._activeWord: tuple[int, int] | None = None
         self._anchorPosition: int | None = None
+        self._selectionRange: tuple[int, int] | None = None
         self._committing = False
+        self._mouseActive = False
         self._overlay: RomanOverlay | None = None
         # PySide6 emits the widget's cursorPositionChanged without its
         # position argument to Python slots, so the sync handler must be
@@ -581,16 +584,24 @@ class PyRaya(QPlainTextEdit):
         return self._romanEngine
 
     # ==========================================================================
-    def _syncOverlay(self) -> None:
+    def _syncOverlay(self, *, bypassMouse: bool = False) -> None:
         """Activate, reposition, or deactivate the overlay for the cursor.
 
-        Returns early while the feature is disabled or a commit is in
-        progress; otherwise the overlay state is reconciled with the maximal
-        Arabic word containing the document cursor — a new word activates the
-        overlay with that word's romanization, the same word merely
-        repositions it, and no word hides it.
+        Returns early while the feature is disabled, a commit is in
+        progress, or — unless ``bypassMouse`` — a mouse button is held down:
+        a drag is moving the document cursor, and the overlay would
+        reposition mid-drag, and, when it crosses the word boundary,
+        deactivate and refocus the document. The explicit resync after a
+        commit (:meth:`_onOverlayCommitted`) passes ``bypassMouse``: the
+        commit has already reconciled the overlay state, and the button
+        being held down is unrelated, so suppressing there would delay the
+        reconciliation until the release.
         """
-        if not self._romanInputEnabled or self._committing:
+        if (
+            not self._romanInputEnabled
+            or self._committing
+            or (self._mouseActive and not bypassMouse)
+        ):
             return
         word = self._wordUnderCursor()
         if word is None:
@@ -766,12 +777,18 @@ class PyRaya(QPlainTextEdit):
 
         Scenario 1 (a new word): the typed character seeds the overlay and
         ``position`` is stored as the commit anchor; the character is never
-        written to the document.
+        written to the document. If the cursor has a selection, the
+        selection range is recorded so a commit replaces it; the selection
+        is left visible while the user edits in the overlay.
         """
         engine = self.romanEngine()
         if engine is None:
             return
         overlay = self._ensureOverlay(engine)
+        cursor = self.textCursor()
+        self._selectionRange = (
+            (cursor.selectionStart(), cursor.selectionEnd()) if cursor.hasSelection() else None
+        )
         overlay.setText(text)
         self._activeWord = None
         self._anchorPosition = position
@@ -787,6 +804,7 @@ class PyRaya(QPlainTextEdit):
             self._overlay.hide()
         self._activeWord = None
         self._anchorPosition = None
+        self._selectionRange = None
         self.setFocus()
 
     # ==========================================================================
@@ -803,7 +821,8 @@ class PyRaya(QPlainTextEdit):
         A separator-key commit (Space, Enter, typed punctuation) inserts the
         committed word plus the separator character as a single undoable edit:
         over an existing word (scenario 2) the word's span is replaced, at a
-        bare cursor (scenario 1) the text is inserted at the anchor position.
+        bare cursor (scenario 1) the text is inserted at the anchor position —
+        or, if the cursor had a selection, that selection is replaced.
         The word and the separator both carry the :class:`RomanUrdu` region
         background. An edge commit writes nothing and moves the cursor to the
         adjacent Arabic word in visual order — Left at the visually left edge
@@ -864,6 +883,12 @@ class PyRaya(QPlainTextEdit):
                     if word == "":
                         # The span is deleted; the region changed.
                         self.regionsChanged.emit()
+                elif self._selectionRange is not None:
+                    # Scenario 1 over a selection: replace the selection,
+                    # plain QPlainTextEdit typing semantics.
+                    start, end = self._selectionRange
+                    cursor.setPosition(start)
+                    cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
                 else:
                     cursor.setPosition(self._anchorPosition or 0)
                 cursor.insertText(word + separator, fmt)
@@ -874,7 +899,10 @@ class PyRaya(QPlainTextEdit):
         finally:
             self._committing = False
             if resync:
-                self._syncOverlay()
+                # Explicit resync: bypasses the mouse flag, so the
+                # reconciliation still runs even if a button happens to be
+                # held down (see ``_syncOverlay``).
+                self._syncOverlay(bypassMouse=True)
 
     # ==========================================================================
     def _adjacentWord(self, reference: int, atStart: bool) -> tuple[int, int] | None:
@@ -1014,6 +1042,42 @@ class PyRaya(QPlainTextEdit):
             event.accept()
             return
         super().keyPressEvent(event)
+
+    # ==========================================================================
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        """Take ownership of a mouse press: deactivate a shown overlay.
+
+        The overlay is mouse-transparent, so a press in the document area
+        reaches the document even while the overlay is shown; this handler
+        makes the press deactivate the overlay before the default handling
+        (which places the cursor and starts any selection), and marks the
+        mouse as active so ``_syncOverlay`` is suppressed until the button
+        is released (:meth:`mouseReleaseEvent`).
+
+        Args:
+            event: The mouse press event.
+        """
+        if self._overlayActive():
+            self._deactivateOverlay()
+        self._mouseActive = True
+        super().mousePressEvent(event)
+
+    # ==========================================================================
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        """Clear the mouse-active flag and resync the overlay.
+
+        The press that set ``_mouseActive`` is complete: the document
+        cursor has settled, so the overlay state is reconciled — a release
+        on a RomanUrdu word re-activates the overlay over it (scenario 2),
+        with focus in the line edit.
+
+        Args:
+            event: The mouse release event.
+        """
+        super().mouseReleaseEvent(event)
+        if self._mouseActive:
+            self._mouseActive = False
+            self._syncOverlay()
 
     # ==========================================================================
     def _applyRegionFormat(self, start: int, end: int, kind: RegionType) -> None:

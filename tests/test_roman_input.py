@@ -11,13 +11,14 @@ from collections.abc import Generator
 from typing import cast
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QEvent, QPoint, Qt
+from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import (
     QColor,
     QFont,
     QFontMetrics,
     QImage,
     QKeyEvent,
+    QMouseEvent,
     QPixmap,
     QTextCursor,
     QWheelEvent,
@@ -698,6 +699,54 @@ def _assertNoOverlay(widget: PyRaya) -> None:
 
 
 # ******************************************************************************
+def _sendMouse(
+    widget: PyRaya,
+    kind: str,
+    x: int,
+    y: int,
+    modifiers: Qt.KeyboardModifier = Qt.KeyboardModifier.NoModifier,
+) -> None:
+    """Send a synthesized mouse event at viewport coordinates (x, y).
+
+    The event is hit-tested to the topmost widget at the global point —
+    the document viewport, since the overlay is mouse-transparent — so the
+    widget's own mouse handlers (press ownership, release resync) run
+    exactly as for a real mouse.
+
+    Args:
+        widget: The host widget the coordinates refer to.
+        kind: One of "press", "move", "release", or "dbclick".
+        x: The x coordinate in viewport coordinates.
+        y: The y coordinate in viewport coordinates.
+        modifiers: The keyboard modifiers carried by the event.
+    """
+    globalPos = widget.viewport().mapToGlobal(QPoint(x, y))
+    top = QApplication.widgetAt(globalPos.x(), globalPos.y())
+    assert top is not None
+    local = top.mapFromGlobal(globalPos)
+    if kind == "move":
+        etype = QEvent.Type.MouseMove
+        button = Qt.MouseButton.NoButton
+    else:
+        etype = {
+            "press": QEvent.Type.MouseButtonPress,
+            "release": QEvent.Type.MouseButtonRelease,
+            "dbclick": QEvent.Type.MouseButtonDblClick,
+        }[kind]
+        button = Qt.MouseButton.LeftButton
+    QCoreApplication.sendEvent(
+        top,
+        QMouseEvent(
+            etype,
+            QPointF(local.x(), local.y()),
+            button,
+            Qt.MouseButton.LeftButton,
+            modifiers,
+        ),
+    )
+
+
+# ******************************************************************************
 def testActivatesOnArabicWordInRomanUrduSpan(app: QApplication) -> None:
     """The cursor inside a RomanUrdu-tagged Arabic word activates the overlay."""
     widget = PyRaya()
@@ -952,6 +1001,264 @@ def testScenario2ReplacementCommit(app: QApplication) -> None:
     widget.redo()
     assert widget.toPlainText() == "hello خوش  world"
     assert widget.document().isUndoAvailable()
+
+
+# ******************************************************************************
+def testScenario1CommitReplacesSelection(app: QApplication) -> None:
+    """A scenario-1 commit over a selection replaces it, plain typing
+    semantics: the committed word plus the separator take its place."""
+    widget = PyRaya()
+    widget.show()
+    original = "hello world"
+    widget.setPlainText(original)
+    widget.setRomanInputEnabled(True)
+    cursor = widget.textCursor()
+    cursor.setPosition(6)
+    cursor.setPosition(11, QTextCursor.MoveMode.KeepAnchor)  # select "world"
+    widget.setTextCursor(cursor)
+    committed: list[tuple[str, str]] = []
+    changed: list[int] = []
+    widget.romanWordCommitted.connect(lambda w, r: committed.append((w, r)))
+    widget.regionsChanged.connect(lambda: changed.append(1))
+    baseline = widget.document().availableUndoSteps()
+    _sendKey(widget, Qt.Key.Key_K, "k")
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    assert overlay.lineEdit().text() == "k"
+    assert widget.textCursor().hasSelection()  # the selection stays visible
+    row = overlay.suggestionList().selectedRow()
+    assert row is not None
+    suggestion = row.suggestion
+    assert suggestion is not None
+    word = suggestion.arabic
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Space, " ")
+    assert widget.toPlainText() == "hello " + word + " "
+    assert committed == [(word, "k")]
+    assert changed == []
+    assert not widget.textCursor().hasSelection()
+    assert widget.textCursor().position() == 6 + len(word) + 1
+    assert widget._regionKindAt(6) == RegionType.RomanUrdu
+    assert widget._regionKindAt(6 + len(word) - 1) == RegionType.RomanUrdu
+    assert widget._regionKindAt(6 + len(word)) == RegionType.RomanUrdu  # separator
+    _assertNoOverlay(widget)
+    # the selection replacement is counted as two undo steps (delete +
+    # insert), but a single undo reverts the whole commit
+    assert widget.document().availableUndoSteps() == baseline + 2
+    widget.undo()
+    assert widget.toPlainText() == original
+    assert widget.document().availableUndoSteps() == baseline
+    widget.redo()
+    widget.redo()
+    assert widget.toPlainText() == "hello " + word + " "
+    assert widget.document().isUndoAvailable()
+
+    # Enter commits the word plus the newline over the same selection
+    widget2 = PyRaya()
+    widget2.show()
+    widget2.setPlainText(original)
+    widget2.setRomanInputEnabled(True)
+    cursor2 = widget2.textCursor()
+    cursor2.setPosition(6)
+    cursor2.setPosition(11, QTextCursor.MoveMode.KeepAnchor)
+    widget2.setTextCursor(cursor2)
+    _sendKey(widget2, Qt.Key.Key_K, "k")
+    overlay2 = widget2._overlay
+    assert overlay2 is not None and overlay2.isVisible()
+    row2 = overlay2.suggestionList().selectedRow()
+    assert row2 is not None
+    suggestion2 = row2.suggestion
+    assert suggestion2 is not None
+    word2 = suggestion2.arabic
+    _sendKey(overlay2.lineEdit(), Qt.Key.Key_Return, "\n")
+    # a block-terminator character cannot carry a character format, so the
+    # newline stays untagged; the committed word characters are RomanUrdu
+    assert widget2.toPlainText() == "hello " + word2 + "\n"
+    assert not widget2.textCursor().hasSelection()
+    assert widget2.textCursor().position() == 6 + len(word2) + 1
+    assert widget2._regionKindAt(6) == RegionType.RomanUrdu
+    assert widget2._regionKindAt(6 + len(word2) - 1) == RegionType.RomanUrdu
+    _assertNoOverlay(widget2)
+
+
+# ******************************************************************************
+def testOverlayIsMouseTransparent(app: QApplication, engine: RomanInputEngine) -> None:
+    """Both the overlay container and its line edit are mouse-transparent."""
+    overlay, _ = _makeOverlay(app, engine)
+    assert overlay.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+    assert overlay.lineEdit().testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+
+# ******************************************************************************
+def testPressDeactivatesAndReleaseReactivatesOverlay(app: QApplication) -> None:
+    """A press in the document takes ownership and hides the overlay; the
+    release resyncs, re-activating it on the word with focus in the line edit.
+
+    The press point is one pixel inside the word's exclusive right edge
+    (``_wordRect``'s ``right()``), which lands the cursor inside the word.
+    """
+    widget = PyRaya()
+    widget.show()
+    widget.resize(600, 200)
+    widget.setPlainText("hello خوش world دوست")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+
+    rect = widget._wordRect(6, 9)
+    _sendMouse(widget, "press", rect.right(), rect.center().y())
+    assert not widget._overlayActive()  # the press took ownership
+    assert widget._mouseActive
+    assert 6 <= widget.textCursor().position() < 9
+    assert not widget.textCursor().hasSelection()
+
+    _sendMouse(widget, "release", rect.right(), rect.center().y())
+    app.processEvents()
+    assert not widget._mouseActive
+    assert widget._overlayActive()  # the release resync re-activated it
+    assert widget._activeWord == (6, 9)
+    assert overlay.lineEdit().hasFocus()
+    assert not widget.hasFocus()
+    assert overlay.lineEdit().text() == "khosh"
+
+
+# ******************************************************************************
+def testDragAcrossWordCreatesSelection(app: QApplication) -> None:
+    """A press-drag-release across the word selects exactly the word."""
+    widget = PyRaya()
+    widget.show()
+    widget.resize(600, 200)
+    widget.setPlainText("hello خوش world دوست")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+
+    rect = widget._wordRect(6, 9)
+    _sendMouse(widget, "press", rect.right(), rect.center().y())
+    for x in (rect.right() - 3, rect.center().x()):
+        _sendMouse(widget, "move", x, rect.center().y())
+    _sendMouse(widget, "release", rect.left() + 1, rect.center().y())
+    cursor = widget.textCursor()
+    assert cursor.hasSelection()
+    assert (cursor.selectionStart(), cursor.selectionEnd()) == (6, 9)
+    # The cursor settled on the word's trailing space, so no overlay.
+    assert not widget._overlayActive()
+    assert not widget._mouseActive
+
+
+# ******************************************************************************
+def testShiftDragExtendsSelection(app: QApplication) -> None:
+    """A shift+drag from the cursor extends the selection to the release point."""
+    widget = PyRaya()
+    widget.show()
+    widget.resize(600, 200)
+    widget.setPlainText("hello خوش world دوست")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+
+    rect = widget._wordRect(6, 9)
+    shift = Qt.KeyboardModifier.ShiftModifier
+    _sendMouse(widget, "press", rect.right() - 1, rect.center().y(), shift)
+    for x in (rect.right() - 3, rect.center().x()):
+        _sendMouse(widget, "move", x, rect.center().y(), shift)
+    _sendMouse(widget, "release", rect.left() + 1, rect.center().y(), shift)
+    cursor = widget.textCursor()
+    assert cursor.hasSelection()
+    # The shift press anchored the original cursor position (7); the drag
+    # extended the selection to the release point (the word's end).
+    assert (cursor.selectionStart(), cursor.selectionEnd()) == (7, 9)
+    assert not widget._overlayActive()
+    assert not widget._mouseActive
+
+
+# ******************************************************************************
+def testDoubleClickSelectsWord(app: QApplication) -> None:
+    """A double click on the word selects the whole word."""
+    widget = PyRaya()
+    widget.show()
+    widget.resize(600, 200)
+    widget.setPlainText("hello خوش world دوست")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+
+    rect = widget._wordRect(6, 9)
+    _sendMouse(widget, "press", rect.right(), rect.center().y())
+    _sendMouse(widget, "release", rect.right(), rect.center().y())
+    _sendMouse(widget, "dbclick", rect.right(), rect.center().y())
+    _sendMouse(widget, "release", rect.right(), rect.center().y())
+    cursor = widget.textCursor()
+    assert cursor.hasSelection()
+    assert cursor.selectionStart() == 6
+    assert cursor.selectionEnd() >= 9
+
+
+# ******************************************************************************
+def testSyncOverlaySuppressedWhileMouseActive(app: QApplication) -> None:
+    """A cursor move while the mouse flag is set leaves the overlay untouched;
+    clearing the flag and moving again lets the resync hide it.
+    """
+    widget = PyRaya()
+    widget.show()
+    widget.resize(600, 200)
+    widget.setPlainText("hello خوش world دوست")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    assert widget._activeWord == (6, 9)
+    app.processEvents()
+
+    widget._mouseActive = True
+    _moveCursor(widget, 1)
+    assert widget._activeWord == (6, 9)
+    assert overlay.isVisible()
+    assert overlay.lineEdit().hasFocus()
+
+    widget._mouseActive = False
+    _moveCursor(widget, 3)
+    assert not widget._overlayActive()
+    assert widget._activeWord is None
+
+
+# ******************************************************************************
+def testPostCommitResyncBypassesMouseFlag(app: QApplication) -> None:
+    """The post-commit resync runs even while the mouse flag is set.
+
+    A press at the word's edge would leave ``_mouseActive`` set until the
+    release; the commit's resync must still reconcile the overlay, so it
+    bypasses the flag.
+    """
+    widget = PyRaya()
+    widget.show()
+    widget.resize(600, 200)
+    widget.setPlainText("hello خوش world دوست")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    assert overlay.lineEdit().text() == "khosh"
+
+    widget._mouseActive = True
+    overlay.lineEdit().setCursorPosition(0)
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Left, "Left")
+    # the edge commit moved the cursor to the next word; the resync ran
+    # despite the mouse flag and re-activated the overlay on that word
+    assert widget._activeWord == (16, 20)
+    assert overlay.lineEdit().text() == "dost"
+    assert widget.textCursor().position() == 16
+    assert widget._mouseActive
+    assert widget.toPlainText() == "hello خوش world دوست"
 
 
 # ******************************************************************************

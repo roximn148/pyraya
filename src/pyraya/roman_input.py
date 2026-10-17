@@ -429,6 +429,12 @@ class RomanLineEdit(QLineEdit):
     suggestion with wraparound. Esc cancels. Wheel events are explicitly
     forwarded to the nearest scroll-area ancestor, because
     ``QCoreApplication.sendEvent`` does not bubble to parents.
+
+    The line edit is mouse-transparent (``WA_TransparentForMouseEvents``):
+    mouse presses in the document area reach the document even while the
+    overlay is shown, so a click or drag over the word never lands in the
+    line edit. Keyboard focus is independent of mouse hit-testing — the host
+    still calls ``setFocus`` to put the keys there.
     """
 
     def __init__(self, overlay: RomanOverlay, parent: QWidget | None = None) -> None:
@@ -439,6 +445,9 @@ class RomanLineEdit(QLineEdit):
             parent: The parent widget (the overlay).
         """
         super().__init__(parent)
+        # Mouse-transparent: presses over the word reach the document (see
+        # the class docstring); keyboard focus is unaffected.
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self._overlay = overlay
 
     # ==========================================================================
@@ -497,6 +506,14 @@ class RomanOverlay(QWidget):
     direction with right-aligned text, so typed text grows leftward from the
     word's right edge, matching the document flow.
 
+    The overlay is mouse-transparent (``WA_TransparentForMouseEvents``): no
+    part of it intercepts mouse presses, so clicks, drags, shift-drags, and
+    double-clicks in the document area reach the document even while the
+    overlay is shown. Nothing in the overlay relies on mouse events — the
+    suggestion list is a passive NoFocus display and the line edit handles
+    only keys — so transparency is safe on both the container and the line
+    edit.
+
     The host widget positions and sizes the overlay over the word's rectangle
     and consumes the signals below.
 
@@ -530,6 +547,11 @@ class RomanOverlay(QWidget):
             parent: The parent widget (typically the host's viewport).
         """
         super().__init__(parent)
+        # Mouse-transparent on both this container and the line edit: the
+        # container is a plain QWidget that ignores mouse events, and the
+        # line edit must not intercept presses meant for the document (see
+        # the class docstring).
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self._engine = engine
         self.setFont(font)
         self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
