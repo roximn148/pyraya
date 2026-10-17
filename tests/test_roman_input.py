@@ -847,6 +847,86 @@ def testGeometryBounds(app: QApplication) -> None:
     assert geom.bottom() <= widget.viewport().height()
 
 
+# ******************************************************************************
+def testTypingInSecondParagraphAfterEnterCommit(app: QApplication) -> None:
+    """Typing in the second paragraph after an Enter commit does not crash.
+
+    The Enter commit moves the cursor into the second block, so the seeded
+    overlay's anchor — and every subsequent keystroke — resolves line
+    geometry in that block's own layout. ``lineForTextPosition`` and
+    ``cursorToX`` take block-local positions; the absolute position overflowed
+    the block's layout (a non-None invalid line whose calls segfaulted), and
+    the anchor's top must include the block's content-coordinates origin.
+    """
+    widget = PyRaya()
+    widget.resize(640, 480)
+    widget.show()
+    _sendKey(widget, Qt.Key.Key_K, "k")
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    for key, letter in ((Qt.Key.Key_O, "o"), (Qt.Key.Key_S, "s"), (Qt.Key.Key_T, "t")):
+        _sendKey(overlay.lineEdit(), key, letter)
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Return, "\n")
+    assert widget.toPlainText() == "دوست\n"
+    # paragraph 2: typing seeds the overlay in the second block
+    _sendKey(widget, Qt.Key.Key_H, "h")
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    assert overlay.lineEdit().text() == "h"
+    assert widget.toPlainText() == "دوست\n"  # the character never written
+    # the seeded anchor sits on the second block's line, at Qt's own top
+    cursor = QTextCursor(widget.document())
+    cursor.setPosition(5)
+    assert overlay.geometry().top() == widget._cursorAnchor(5)[1]
+    assert widget._cursorAnchor(5)[1] == widget.cursorRect(cursor).top()
+    for key, letter in ((Qt.Key.Key_O, "o"), (Qt.Key.Key_S, "s")):
+        _sendKey(overlay.lineEdit(), key, letter)
+    assert overlay.lineEdit().text() == "hos"
+    assert widget.toPlainText() == "دوست\n"
+
+
+# ******************************************************************************
+def testWordRectInSecondBlock(app: QApplication) -> None:
+    """The word rect and the overlay anchor resolve in the second block.
+
+    The word rect is computed from block-local positions translated by the
+    block's content-coordinates origin; both it and the cursor anchor must
+    agree with Qt's own cursor-rectangle mapping (viewport coordinates) for
+    words past block 0, and a mouse release over the word re-activates the
+    overlay over it (scenario 2) with the line edit's text romanized.
+    """
+    widget = PyRaya()
+    widget.resize(640, 480)
+    widget.show()
+    widget.setPlainText("دوست\nمنتظم")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 5, 10)
+    _moveCursor(widget, 6)  # inside the block-1 word: activates the overlay
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    wordRect = widget._wordRect(5, 10)
+    assert overlay.geometry().top() == wordRect.top()
+    # cross-check against Qt's own cursor geometry (viewport coordinates)
+    cursorStart = QTextCursor(widget.document())
+    cursorStart.setPosition(5)
+    cursorEnd = QTextCursor(widget.document())
+    cursorEnd.setPosition(10)
+    assert wordRect.top() == widget.cursorRect(cursorStart).top()
+    assert wordRect.left() == widget.cursorRect(cursorEnd).left()
+    # QRect.right() is inclusive; the exclusive right edge is +1.
+    assert wordRect.right() + 1 == widget.cursorRect(cursorStart).left()
+    # mouse release over the block-1 word re-activates (scenario 2)
+    point = (wordRect.right(), wordRect.top() + 5)
+    _sendMouse(widget, "press", point[0], point[1])
+    _sendMouse(widget, "release", point[0], point[1])
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    engine = widget.romanEngine()
+    assert engine is not None
+    assert overlay.lineEdit().text() == engine.romanizeArabic("منتظم")
+
+
+# ******************************************************************************
 def testOverlayWidthFitsContentAtActivation(app: QApplication) -> None:
     """At activation the overlay covers the word and the typed text only.
 

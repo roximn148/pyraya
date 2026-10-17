@@ -687,27 +687,35 @@ class PyRaya(QPlainTextEdit):
         cursor = QTextCursor(document)
         cursor.setPosition(start)
         block = cursor.block()
+        # ``lineForTextPosition`` and ``cursorToX`` take block-local
+        # positions: an absolute position overflows the block's own layout
+        # past block 0 (yielding a non-None invalid line whose calls
+        # segfault), so the block's document offset is subtracted, and the
+        # block's content-coordinates origin is added so the line geometry
+        # maps to the viewport.
+        geometry = self.blockBoundingGeometry(block)
         layout = block.layout()
-        line = layout.lineForTextPosition(start)
-        if line is None:
+        local = start - block.position()
+        line = layout.lineForTextPosition(local)
+        if line is None or not line.isValid():
             rect = layout.boundingRect()
             metrics = QFontMetrics(self.font())
             width = metrics.horizontalAdvance(document.toPlainText()[start:end])
             return QRect(
-                round(rect.left() + offset.x()),
-                round(rect.top() + offset.y()),
+                round(rect.left() + geometry.x() + offset.x()),
+                round(rect.top() + geometry.y() + offset.y()),
                 max(1, width),
                 int(rect.height()),
             )
         # PySide6 types cursorToX as returning an untyped point, which is a
         # plain (x, y) tuple at runtime; cast to the actual shape.
-        pointStart = cast("tuple[float, float]", line.cursorToX(start))
-        pointEnd = cast("tuple[float, float]", line.cursorToX(end))
+        pointStart = cast("tuple[float, float]", line.cursorToX(local))
+        pointEnd = cast("tuple[float, float]", line.cursorToX(end - block.position()))
         left = min(pointStart[0], pointEnd[0])
         right = max(pointStart[0], pointEnd[0])
         return QRect(
-            round(left + offset.x()),
-            round(line.rect().top() + offset.y()),
+            round(left + geometry.x() + offset.x()),
+            round(line.rect().top() + geometry.y() + offset.y()),
             max(1, round(right - left)),
             int(line.rect().height()),
         )
@@ -766,15 +774,29 @@ class PyRaya(QPlainTextEdit):
         cursor = QTextCursor(document)
         cursor.setPosition(position)
         block = cursor.block()
+        # ``lineForTextPosition`` and ``cursorToX`` take block-local
+        # positions: an absolute position overflows the block's own layout
+        # past block 0 (yielding a non-None invalid line whose calls
+        # segfault), so the block's document offset is subtracted, and the
+        # block's content-coordinates origin is added so the line geometry
+        # maps to the viewport.
+        geometry = self.blockBoundingGeometry(block)
         layout = block.layout()
-        line = layout.lineForTextPosition(position)
-        if line is None:
+        local = position - block.position()
+        line = layout.lineForTextPosition(local)
+        if line is None or not line.isValid():
             rect = layout.boundingRect()
-            return (round(rect.right() + offset.x()), round(rect.top() + offset.y()))
+            return (
+                round(rect.right() + geometry.x() + offset.x()),
+                round(rect.top() + geometry.y() + offset.y()),
+            )
         # PySide6 types cursorToX as returning an untyped point, which is a
         # plain (x, y) tuple at runtime; cast to the actual shape.
-        point = cast("tuple[float, float]", line.cursorToX(position))
-        return (round(point[0] + offset.x()), round(line.rect().top() + offset.y()))
+        point = cast("tuple[float, float]", line.cursorToX(local))
+        return (
+            round(point[0] + geometry.x() + offset.x()),
+            round(line.rect().top() + geometry.y() + offset.y()),
+        )
 
     # ==========================================================================
     def _ensureOverlay(self, engine: RomanInputEngine) -> RomanOverlay:
