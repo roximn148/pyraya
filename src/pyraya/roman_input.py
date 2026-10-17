@@ -466,6 +466,19 @@ class RomanLineEdit(QLineEdit):
         event.accept()
 
     # ==========================================================================
+    def sizeHint(self) -> QSize:
+        """The preferred size: the typed text's advance plus margin per side.
+
+        The width is the content width of the typed roman text plus the
+        suggestion list's margin (6 pixels) on both sides, not the generic
+        ``QLineEdit`` default, so the overlay covers only the word and the
+        typed text.
+        """
+        base = super().sizeHint()
+        width = self.fontMetrics().horizontalAdvance(self.text()) + 2 * 6
+        return QSize(width, base.height())
+
+    # ==========================================================================
     def keyPressEvent(self, event: QKeyEvent) -> None:
         """Handle the overlay key table (see the spec key-handling table)."""
         overlay = self._overlay

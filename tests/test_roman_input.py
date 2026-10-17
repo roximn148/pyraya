@@ -842,15 +842,104 @@ def testGeometryBounds(app: QApplication) -> None:
     assert geom.bottom() <= widget.viewport().height()
 
 
+def testOverlayWidthFitsContentAtActivation(app: QApplication) -> None:
+    """At activation the overlay covers the word and the typed text only.
+
+    The line edit's size hint is the typed text's advance plus margin per
+    side, not the generic ``QLineEdit`` default width, and the overlay's
+    width is the wider of that content size and the word's rect width, so a
+    short word does not stretch the overlay across the document.
+    """
+    widget = PyRaya()
+    widget.resize(640, 480)
+    widget.show()
+    widget.setPlainText("hello خوش world دوست")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None
+    metrics = overlay.lineEdit().fontMetrics()
+    lineHint = metrics.horizontalAdvance(overlay.lineEdit().text()) + 2 * 6
+    assert overlay.lineEdit().sizeHint().width() == lineHint
+    expected = max(overlay.sizeHint().width(), widget._wordRect(6, 9).width())
+    assert overlay.geometry().width() == expected
+
+
+# ******************************************************************************
+def testOverlayGrowsLeftwardWhileTyping(app: QApplication) -> None:
+    """Typing grows the overlay leftward; the right edge and top stay pinned.
+
+    Each typed character widens the overlay to the new content size — the
+    wider of the line edit's text advance plus margin, the suggestion
+    list's hint, and the word's width — so the left edge walks leftward with
+    the text while the right edge stays on the word's right edge.
+    """
+    widget = PyRaya()
+    widget.resize(800, 600)
+    widget.show()
+    widget.setPlainText("hello خوش world دوست")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    floor = widget._wordRect(6, 9).width()
+    right = overlay.geometry().right()
+    top = overlay.geometry().top()
+    for key, char in ((Qt.Key.Key_H, "h"), (Qt.Key.Key_T, "t")):
+        _sendKey(overlay.lineEdit(), key, char)
+        app.processEvents()
+        metrics = overlay.lineEdit().fontMetrics()
+        lineHint = metrics.horizontalAdvance(overlay.lineEdit().text()) + 2 * 6
+        listHint = overlay.suggestionList().sizeHint().width()
+        expected = max(lineHint, listHint, floor)
+        geom = overlay.geometry()
+        assert geom.right() == right
+        assert geom.top() == top
+        assert geom.width() == expected
+
+
+# ******************************************************************************
+def testSeededOverlayBaselinesAtFourRomanChars(app: QApplication) -> None:
+    """A seeded overlay (no pre-existing word) baselines at four roman chars.
+
+    With no word to cover, the width floor is the advance of four roman
+    characters, so backspacing the seeded text to empty leaves the overlay
+    at the baseline width rather than collapsing to the line edit's margin.
+    """
+    widget = PyRaya()
+    widget.resize(800, 600)
+    widget.show()
+    widget.setPlainText("hello world ")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 12)
+    _moveCursor(widget, 11)
+    _sendKey(widget, Qt.Key.Key_D, "d")
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    line = overlay.lineEdit()
+    app.processEvents()
+    baseline = 4 * line.fontMetrics().averageCharWidth()
+    right = overlay.geometry().right()
+    top = overlay.geometry().top()
+    _sendKey(line, Qt.Key.Key_Backspace, "")
+    app.processEvents()
+    geom = overlay.geometry()
+    assert geom.width() == baseline
+    assert geom.right() == right
+    assert geom.top() == top
+
+
 # ******************************************************************************
 def testOverlayStaysPinnedWhileEditing(app: QApplication) -> None:
-    """The overlay and its line edit keep their activation geometry while the
-    suggestion list's height changes during editing.
+    """The overlay's right edge and top stay pinned while its text changes.
 
-    The overlay is sized once at activation; typing, backspacing, and emptying
-    the text change the list's row count and visibility (many rows, one row,
-    hidden). Neither the overlay nor its line edit may move: the line edit
-    stays pinned to the top of the overlay regardless of the list height.
+    Typing, backspacing, and emptying the text change the line edit's content
+    width, so the overlay's width tracks the text at each keystroke: the left
+    edge walks leftward as the text grows and back as it shrinks, never below
+    the activation floor, while the right edge stays on the anchor and the top
+    stays put.
     """
     widget = PyRaya()
     widget.resize(800, 600)
@@ -863,8 +952,9 @@ def testOverlayStaysPinnedWhileEditing(app: QApplication) -> None:
     assert overlay is not None and overlay.isVisible()
     line = overlay.lineEdit()
     app.processEvents()
-    overlayGeom = overlay.geometry()
-    lineGeom = line.geometry()
+    baseline = 4 * line.fontMetrics().averageCharWidth()
+    right = overlay.geometry().right()
+    top = overlay.geometry().top()
     steps = (
         (Qt.Key.Key_O, "o"),
         (Qt.Key.Key_S, "s"),
@@ -877,8 +967,10 @@ def testOverlayStaysPinnedWhileEditing(app: QApplication) -> None:
     for key, text in steps:
         _sendKey(line, key, text)
         app.processEvents()
-        assert overlay.geometry() == overlayGeom
-        assert line.geometry() == lineGeom
+        geom = overlay.geometry()
+        assert geom.right() == right
+        assert geom.top() == top
+        assert geom.width() == max(overlay.sizeHint().width(), baseline)
 
 
 # ******************************************************************************

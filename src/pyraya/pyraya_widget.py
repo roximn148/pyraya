@@ -288,6 +288,7 @@ class PyRaya(QPlainTextEdit):
         self._selectionRange: tuple[int, int] | None = None
         self._committing = False
         self._mouseActive = False
+        self._minOverlayWidth: int = 0
         self._overlay: RomanOverlay | None = None
         # PySide6 emits the widget's cursorPositionChanged without its
         # position argument to Python slots, so the sync handler must be
@@ -683,9 +684,12 @@ class PyRaya(QPlainTextEdit):
         """Place and size the overlay over the word's rectangle.
 
         The overlay's right edge is anchored to the word's right edge (so the
-        right-aligned line edit grows leftward, matching the document flow).
+        right-aligned line edit grows leftward, matching the document flow);
+        the width floor is the word's rect width, so the overlay never
+        narrows below the word it covers.
         """
         wordRect = self._wordRect(word[0], word[1])
+        self._minOverlayWidth = wordRect.width()
         # QRect.right() is inclusive; the exclusive right edge is +1, so the
         # overlay's right border sits exactly on the word's right edge.
         self._placeOverlay(wordRect.right() + 1, wordRect.top())
@@ -695,23 +699,26 @@ class PyRaya(QPlainTextEdit):
         """Place and size the overlay with its right edge at ``rightX``.
 
         The right-aligned line edit grows leftward from ``rightX``, matching
-        the document flow; the overlay is clamped to stay inside the
-        viewport, flipping above the anchor when the suggestion list would
-        overflow the bottom.
+        the document flow; the width is the wider of the size hint and the
+        activation width floor (``_minOverlayWidth``), so typed text that
+        outgrows the anchor width still fits. The overlay is clamped to stay
+        inside the viewport, flipping above the anchor when the suggestion
+        list would overflow the bottom.
         """
         overlay = self._overlay
         if overlay is None:
             return
         hint = overlay.sizeHint()
+        width = max(hint.width(), self._minOverlayWidth)
         viewport = self.viewport()
-        x = rightX - hint.width()
+        x = rightX - width
         y = top
         if y + hint.height() > viewport.height():
             y = top - hint.height()
-        x = max(0, min(x, viewport.width() - hint.width()))
+        x = max(0, min(x, viewport.width() - width))
         y = max(0, y)
         overlay.move(x, y)
-        overlay.resize(hint.width(), hint.height())
+        overlay.resize(width, hint.height())
 
     # ==========================================================================
     def _cursorAnchor(self, position: int) -> tuple[int, int]:
@@ -742,13 +749,15 @@ class PyRaya(QPlainTextEdit):
 
         The overlay is created at most once, as a child of the viewport so it
         scrolls with the text automatically; its ``canceled`` and ``committed``
-        signals are wired at creation.
+        signals, and the line edit's ``textChanged`` signal (the width
+        re-placement hook), are wired at creation.
         """
         overlay = self._overlay
         if overlay is None:
             overlay = RomanOverlay(engine, self.font(), self.viewport())
             overlay.canceled.connect(self._deactivateOverlay)
             overlay.committed.connect(self._onOverlayCommitted)
+            overlay.lineEdit().textChanged.connect(self._onOverlayTextChanged)
             self._overlay = overlay
         return overlay
 
@@ -792,6 +801,10 @@ class PyRaya(QPlainTextEdit):
         overlay.setText(text)
         self._activeWord = None
         self._anchorPosition = position
+        # No word to cover: the width floor is the advance of four roman
+        # characters, so the overlay does not collapse as the seeded text is
+        # edited.
+        self._minOverlayWidth = 4 * overlay.lineEdit().fontMetrics().averageCharWidth()
         rightX, top = self._cursorAnchor(position)
         self._placeOverlay(rightX, top)
         overlay.show()
@@ -805,12 +818,33 @@ class PyRaya(QPlainTextEdit):
         self._activeWord = None
         self._anchorPosition = None
         self._selectionRange = None
+        self._minOverlayWidth = 0
         self.setFocus()
 
     # ==========================================================================
     def _overlayActive(self) -> bool:
         """Whether the overlay is currently shown over the document."""
         return self._overlay is not None and self._overlay.isVisible()
+
+    # ==========================================================================
+    def _onOverlayTextChanged(self, text: str) -> None:
+        """Re-place the overlay so its width tracks the line edit's text.
+
+        Typing in the overlay edits only the line edit (the document is
+        untouched), so the overlay is re-placed from the activation anchor
+        with the width floored at the activation minimum: over an existing
+        word (scenario 2) the word rect, at a seeded cursor (scenario 1) the
+        stored four-roman-character baseline. The signal also fires from the
+        activation ``setText`` calls, which precede the initial placement;
+        the visibility and commit guards skip those.
+        """
+        if not self._overlayActive() or self._committing:
+            return
+        if self._activeWord is not None:
+            self._positionOverlay(self._activeWord)
+        elif self._anchorPosition is not None:
+            rightX, top = self._cursorAnchor(self._anchorPosition)
+            self._placeOverlay(rightX, top)
 
     # ==========================================================================
     def _onOverlayCommitted(
