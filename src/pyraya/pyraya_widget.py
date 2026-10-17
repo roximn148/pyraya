@@ -30,6 +30,7 @@ from PySide6.QtGui import (
     QFontMetrics,
     QKeyEvent,
     QMouseEvent,
+    QResizeEvent,
     QSyntaxHighlighter,
     QTextBlockFormat,
     QTextCharFormat,
@@ -276,11 +277,12 @@ class PyRaya(QPlainTextEdit):
         # context menu event reaches the widget's viewport.
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._onCustomContextMenuRequested)
-        # Roman-input overlay state: the feature is on by default so the
-        # widget is ready for roman Urdu out of the box; the dictionary and
-        # engine are owned by the widget (the engine is created lazily on
-        # demand).
+        # Roman-input overlay state: the feature and assist mode are on by
+        # default so the widget is ready for roman Urdu out of the box; the
+        # dictionary and engine are owned by the widget (the engine is
+        # created lazily on demand).
         self._romanInputEnabled = True
+        self._assistMode = True
         self._localDictionary = Vocabulary()
         self._romanEngine: RomanInputEngine | None = None
         self._activeWord: tuple[int, int] | None = None
@@ -536,22 +538,51 @@ class PyRaya(QPlainTextEdit):
 
         Enabled by default so the widget is ready for roman Urdu out of the
         box. While disabled, roman keystrokes type into the document as
-        before and no overlay machinery runs. Enabling the feature only marks
-        it ready —
-        the :class:`~pyraya.roman_input.RomanInputEngine` (and its dictionary
+        before and no overlay machinery runs. Enabling the feature resets
+        assist mode to on and only marks the feature ready — the
+        :class:`~pyraya.roman_input.RomanInputEngine` (and its dictionary
         load) happens on first overlay activation.
 
         Args:
             enabled: Whether the overlay input feature is active.
         """
         self._romanInputEnabled = enabled
-        if not enabled:
+        if enabled:
+            self._assistMode = True
+        else:
             self._deactivateOverlay()
 
     # ==========================================================================
     def isRomanInputEnabled(self) -> bool:
         """Whether the roman-script overlay input feature is enabled."""
         return self._romanInputEnabled
+
+    # ==========================================================================
+    def setAssistEnabled(self, enabled: bool) -> None:
+        """Enable or disable overlay assist mode.
+
+        While assist mode is off, the user is left alone: typing and mouse
+        presses never activate the overlay, and only Ctrl+Space in the
+        document turns the mode back on. Disabling the mode hides a shown
+        overlay; enabling it only marks the mode ready and does not show
+        the overlay.
+
+        Args:
+            enabled: Whether assist mode is active.
+        """
+        self._assistMode = enabled
+        if not enabled:
+            self._deactivateOverlay()
+
+    # ==========================================================================
+    def isAssistEnabled(self) -> bool:
+        """Whether overlay assist mode is enabled.
+
+        While assist mode is off, the user is left alone: typing and mouse
+        presses never activate the overlay, and only Ctrl+Space in the
+        document turns the mode back on.
+        """
+        return self._assistMode
 
     # ==========================================================================
     def localDictionary(self) -> Vocabulary:
@@ -588,9 +619,10 @@ class PyRaya(QPlainTextEdit):
     def _syncOverlay(self, *, bypassMouse: bool = False) -> None:
         """Activate, reposition, or deactivate the overlay for the cursor.
 
-        Returns early while the feature is disabled, a commit is in
-        progress, or — unless ``bypassMouse`` — a mouse button is held down:
-        a drag is moving the document cursor, and the overlay would
+        Returns early while the feature is disabled, assist mode is off
+        (the user is left alone until Ctrl+Space), a commit is in
+        progress, or — unless ``bypassMouse`` — a mouse button is held
+        down: a drag is moving the document cursor, and the overlay would
         reposition mid-drag, and, when it crosses the word boundary,
         deactivate and refocus the document. The explicit resync after a
         commit (:meth:`_onOverlayCommitted`) passes ``bypassMouse``: the
@@ -600,6 +632,7 @@ class PyRaya(QPlainTextEdit):
         """
         if (
             not self._romanInputEnabled
+            or not self._assistMode
             or self._committing
             or (self._mouseActive and not bypassMouse)
         ):
@@ -755,7 +788,7 @@ class PyRaya(QPlainTextEdit):
         overlay = self._overlay
         if overlay is None:
             overlay = RomanOverlay(engine, self.font(), self.viewport())
-            overlay.canceled.connect(self._deactivateOverlay)
+            overlay.canceled.connect(self._onOverlayCanceled)
             overlay.committed.connect(self._onOverlayCommitted)
             overlay.lineEdit().textChanged.connect(self._onOverlayTextChanged)
             self._overlay = overlay
@@ -825,6 +858,17 @@ class PyRaya(QPlainTextEdit):
     def _overlayActive(self) -> bool:
         """Whether the overlay is currently shown over the document."""
         return self._overlay is not None and self._overlay.isVisible()
+
+    # ==========================================================================
+    def _onOverlayCanceled(self) -> None:
+        """Handle the overlay's Esc: the user wants to be left alone.
+
+        Turns assist mode off, then deactivates the overlay. This is the
+        only path that flips assist mode off — commits and cursor-driven
+        deactivation leave it on.
+        """
+        self._assistMode = False
+        self._deactivateOverlay()
 
     # ==========================================================================
     def _onOverlayTextChanged(self, text: str) -> None:
@@ -1027,7 +1071,11 @@ class PyRaya(QPlainTextEdit):
         """Handle region shortcuts and intercept roman-input keystrokes.
 
         ``Ctrl+1`` tags the current selection as Latin and ``Ctrl+2`` tags
-        it as Roman Urdu. While the roman-input feature is enabled and the
+        it as Roman Urdu. ``Ctrl+Space`` turns assist mode back on and
+        activates the overlay — over the RomanUrdu word under the cursor
+        with its romanized text, or, with no such word, an empty overlay
+        at the cursor — and never reaches the document. While the
+        roman-input feature is enabled, assist mode is on, and the
         overlay is inactive, an ASCII alphanumeric key pressed with the
         cursor inside a RomanUrdu region seeds the overlay with that
         character (scenario 1); the character never reaches the document.
@@ -1042,6 +1090,7 @@ class PyRaya(QPlainTextEdit):
         """
         if (
             self._romanInputEnabled
+            and self._assistMode
             and not self._overlayActive()
             and not (event.modifiers() & Qt.KeyboardModifier.ControlModifier)
         ):
@@ -1051,6 +1100,14 @@ class PyRaya(QPlainTextEdit):
                     self._activateOverlayAt(text, self.textCursor().position())
                     return
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            if event.key() == Qt.Key.Key_Space:
+                self._assistMode = True
+                word = self._wordUnderCursor()
+                if word is not None:
+                    self._activateOverlay(word)
+                else:
+                    self._activateOverlayAt("", self.textCursor().position())
+                return
             if event.key() == Qt.Key.Key_1 and self.textCursor().hasSelection():
                 self.setRegionType(RegionType.Latin)
                 return
@@ -1112,6 +1169,36 @@ class PyRaya(QPlainTextEdit):
         if self._mouseActive:
             self._mouseActive = False
             self._syncOverlay()
+
+    # ==========================================================================
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        """Re-anchor the active overlay when the widget is resized.
+
+        A resize reflows the right-aligned document, moving the word
+        (scenario 2) and the seeded cursor anchor (scenario 1) in
+        viewport coordinates, without a cursor move or document edit —
+        so the overlay, placed in viewport coordinates at activation,
+        would otherwise keep its stale location. The base handler runs
+        first, since it updates the viewport and the text layout; the
+        overlay is then re-placed from its stored anchor, exactly as
+        :meth:`_onOverlayTextChanged` does on text edits. Only the
+        active overlay is re-placed: a resize does not change which
+        word or anchor it is active over, so activation is never
+        re-evaluated — doing so would clobber the typed text (scenario
+        1) or deactivate the overlay when the cursor is not inside a
+        word.
+
+        Args:
+            event: The resize event.
+        """
+        super().resizeEvent(event)
+        if not self._overlayActive():
+            return
+        if self._activeWord is not None:
+            self._positionOverlay(self._activeWord)
+        elif self._anchorPosition is not None:
+            rightX, top = self._cursorAnchor(self._anchorPosition)
+            self._placeOverlay(rightX, top)
 
     # ==========================================================================
     def _applyRegionFormat(self, start: int, end: int, kind: RegionType) -> None:

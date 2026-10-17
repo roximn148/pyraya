@@ -154,11 +154,16 @@ def testAddVocabularyAttached(app: QApplication) -> None:
 
 
 # ******************************************************************************
-def _sendKey(widget: QWidget, key: int, text: str = "") -> None:
+def _sendKey(
+    widget: QWidget,
+    key: int,
+    text: str = "",
+    modifiers: Qt.KeyboardModifier = Qt.KeyboardModifier.NoModifier,
+) -> None:
     """Send a key-press event to a widget."""
     QCoreApplication.sendEvent(
         widget,
-        QKeyEvent(QEvent.Type.KeyPress, key, Qt.KeyboardModifier.NoModifier, text),
+        QKeyEvent(QEvent.Type.KeyPress, key, modifiers, text),
     )
 
 
@@ -974,6 +979,70 @@ def testOverlayStaysPinnedWhileEditing(app: QApplication) -> None:
 
 
 # ******************************************************************************
+def testOverlayReanchorsOnResize(app: QApplication) -> None:
+    """Resizing the widget reflows the document; the overlay follows the word.
+
+    The overlay is placed in viewport coordinates at activation, and a
+    resize moves the right-aligned word without a cursor move or document
+    edit, so the resize handler must re-place the overlay from the stored
+    anchor: the right edge stays on the reflowed word's exclusive right
+    edge and the top follows the line.
+    """
+    widget = PyRaya()
+    widget.resize(640, 480)
+    widget.show()
+    widget.setPlainText("hello خوش world دوست")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    app.processEvents()
+    widget.resize(300, 480)
+    app.processEvents()
+    assert overlay.isVisible()
+    wordRect = widget._wordRect(6, 9)
+    geom = overlay.geometry()
+    assert geom.right() == wordRect.right()  # right edge anchored to the word
+    assert geom.top() == wordRect.top()
+    assert geom.left() >= 0
+    assert geom.bottom() <= widget.viewport().height()
+
+
+# ******************************************************************************
+def testSeededOverlayReanchorsOnResize(app: QApplication) -> None:
+    """A seeded overlay survives a resize: re-anchored, typed text preserved.
+
+    The seeded overlay has no word to cover, so the resize handler must
+    only re-place it from the stored anchor — not re-evaluate activation,
+    which would deactivate the overlay or clobber the typed text.
+    """
+    widget = PyRaya()
+    widget.resize(800, 600)
+    widget.show()
+    widget.setPlainText("hello world ")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 12)
+    _moveCursor(widget, 11)
+    _sendKey(widget, Qt.Key.Key_D, "d")
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    app.processEvents()
+    widget.resize(400, 600)
+    app.processEvents()
+    assert overlay.isVisible()
+    assert overlay.lineEdit().text() == "d"  # typed text preserved
+    anchor = widget._anchorPosition
+    assert anchor is not None
+    rightX, top = widget._cursorAnchor(anchor)
+    geom = overlay.geometry()
+    assert geom.right() + 1 == rightX  # right edge anchored to the cursor
+    assert geom.top() == top
+    assert geom.left() >= 0
+    assert geom.bottom() <= widget.viewport().height()
+
+
+# ******************************************************************************
 def testDeactivatesWhenCursorLeaves(app: QApplication) -> None:
     """Leaving the word hides the overlay; the document is untouched."""
     widget = PyRaya()
@@ -1663,3 +1732,193 @@ def testUpAndDownSelectionThenCommit(app: QApplication) -> None:
     _sendKey(overlay.lineEdit(), Qt.Key.Key_Space, " ")
     assert widget.toPlainText() == "hello " + second.arabic + "  world"
     _assertNoOverlay(widget)
+
+
+# ******************************************************************************
+def testAssistModeOnByDefault(app: QApplication) -> None:
+    """Assist mode is on by default, like the roman-input feature itself."""
+    widget = PyRaya()
+    assert widget.isAssistEnabled() is True
+
+
+# ******************************************************************************
+def testEscOnActiveOverlayTurnsAssistModeOff(app: QApplication) -> None:
+    """Esc on the active overlay dismisses it and turns assist mode off."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello خوش world دوست")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Escape)
+    assert widget.isAssistEnabled() is False
+    _assertNoOverlay(widget)
+
+
+# ******************************************************************************
+def testTypingReachesDocumentWhenAssistModeOff(app: QApplication) -> None:
+    """With assist mode off, a roman keystroke types into the document and
+    does not seed the overlay."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello خوش world دوست")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Escape)
+    assert widget.isAssistEnabled() is False
+    _sendKey(widget, Qt.Key.Key_K, "k")
+    assert widget.toPlainText() == "hello خkوش world دوست"
+    assert widget.textCursor().position() == 8
+    _assertNoOverlay(widget)
+
+
+# ******************************************************************************
+def testMouseReleaseDoesNotReactivateWhenAssistModeOff(app: QApplication) -> None:
+    """With assist mode off, a press and release over a word do not
+    activate the overlay."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello خوش world دوست")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Escape)
+    assert widget.isAssistEnabled() is False
+    rect = widget._wordRect(6, 9)
+    _sendMouse(widget, "press", rect.right(), rect.center().y())
+    _assertNoOverlay(widget)
+    _sendMouse(widget, "release", rect.right(), rect.center().y())
+    _assertNoOverlay(widget)
+
+
+# ******************************************************************************
+def testCtrlSpaceOnWordReentersAssistMode(app: QApplication) -> None:
+    """Ctrl+Space over a word turns assist mode back on and activates the
+    overlay over the word; the key never reaches the document."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello خوش world دوست")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Escape)
+    assert widget.isAssistEnabled() is False
+    _sendKey(
+        widget,
+        Qt.Key.Key_Space,
+        "\u00a0",
+        Qt.KeyboardModifier.ControlModifier,
+    )
+    assert widget.isAssistEnabled() is True
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    assert overlay.lineEdit().text() == "khosh"
+    assert widget.toPlainText() == "hello خوش world دوست"
+
+
+# ******************************************************************************
+def testCtrlSpaceWithoutWordShowsEmptyOverlay(app: QApplication) -> None:
+    """Ctrl+Space with no word under the cursor shows an empty overlay at
+    the cursor; the key never reaches the document."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello world")
+    _moveCursor(widget, 1)
+    _sendKey(
+        widget,
+        Qt.Key.Key_Space,
+        "\u00a0",
+        Qt.KeyboardModifier.ControlModifier,
+    )
+    app.processEvents()
+    assert widget.isAssistEnabled() is True
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    assert overlay.lineEdit().text() == ""
+    assert overlay.lineEdit().hasFocus()
+    assert widget.toPlainText() == "hello world"
+
+
+# ******************************************************************************
+def testCommitLeavesAssistModeOn(app: QApplication) -> None:
+    """Committing leaves assist mode on: only Esc on the overlay turns it off."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello خوش world دوست")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Space, " ")
+    _assertNoOverlay(widget)
+    assert widget.isAssistEnabled() is True
+
+
+# ******************************************************************************
+def testEscInDocumentDoesNotFlipAssistMode(app: QApplication) -> None:
+    """Esc in the document (overlay inactive) never flips assist mode."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello world")
+    _moveCursor(widget, 1)
+    _sendKey(widget, Qt.Key.Key_Escape)
+    assert widget.isAssistEnabled() is True
+    _assertNoOverlay(widget)
+
+    widget.setPlainText("hello خوش world دوست")
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Escape)
+    assert widget.isAssistEnabled() is False
+    _sendKey(widget, Qt.Key.Key_Escape)
+    assert widget.isAssistEnabled() is False
+
+
+# ******************************************************************************
+def testSetAssistEnabledTogglesOverlay(app: QApplication) -> None:
+    """setAssistEnabled(False) hides a shown overlay; setAssistEnabled(True)
+    only marks the mode ready and does not show the overlay."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello خوش world دوست")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    widget.setAssistEnabled(False)
+    assert widget.isAssistEnabled() is False
+    _assertNoOverlay(widget)
+    widget.setAssistEnabled(True)
+    assert widget.isAssistEnabled() is True
+    _assertNoOverlay(widget)
+
+
+# ******************************************************************************
+def testReEnablingFeatureResetsAssistMode(app: QApplication) -> None:
+    """Re-enabling the roman-input feature resets assist mode to on."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello خوش world دوست")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Escape)
+    assert widget.isAssistEnabled() is False
+    widget.setRomanInputEnabled(False)
+    widget.setRomanInputEnabled(True)
+    assert widget.isAssistEnabled() is True
