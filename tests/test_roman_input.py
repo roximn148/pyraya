@@ -580,14 +580,62 @@ def testOverlayWheelForwardsToScrollArea(
 
 # ******************************************************************************
 def testRomanInputFeatureOnByDefault(app: QApplication) -> None:
-    """The feature is on by default; keystrokes at the trailing terminator
-    still type into the document."""
+    """The feature is on by default; the first keystroke on a fresh widget
+    seeds the overlay and never reaches the document."""
     widget = PyRaya()
+    widget.show()
     assert widget.isRomanInputEnabled() is True
     _sendKey(widget, Qt.Key.Key_K, "k")
-    assert widget.toPlainText() == "k"
-    _sendKey(widget, Qt.Key.Key_O, "o")
-    assert widget.toPlainText() == "ko"
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    assert overlay.lineEdit().text() == "k"
+    assert widget.toPlainText() == ""
+    assert widget.textCursor().position() == 0
+
+
+# ******************************************************************************
+def testFirstKeystrokeOnEmptyDocumentSeedsOverlay(app: QApplication) -> None:
+    """The first keystroke on an empty document seeds the overlay; the letter
+    never reaches the document."""
+    widget = PyRaya()
+    widget.show()
+    _sendKey(widget, Qt.Key.Key_K, "k")
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    assert overlay.lineEdit().text() == "k"
+    assert widget.toPlainText() == ""
+    assert widget.textCursor().position() == 0
+
+
+# ******************************************************************************
+def testKeystrokeAtEndOfUntaggedDocumentSeedsOverlay(app: QApplication) -> None:
+    """Typing at the end of a non-empty untagged document seeds the overlay."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello")
+    widget.setRomanInputEnabled(True)
+    _moveCursor(widget, 5)  # the document end
+    _sendKey(widget, Qt.Key.Key_K, "k")
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    assert overlay.lineEdit().text() == "k"
+    assert widget.toPlainText() == "hello"  # the char was not inserted
+    assert widget.textCursor().position() == 5
+
+
+# ******************************************************************************
+def testKeystrokeAtEndAfterLatinRegionNotIntercepted(app: QApplication) -> None:
+    """Typing at the end with the last character in a Latin region does not
+    seed the overlay; the key types into the document."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello world")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.Latin, 6, 11)
+    _moveCursor(widget, 11)  # the document end, after the Latin region
+    _sendKey(widget, Qt.Key.Key_K, "k")
+    assert widget.toPlainText() == "hello worldk"
+    _assertNoOverlay(widget)
 
 
 # ******************************************************************************
@@ -1088,6 +1136,42 @@ def testEmptyTextCommitDeletesSpan(app: QApplication) -> None:
     _sendKey(overlay2.lineEdit(), Qt.Key.Key_Space, " ")
     assert widget2.toPlainText() == "hello خوش  world"
     assert changed2 == []
+
+
+# ******************************************************************************
+def testEmptyDocumentScenario1Commit(app: QApplication) -> None:
+    """A scenario-1 commit on an empty document inserts at position zero."""
+    widget = PyRaya()
+    widget.show()
+    committed: list[tuple[str, str]] = []
+    changed: list[int] = []
+    widget.romanWordCommitted.connect(lambda w, r: committed.append((w, r)))
+    widget.regionsChanged.connect(lambda: changed.append(1))
+    baseline = widget.document().availableUndoSteps()
+    _sendKey(widget, Qt.Key.Key_K, "k")
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    row = overlay.suggestionList().selectedRow()
+    assert row is not None
+    suggestion = row.suggestion
+    assert suggestion is not None
+    word = suggestion.arabic
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Space, " ")
+    assert widget.toPlainText() == word + " "
+    assert committed == [(word, "k")]
+    assert changed == []
+    assert not widget.textCursor().hasSelection()
+    assert widget.textCursor().position() == len(word) + 1
+    assert widget._regionKindAt(0) == RegionType.RomanUrdu
+    assert widget._regionKindAt(len(word)) == RegionType.RomanUrdu  # separator
+    _assertNoOverlay(widget)
+    assert widget.document().availableUndoSteps() == baseline + 1
+    widget.undo()
+    assert widget.toPlainText() == ""
+    assert widget.document().availableUndoSteps() == baseline
+    widget.redo()
+    assert widget.toPlainText() == word + " "
+    assert widget.document().isUndoAvailable()
 
 
 # ******************************************************************************

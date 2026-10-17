@@ -985,8 +985,7 @@ class PyRaya(QPlainTextEdit):
         ):
             text = event.text()
             if len(text) == 1 and text.isascii() and text.isalnum():
-                region = self._regionUnderCursor()
-                if region is not None and region.kind is RegionType.RomanUrdu:
+                if self._regionKindForTyping() is RegionType.RomanUrdu:
                     self._activateOverlayAt(text, self.textCursor().position())
                     return
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
@@ -1127,6 +1126,37 @@ class PyRaya(QPlainTextEdit):
                 if span.start < end and start < span.end:
                     return span
         return self._regionAt(cursor.position())
+
+    # ==========================================================================
+    def _regionKindForTyping(self) -> RegionType | None:
+        """The region kind for the scenario-1 typing gate at the cursor.
+
+        A cursor with a selection resolves the region overlapping the
+        selection. A bare cursor at the document end (``position ==
+        characterCount() - 1``) resolves to the kind of the last real
+        character before the cursor — the trailing terminator itself never
+        belongs to a region — and an empty document to
+        :data:`~pyraya.regions.defaultRegionKind`; any other position
+        resolves the region containing it. Positions past the document end
+        return None.
+        """
+        cursor = self.textCursor()
+        if cursor.hasSelection():
+            start = cursor.selectionStart()
+            end = cursor.selectionEnd()
+            for span in self._regionSpans():
+                if span.start < end and start < span.end:
+                    return span.kind
+        document = self.document()
+        position = cursor.position()
+        limit = document.characterCount() - 1
+        if not 0 <= position <= limit:
+            return None
+        if position == limit:
+            if document.characterCount() == 1:
+                return defaultRegionKind
+            return self._regionKindAt(position - 1)
+        return self._regionKindAt(position)
 
     # ==========================================================================
     def _charFormatAt(self, position: int) -> QTextCharFormat:
