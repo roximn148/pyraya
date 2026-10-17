@@ -22,7 +22,7 @@ empty and :meth:`RomanInputEngine.learnRomanWord` still works.
 import string
 from dataclasses import dataclass
 
-from PySide6.QtCore import QObject, QRect, QSize, Qt, Signal
+from PySide6.QtCore import QObject, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -30,6 +30,7 @@ from PySide6.QtGui import (
     QFontMetrics,
     QKeyEvent,
     QPainter,
+    QPainterPath,
     QPaintEvent,
     QPen,
     QResizeEvent,
@@ -65,6 +66,13 @@ _ACCENT_BORDER = QColor(0x1D, 0x4E, 0x89)
 
 #: The dashed gray style of the placeholder (Learn) row.
 _PLACEHOLDER_COLOR = QColor(0x8A, 0x8F, 0x98, 30)
+
+#: The suggestion list's panel style: an opaque base, a subtle border, and
+#: the rounded-corner radius. The list floats over the document text, so
+#: the base must be opaque for the rows to stay readable.
+_LIST_BACKGROUND = QColor(0xFF, 0xFF, 0xFF)
+_LIST_BORDER = QColor(0xD0, 0xD5, 0xDD)
+_LIST_RADIUS = 6
 
 #: The maximum number of suggestion rows shown at once; the list scrolls to
 #: keep the selected row visible while navigating.
@@ -237,7 +245,9 @@ class SuggestionList(QWidget):
     ``maxVisibleRows`` rows are shown at once; the list scrolls so the
     selected row stays visible while navigating. The preferred width covers
     the widest rendered row with the configurable margin on both sides, so
-    no row's text is clipped.
+    no row's text is clipped. The rows sit on an opaque white panel with a
+    subtle border and rounded corners, so the list stays readable when it
+    overlaps the document text.
 
     This widget never takes focus — all key handling lives in the overlay's
     :class:`RomanLineEdit`.
@@ -270,6 +280,10 @@ class SuggestionList(QWidget):
         self._firstRow: int = 0
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        # The list floats over the document: keep the widget backing
+        # transparent so only the opaque panel painted in ``paintEvent``
+        # covers the text behind, and the rounded corners stay clear.
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
 
     # ==========================================================================
     def setRows(self, rows: list[_SuggestionRow]) -> None:
@@ -384,11 +398,33 @@ class SuggestionList(QWidget):
 
         Rows outside the visible window — above ``firstRow`` or below the
         widget's bottom — are not drawn.
+
+        The rows sit on an opaque panel with a border and rounded corners:
+        the list floats over the document, so a transparent base would let
+        the document text show through the rows and make them unreadable.
         """
         if not self._rows:
             return
         last = min(len(self._rows), self._firstRow + self.visibleRowCount())
         painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        path = QPainterPath()
+        path.addRoundedRect(
+            QRectF(0.5, 0.5, self.width() - 1, self.height() - 1),
+            _LIST_RADIUS,
+            _LIST_RADIUS,
+        )
+        # The opaque base is painted first, so the translucent tier tints
+        # composite over it rather than over the document behind.
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(_LIST_BACKGROUND)
+        painter.drawPath(path)
+        # The rows are clipped to the panel so no tint pokes past the
+        # rounded corners.
+        painter.setClipPath(path)
+        # NoBrush so the row and border strokes below only draw outlines
+        # rather than re-filling the panel with the base color.
+        painter.setBrush(Qt.BrushStyle.NoBrush)
         rowHeight = self._rowHeight()
         baseline = self._metrics.ascent() + (rowHeight - self._metrics.height()) // 2
         for i in range(self._firstRow, last):
@@ -411,6 +447,11 @@ class SuggestionList(QWidget):
             arabicWidth = self._metrics.horizontalAdvance(row.arabic)
             x = self.width() - self._margin - arabicWidth
             painter.drawText(x, y + baseline, row.arabic)
+        # The border is stroked on top of the rows, after clearing the clip
+        # so the outer half of the stroke is not clipped away.
+        painter.setClipping(False)
+        painter.setPen(QPen(_LIST_BORDER, 1))
+        painter.drawPath(path)
         painter.end()
 
 

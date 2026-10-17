@@ -30,6 +30,7 @@ from romanalfaz.engine import Suggestion, Vocabulary
 from pyraya import PyRaya
 from pyraya.regions import RegionType
 from pyraya.roman_input import (
+    _LIST_BORDER,
     RomanInputEngine,
     RomanOverlay,
     SuggestionList,
@@ -427,6 +428,59 @@ def testSuggestionListTextVerticallyCenteredInRows(
         assert top is not None and bottom is not None
         assert top >= row * rowHeight + 2  # not pushed into the row above
         assert bottom <= (row + 1) * rowHeight - 2  # not pushed into the row below
+
+
+# ******************************************************************************
+def testSuggestionListRendersOpaquePanel(
+    app: QApplication,
+) -> None:
+    """The list paints an opaque panel with a border and rounded corners.
+
+    Rendered onto a dark fill distinct from the panel base: if the
+    backing were still translucent, the tier tints would composite with
+    that fill instead of with the opaque base, and the rounded corners
+    would let the fill through at the widget's corners.
+    """
+    font = QFont()
+    listWidget = SuggestionList(font)
+    listWidget.setRows(_stubRows())
+    hint = listWidget.sizeHint()
+    listWidget.resize(hint.width(), hint.height())
+    behind = QColor(0x30, 0x60, 0xA0)
+    pixmap = QPixmap(hint.width(), hint.height())
+    pixmap.fill(behind)
+    listWidget.render(pixmap)
+    image = pixmap.toImage()
+    rowHeight = QFontMetrics(font).height() + 6
+
+    # A text-free point inside row 1 (tier 1, unselected): the text is
+    # right-aligned and the margin keeps the left margin columns clear.
+    color = image.pixelColor(3, rowHeight + rowHeight // 2)
+    # The tier-1 tint (alpha 30) over the opaque white base; a translucent
+    # backing would composite with the dark fill behind and read
+    # (70, 101, 144) instead.
+    assert abs(color.red() - 252) <= 12
+    assert abs(color.green() - 241) <= 12
+    assert abs(color.blue() - 228) <= 12
+
+    # The panel border along the left edge and along the top edge past
+    # the corner radius.
+    border = _LIST_BORDER
+    left = image.pixelColor(0, hint.height() // 2)
+    assert abs(left.red() - border.red()) <= 3
+    assert abs(left.green() - border.green()) <= 3
+    assert abs(left.blue() - border.blue()) <= 3
+    top = image.pixelColor(10, 0)
+    assert abs(top.red() - border.red()) <= 3
+    assert abs(top.green() - border.green()) <= 3
+    assert abs(top.blue() - border.blue()) <= 3
+
+    # Rounded corner: the widget's own corner is transparent, so the
+    # fill behind shows through untouched.
+    corner = image.pixelColor(0, 0)
+    assert abs(corner.red() - behind.red()) <= 3
+    assert abs(corner.green() - behind.green()) <= 3
+    assert abs(corner.blue() - behind.blue()) <= 3
 
 
 # ******************************************************************************
