@@ -64,7 +64,7 @@ _TIER_COLORS = {
 _SELECTED_ALPHA = 90
 _ACCENT_BORDER = QColor(0x1D, 0x4E, 0x89)
 
-#: The dashed gray style of the placeholder (Learn) row.
+#: The dashed gray style of the undefined-word (Learn) row.
 _PLACEHOLDER_COLOR = QColor(0x8A, 0x8F, 0x98, 30)
 
 #: The suggestion list's panel style: an opaque base, a subtle border, and
@@ -221,7 +221,7 @@ class RomanInputEngine:
         """Learn a typed roman word.
 
         **No-op for this session**: simply returns the same word as-is (the
-        typed roman). It is the hook the placeholder (Learn) commit maps
+        typed roman). It is the hook the undefined-word (Learn) commit maps
         to; in the future it will return the Arabic-script word for the
         typed roman and update the local vocabulary, guarded by full
         mappability.
@@ -242,7 +242,7 @@ class SuggestionList(QWidget):
     A lightweight widget that renders each row with only its Arabic-script
     text in the document font, color-coded by edit-distance tier (green =
     exact, orange = distance 1, red = distance 2). The selected row is
-    emphasized with a stronger tint and an accent border; the placeholder
+    emphasized with a stronger tint and an accent border; the undefined-word
     (Learn) row is drawn in a distinct dashed gray style. At most
     ``maxVisibleRows`` rows are shown at once; the list scrolls so the
     selected row stays visible while navigating. The preferred width covers
