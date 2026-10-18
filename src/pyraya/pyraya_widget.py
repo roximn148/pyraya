@@ -62,7 +62,7 @@ defaultFontSize: float = 14.0
 
 
 def _isArabicChar(char: str) -> bool:
-    """Whether a character belongs to the Arabic script block (U+0600–U+06FF)."""
+    """Whether a character belongs to the Arabic script block (U+0600-U+06FF)."""
     return "\u0600" <= char <= "\u06ff"
 
 
@@ -837,7 +837,10 @@ class PyRaya(QPlainTextEdit):
         # document cursor, so arrow keys move in visual order without
         # immediately triggering an edge commit.
         docPos = self.textCursor().position()
-        overlayPos = max(0, min(docPos - word[0], len(roman)))
+        # Mirror-map docPos (in the document word) into the roman word, 0..len(roman),
+        # rounded to the nearest character
+        L = word[1] - word[0]
+        overlayPos = ((word[1] - docPos) * len(roman) + L // 2) // L
         overlay.lineEdit().setCursorPosition(overlayPos)
         self._activeWord = word
         self._anchorPosition = word[0]
