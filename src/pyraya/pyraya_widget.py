@@ -941,7 +941,7 @@ class PyRaya(QPlainTextEdit):
         ``Key_Space`` and typed punctuation, and the empty string for
         ``Key_Return`` with ``ControlModifier`` (Ctrl+Enter commits the word
         without a newline) and for an edge commit (``Key_Left`` /
-        ``Key_Right``, unmodified).
+        ``Key_Right``).
 
         A separator-key commit inserts the committed word plus the separator
         as a single undoable edit: over an existing word (scenario 2) the

@@ -721,7 +721,7 @@ class RomanOverlay(QWidget):
         ``key`` and ``keyText`` — plain ``Key_Return`` commits with a
         newline, ``Key_Return`` with ``ControlModifier`` without one,
         ``Key_Space`` and typed punctuation with ``keyText``, and
-        ``Key_Left`` / ``Key_Right`` (unmodified) are edge commits.
+        ``Key_Left`` / ``Key_Right`` are edge commits.
 
         Args:
             key: The committing ``Qt.Key``.
