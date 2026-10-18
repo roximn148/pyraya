@@ -65,7 +65,7 @@ _SELECTED_ALPHA = 90
 _ACCENT_BORDER = QColor(0x1D, 0x4E, 0x89)
 
 #: The dashed gray style of the undefined-word (Learn) row.
-_PLACEHOLDER_COLOR = QColor(0x8A, 0x8F, 0x98, 30)
+_UNDEFINED_WORD_COLOR = QColor(0x8A, 0x8F, 0x98, 30)
 
 #: The suggestion list's panel style: an opaque base, a subtle border, and
 #: the rounded-corner radius. The list floats over the document text, so
@@ -433,14 +433,14 @@ class SuggestionList(QWidget):
             y = (i - self._firstRow) * rowHeight
             row = self._rows[i]
             undefined = row.suggestion.isUndefined()
-            color = _PLACEHOLDER_COLOR if undefined else _TIER_COLORS[row.tier]
+            color = _UNDEFINED_WORD_COLOR if undefined else _TIER_COLORS[row.tier]
             if i == self._selectedIndex:
                 color = QColor(color.red(), color.green(), color.blue(), _SELECTED_ALPHA)
             painter.fillRect(QRect(0, y, self.width(), rowHeight), QBrush(color))
             if i == self._selectedIndex:
                 painter.setPen(QPen(_ACCENT_BORDER, 1))
             elif undefined:
-                painter.setPen(QPen(_PLACEHOLDER_COLOR, 1, Qt.PenStyle.DashLine))
+                painter.setPen(QPen(_UNDEFINED_WORD_COLOR, 1, Qt.PenStyle.DashLine))
             else:
                 painter.setPen(Qt.PenStyle.NoPen)
             painter.drawRect(0, y, self.width() - 1, rowHeight - 1)

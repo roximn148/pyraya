@@ -398,7 +398,7 @@ def testSuggestionListTextStaysInsideMargin(app: QApplication) -> None:
 def _inkSpan(image: QImage, width: int, yStart: int, yEnd: int) -> tuple[int | None, int | None]:
     """The topmost and bottommost dark pixels (text ink) inside a row band.
 
-    The tier tints and placeholder borders stay above the darkness
+    The tier tints and undefined-word borders stay above the darkness
     threshold, so only the black text ink is measured.
     """
     top: int | None = None
@@ -541,7 +541,7 @@ def testResizeKeepsSelectedRowVisible(app: QApplication) -> None:
 
 # ******************************************************************************
 def testOverlayEmptyTextHidesList(app: QApplication, engine: RomanInputEngine) -> None:
-    """Empty overlay text shows no rows and no placeholder."""
+    """Empty overlay text shows no rows and no undefined-word row."""
     overlay, _ = _makeOverlay(app, engine)
     overlay.setText("")
     suggestionList = overlay.suggestionList()
@@ -550,11 +550,11 @@ def testOverlayEmptyTextHidesList(app: QApplication, engine: RomanInputEngine) -
 
 
 # ******************************************************************************
-def testOverlayZeroMatchesShowsPlaceholder(
+def testOverlayZeroMatchesShowsUndefinedWord(
     app: QApplication,
     engine: RomanInputEngine,
 ) -> None:
-    """A non-empty typed word with zero matches shows the Learn placeholder."""
+    """A non-empty typed word with zero matches shows the undefined-word (Learn) row."""
     overlay, _ = _makeOverlay(app, engine)
     overlay.setText(ZERO_MATCH_WORDS[0])
     suggestionList = overlay.suggestionList()
@@ -583,7 +583,7 @@ def testOverlayZeroMatchesShowsPlaceholder(
 
 # ******************************************************************************
 def testOverlayUnavailableOffersNothing(app: QApplication, monkeypatch) -> None:
-    """An unavailable engine offers no rows, no placeholder, and no crash."""
+    """An unavailable engine offers no rows, no undefined-word row, and no crash."""
 
     class _Missing:
         def __init__(self) -> None:
@@ -1857,8 +1857,8 @@ def testEmptyDocumentScenario1Commit(app: QApplication) -> None:
 
 
 # ******************************************************************************
-def testPlaceholderCommitScenario1And2(app: QApplication) -> None:
-    """Committing the placeholder learns and commits the typed roman word."""
+def testUndefinedWordCommitScenario1And2(app: QApplication) -> None:
+    """Committing the undefined-word row learns and commits the typed roman word."""
     # scenario 1: typed at the cursor inside the span
     widget = PyRaya()
     widget.show()
@@ -1871,7 +1871,7 @@ def testPlaceholderCommitScenario1And2(app: QApplication) -> None:
     _sendKey(widget, Qt.Key.Key_X, "x")
     overlay = widget._overlay
     assert overlay is not None and overlay.isVisible()
-    overlay.setText("xqwzrty")  # zero matches -> placeholder row
+    overlay.setText("xqwzrty")  # zero matches -> undefined-word row
     row = overlay.suggestionList().selectedRow()
     assert row is not None and row.suggestion.isUndefined()
     _sendKey(overlay.lineEdit(), Qt.Key.Key_Space, " ")
@@ -1893,7 +1893,7 @@ def testPlaceholderCommitScenario1And2(app: QApplication) -> None:
     _moveCursor(widget2, 7)
     overlay2 = widget2._overlay
     assert overlay2 is not None and overlay2.isVisible()
-    overlay2.setText("xqwzrty")  # zero matches -> placeholder row
+    overlay2.setText("xqwzrty")  # zero matches -> undefined-word row
     row2 = overlay2.suggestionList().selectedRow()
     assert row2 is not None and row2.suggestion.isUndefined()
     _sendKey(overlay2.lineEdit(), Qt.Key.Key_Space, " ")
@@ -1918,7 +1918,7 @@ def testUnavailableEngineCommitIsNoOp(app: QApplication) -> None:
     _moveCursor(widget, 7)
     overlay = widget._overlay
     assert overlay is not None and overlay.isVisible()
-    assert overlay.suggestionList().rowCount() == 0  # no rows, no placeholder
+    assert overlay.suggestionList().rowCount() == 0  # no rows, no undefined-word row
     _sendKey(overlay.lineEdit(), Qt.Key.Key_Space, " ")
     assert widget.toPlainText() == "hello خوش world"
     assert committed == []
