@@ -84,19 +84,21 @@ MAX_VISIBLE_ROWS: int = 5
 class _SuggestionRow:
     """One rendered row of the passive suggestion list.
 
+    Every row holds a :class:`Suggestion` (homogeneous); the undefined-word
+    (``+ Learn``) row carries a default-constructed blank one.
+
     Args:
-        suggestion: The suggestion backing the row; ``None`` for the
-            placeholder row.
+        suggestion: The suggestion backing the row; for the undefined-word
+            row a blank :class:`Suggestion` (``isUndefined()`` true).
         arabic: The Arabic-script text drawn in the document font; for the
-            placeholder row this is the ``+ Learn <typed roman>`` label.
-        tier: The edit-distance tier (0 = exact, 1, 2); -1 for the placeholder.
-        isPlaceholder: True for the ``+ Learn`` placeholder row.
+            undefined-word row this is the ``+ Learn <typed roman>`` label.
+        tier: The edit-distance tier (0 = exact, 1, 2); -1 for the
+            undefined-word row.
     """
 
-    suggestion: Suggestion | None
+    suggestion: Suggestion
     arabic: str
     tier: int
-    isPlaceholder: bool
 
 
 # ******************************************************************************
@@ -335,15 +337,15 @@ class SuggestionList(QWidget):
 
     # ==========================================================================
     def selectedSuggestion(self) -> Suggestion | None:
-        """The highlighted suggestion, or ``None`` for the placeholder row."""
+        """The highlighted suggestion, or ``None`` when no row is selected."""
         row = self.selectedRow()
         return row.suggestion if row is not None else None
 
     # ==========================================================================
-    def isPlaceholderSelected(self) -> bool:
-        """True when the highlighted row is the placeholder (Learn) row."""
+    def isUndefinedWordSelected(self) -> bool:
+        """True when the highlighted row is the undefined-word (Learn) row."""
         row = self.selectedRow()
-        return row is not None and row.isPlaceholder
+        return row is not None and row.suggestion.isUndefined()
 
     # ==========================================================================
     def sizeHint(self) -> QSize:
@@ -430,13 +432,14 @@ class SuggestionList(QWidget):
         for i in range(self._firstRow, last):
             y = (i - self._firstRow) * rowHeight
             row = self._rows[i]
-            color = _PLACEHOLDER_COLOR if row.isPlaceholder else _TIER_COLORS[row.tier]
+            undefined = row.suggestion.isUndefined()
+            color = _PLACEHOLDER_COLOR if undefined else _TIER_COLORS[row.tier]
             if i == self._selectedIndex:
                 color = QColor(color.red(), color.green(), color.blue(), _SELECTED_ALPHA)
             painter.fillRect(QRect(0, y, self.width(), rowHeight), QBrush(color))
             if i == self._selectedIndex:
                 painter.setPen(QPen(_ACCENT_BORDER, 1))
-            elif row.isPlaceholder:
+            elif undefined:
                 painter.setPen(QPen(_PLACEHOLDER_COLOR, 1, Qt.PenStyle.DashLine))
             else:
                 painter.setPen(Qt.PenStyle.NoPen)
@@ -533,16 +536,17 @@ class RomanLineEdit(QLineEdit):
             event.accept()
             return
         text = event.text()
+        modifiers = event.modifiers().value
         if key in (Qt.Key.Key_Space, Qt.Key.Key_Return) or (text and text in _SEPARATORS):
-            overlay.commit(text)
+            overlay.commit(key, text, modifiers)
             event.accept()
             return
         if key == Qt.Key.Key_Left and self.cursorPosition() == 0:
-            overlay.commit("")
+            overlay.commit(key, text, modifiers)
             event.accept()
             return
         if key == Qt.Key.Key_Right and self.cursorPosition() == len(self.text()):
-            overlay.commit("")
+            overlay.commit(key, text, modifiers)
             event.accept()
             return
         super().keyPressEvent(event)
@@ -572,18 +576,24 @@ class RomanOverlay(QWidget):
     and consumes the signals below.
 
     Signals:
-        committed: ``(typedRoman: str, selected: Suggestion | None,
-            isPlaceholder: bool, separator: str)`` — emitted on a separator-key
-            commit (Space, Enter, typed punctuation) or an edge commit (Left at
-            the visually left edge, i.e. the start of the text, or Right at the
-            visually right edge, i.e. the end); ``separator`` is the character
-            written to the document alongside the committed word — the space,
-            newline, or punctuation mark — and the empty string for an edge
-            commit.
+        committed: ``(typedRoman: str, selected: object, key: int,
+            keyText: str, modifiers: int)`` — emitted on a committing key
+            stroke: a separator-key commit (Space, Enter, typed punctuation —
+            plain Enter commits the word plus a newline, Ctrl+Enter commits
+            the word without a newline) or an edge commit (Left at the
+            visually left edge, i.e. the start of the text, or Right at the
+            visually right edge, i.e. the end, which commits without a
+            separator). ``typedRoman`` is the overlay's typed text;
+            ``selected`` is the highlighted row's :class:`Suggestion` — the
+            undefined-word row emits a blank ``Suggestion`` (``isUndefined()``
+            true, ``encodedRoman`` set to the typed roman) — or ``None`` only
+            when no row is selected (empty text); ``key`` is the committing
+            ``Qt.Key``, ``keyText`` its ``event.text()``, and ``modifiers``
+            the committing ``Qt.KeyboardModifiers``.
         canceled: emitted when Esc is pressed.
     """
 
-    committed = Signal(str, object, bool, str)
+    committed = Signal(str, object, int, str, int)
     canceled = Signal()
 
     def __init__(
@@ -658,8 +668,9 @@ class RomanOverlay(QWidget):
         """Rebuild the suggestion rows from the current line-edit text.
 
         Empty text hides the list. A non-empty text with zero matches shows a
-        single placeholder row, ``+ Learn <typed roman>`` — unless the engine
-        is unavailable, in which case no rows and no placeholder are offered.
+        single undefined-word row, ``+ Learn <typed roman>`` — unless the
+        engine is unavailable, in which case no rows and no undefined-word
+        row are offered.
         """
         text = self._lineEdit.text()
         if not text:
@@ -672,16 +683,17 @@ class RomanOverlay(QWidget):
                     suggestion=suggestion,
                     arabic=suggestion.arabic,
                     tier=tier,
-                    isPlaceholder=False,
                 ),
             )
         if not rows and self._engine.available:
+            # The undefined-word row is constructed from a default-constructed
+            # blank Suggestion carrying the typed roman, so the commit emits
+            # it like any other row's suggestion.
             rows.append(
                 _SuggestionRow(
-                    suggestion=None,
+                    suggestion=Suggestion(encodedRoman=text),
                     arabic=f"+ Learn {text}",
                     tier=-1,
-                    isPlaceholder=True,
                 ),
             )
         self._list.setRows(rows)
@@ -699,19 +711,29 @@ class RomanOverlay(QWidget):
         self._list.select((current + delta) % count)
 
     # ==========================================================================
-    def commit(self, separator: str) -> None:
-        """Emit :attr:`committed` for the current text and selection.
+    def commit(self, key: int, keyText: str, modifiers: int) -> None:
+        """Emit :attr:`committed` for the current text, selection, and key.
+
+        The host derives the commit policy from the arguments: the committed
+        word from the selected row's :class:`Suggestion` (the undefined-word
+        row's blank ``Suggestion`` maps through
+        :meth:`RomanInputEngine.learnRomanWord`), and the separator from
+        ``key`` and ``keyText`` — plain ``Key_Return`` commits with a
+        newline, ``Key_Return`` with ``ControlModifier`` without one,
+        ``Key_Space`` and typed punctuation with ``keyText``, and
+        ``Key_Left`` / ``Key_Right`` (unmodified) are edge commits.
 
         Args:
-            separator: The character written to the document alongside the
-                committed word (space, newline, or punctuation); the empty
-                string for an edge commit.
+            key: The committing ``Qt.Key``.
+            keyText: The committing event's ``text()``.
+            modifiers: The committing ``Qt.KeyboardModifiers``.
         """
         self.committed.emit(
             self._lineEdit.text(),
             self._list.selectedSuggestion(),
-            self._list.isPlaceholderSelected(),
-            separator,
+            key,
+            keyText,
+            modifiers,
         )
 
     # ==========================================================================

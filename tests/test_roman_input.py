@@ -211,31 +211,38 @@ def testOverlaySeparatorCommits(app: QApplication, engine: RomanInputEngine) -> 
     """Space / Enter / punctuation commit the selected suggestion plus the char."""
     overlay, _ = _makeOverlay(app, engine)
     overlay.setText("khosh")
-    captured: list[tuple[str, Suggestion | None, bool, str]] = []
+    captured: list[tuple[str, object, int, str, int]] = []
     overlay.committed.connect(
-        lambda roman, selected, placeholder, separator: captured.append(
-            (roman, selected, placeholder, separator),
+        lambda roman, selected, key, keyText, modifiers: captured.append(
+            (roman, selected, key, keyText, modifiers),
         ),
     )
 
     lineEdit = overlay.lineEdit()
     _sendKey(lineEdit, Qt.Key.Key_Space, " ")
     assert len(captured) == 1
-    roman, selected, placeholder, separator = captured[0]
+    roman, selected, key, keyText, modifiers = captured[0]
     assert roman == "khosh"
-    assert placeholder is False
-    assert separator == " "
-    assert selected is not None and selected.arabic == "خوش"
+    assert key == Qt.Key.Key_Space
+    assert keyText == " "
+    assert modifiers == Qt.KeyboardModifier.NoModifier.value
+    assert isinstance(selected, Suggestion) and selected.arabic == "خوش"
 
     captured.clear()
     _sendKey(lineEdit, Qt.Key.Key_Return, "\n")
     assert len(captured) == 1
-    assert captured[0][3] == "\n"
+    roman, selected, key, keyText, modifiers = captured[0]
+    # Enter's keyText is platform-dependent, so assert the key and modifiers.
+    assert key == Qt.Key.Key_Return
+    assert modifiers == Qt.KeyboardModifier.NoModifier.value
 
     captured.clear()
     _sendKey(lineEdit, Qt.Key.Key_Comma, ",")
     assert len(captured) == 1
-    assert captured[0][3] == ","
+    roman, selected, key, keyText, modifiers = captured[0]
+    assert key == Qt.Key.Key_Comma
+    assert keyText == ","
+    assert modifiers == Qt.KeyboardModifier.NoModifier.value
 
 
 # ******************************************************************************
@@ -249,10 +256,10 @@ def testOverlayEdgeCommits(app: QApplication, engine: RomanInputEngine) -> None:
     """
     overlay, _ = _makeOverlay(app, engine)
     overlay.setText("khosh")
-    captured: list[tuple[str, Suggestion | None, bool, str]] = []
+    captured: list[tuple[str, object, int, str, int]] = []
     overlay.committed.connect(
-        lambda roman, selected, placeholder, separator: captured.append(
-            (roman, selected, placeholder, separator),
+        lambda roman, selected, key, keyText, modifiers: captured.append(
+            (roman, selected, key, keyText, modifiers),
         ),
     )
 
@@ -268,12 +275,18 @@ def testOverlayEdgeCommits(app: QApplication, engine: RomanInputEngine) -> None:
     lineEdit.setCursorPosition(0)
     _sendKey(lineEdit, Qt.Key.Key_Left)
     assert len(captured) == 1
-    assert captured[0][3] == ""
+    roman, selected, key, keyText, modifiers = captured[0]
+    assert key == Qt.Key.Key_Left
+    assert keyText == ""
+    assert modifiers == Qt.KeyboardModifier.NoModifier.value
 
     lineEdit.setCursorPosition(len("khosh"))
     _sendKey(lineEdit, Qt.Key.Key_Right)
     assert len(captured) == 2
-    assert captured[1][3] == ""
+    roman, selected, key, keyText, modifiers = captured[1]
+    assert key == Qt.Key.Key_Right
+    assert keyText == ""
+    assert modifiers == Qt.KeyboardModifier.NoModifier.value
 
 
 # ******************************************************************************
@@ -332,13 +345,11 @@ def _stubRows() -> list[_SuggestionRow]:
             Suggestion(arabic="word", encodedRoman="word", frequency=0),
             "word",
             0,
-            False,
         ),
         _SuggestionRow(
             Suggestion(arabic="wordlonger", encodedRoman="wordlonger", frequency=1),
             "wordlonger",
             1,
-            False,
         ),
     ]
 
@@ -549,23 +560,25 @@ def testOverlayZeroMatchesShowsPlaceholder(
     suggestionList = overlay.suggestionList()
     assert suggestionList.rowCount() == 1
     row = suggestionList.selectedRow()
-    assert row is not None and row.isPlaceholder
-    assert suggestionList.selectedSuggestion() is None
-    assert suggestionList.isPlaceholderSelected() is True
+    assert row is not None and row.suggestion.isUndefined()
+    assert suggestionList.selectedSuggestion() == Suggestion("", ZERO_MATCH_WORDS[0], 0)
+    assert suggestionList.isUndefinedWordSelected() is True
 
-    captured: list[tuple[str, Suggestion | None, bool, str]] = []
+    captured: list[tuple[str, object, int, str, int]] = []
     overlay.committed.connect(
-        lambda roman, selected, placeholder, separator: captured.append(
-            (roman, selected, placeholder, separator),
+        lambda roman, selected, key, keyText, modifiers: captured.append(
+            (roman, selected, key, keyText, modifiers),
         ),
     )
     _sendKey(overlay.lineEdit(), Qt.Key.Key_Space, " ")
     assert len(captured) == 1
-    roman, selected, placeholder, separator = captured[0]
+    roman, selected, key, keyText, modifiers = captured[0]
     assert roman == ZERO_MATCH_WORDS[0]
-    assert selected is None
-    assert placeholder is True
-    assert separator == " "
+    assert selected == Suggestion("", ZERO_MATCH_WORDS[0], 0)
+    assert isinstance(selected, Suggestion) and selected.isUndefined()
+    assert key == Qt.Key.Key_Space
+    assert keyText == " "
+    assert modifiers == Qt.KeyboardModifier.NoModifier.value
 
 
 # ******************************************************************************
@@ -582,21 +595,22 @@ def testOverlayUnavailableOffersNothing(app: QApplication, monkeypatch) -> None:
     overlay.setText("khosh")
     suggestionList = overlay.suggestionList()
     assert suggestionList.rowCount() == 0
-    assert suggestionList.isPlaceholderSelected() is False
+    assert suggestionList.isUndefinedWordSelected() is False
 
-    captured: list[tuple[str, Suggestion | None, bool, str]] = []
+    captured: list[tuple[str, object, int, str, int]] = []
     overlay.committed.connect(
-        lambda roman, selected, placeholder, separator: captured.append(
-            (roman, selected, placeholder, separator),
+        lambda roman, selected, key, keyText, modifiers: captured.append(
+            (roman, selected, key, keyText, modifiers),
         ),
     )
     _sendKey(overlay.lineEdit(), Qt.Key.Key_Space, " ")
     assert len(captured) == 1
-    roman, selected, placeholder, separator = captured[0]
+    roman, selected, key, keyText, modifiers = captured[0]
     assert roman == "khosh"
     assert selected is None
-    assert placeholder is False
-    assert separator == " "
+    assert key == Qt.Key.Key_Space
+    assert keyText == " "
+    assert modifiers == Qt.KeyboardModifier.NoModifier.value
 
 
 # ******************************************************************************
@@ -1599,6 +1613,43 @@ def testSeparatorCommits(app: QApplication) -> None:
 
 
 # ******************************************************************************
+def testCtrlReturnCommitsWithoutNewline(app: QApplication) -> None:
+    """Ctrl+Enter commits the word without a newline; plain Enter adds one."""
+
+    def setup() -> tuple[PyRaya, RomanOverlay]:
+        widget = PyRaya()
+        widget.show()
+        widget.setPlainText("hello خوش world")
+        widget.setRomanInputEnabled(True)
+        widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+        _moveCursor(widget, 7)
+        overlay = widget._overlay
+        assert overlay is not None and overlay.isVisible()
+        return widget, overlay
+
+    # Ctrl+Enter: the committed word replaces the span with no newline and
+    # no cursor navigation.
+    widget, overlay = setup()
+    _sendKey(
+        overlay.lineEdit(),
+        Qt.Key.Key_Return,
+        "\n",
+        Qt.KeyboardModifier.ControlModifier,
+    )
+    assert widget.toPlainText() == "hello خوش world"
+    assert widget.textCursor().position() == 9  # no newline after the word
+    assert widget._regionKindAt(8) == RegionType.RomanUrdu
+    _assertNoOverlay(widget)
+
+    # Plain Enter: the same commit plus a newline.
+    widget, overlay = setup()
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Return, "\n")
+    assert widget.toPlainText() == "hello خوش\n world"
+    assert widget.textCursor().position() == 10
+    _assertNoOverlay(widget)
+
+
+# ******************************************************************************
 def testEdgeCommits(app: QApplication) -> None:
     """Edge commits insert nothing and jump in visual (screen) order.
 
@@ -1822,7 +1873,7 @@ def testPlaceholderCommitScenario1And2(app: QApplication) -> None:
     assert overlay is not None and overlay.isVisible()
     overlay.setText("xqwzrty")  # zero matches -> placeholder row
     row = overlay.suggestionList().selectedRow()
-    assert row is not None and row.isPlaceholder
+    assert row is not None and row.suggestion.isUndefined()
     _sendKey(overlay.lineEdit(), Qt.Key.Key_Space, " ")
     assert widget.toPlainText() == "hello خوشxqwzrty  world"
     assert committed == [("xqwzrty", "xqwzrty")]
@@ -1844,7 +1895,7 @@ def testPlaceholderCommitScenario1And2(app: QApplication) -> None:
     assert overlay2 is not None and overlay2.isVisible()
     overlay2.setText("xqwzrty")  # zero matches -> placeholder row
     row2 = overlay2.suggestionList().selectedRow()
-    assert row2 is not None and row2.isPlaceholder
+    assert row2 is not None and row2.suggestion.isUndefined()
     _sendKey(overlay2.lineEdit(), Qt.Key.Key_Space, " ")
     assert widget2.toPlainText() == "hello xqwzrty  world"
     assert committed2 == [("xqwzrty", "xqwzrty")]

@@ -245,7 +245,7 @@ class PyRaya(QPlainTextEdit):
 
     #: Emitted when a roman-input commit writes a word to the document:
     #: ``(word, roman)`` — the word committed (the selected Arabic word, or
-    #: the typed roman for a placeholder commit) and the typed roman.
+    #: the typed roman for an undefined-word commit) and the typed roman.
     romanWordCommitted = Signal(str, str)
 
     # ==========================================================================
@@ -927,22 +927,33 @@ class PyRaya(QPlainTextEdit):
 
     # ==========================================================================
     def _onOverlayCommitted(
-        self, typedRoman: str, selected: object, isPlaceholder: bool, separator: str
+        self, typedRoman: str, selected: object, key: int, keyText: str, modifiers: int
     ) -> None:
         """Handle the overlay's commit and write to the document.
 
-        A separator-key commit (Space, Enter, typed punctuation) inserts the
-        committed word plus the separator character as a single undoable edit:
-        over an existing word (scenario 2) the word's span is replaced, at a
-        bare cursor (scenario 1) the text is inserted at the anchor position —
-        or, if the cursor had a selection, that selection is replaced.
-        The word and the separator both carry the :class:`RomanUrdu` region
-        background. An edge commit writes nothing and moves the cursor to the
-        adjacent Arabic word in visual order — Left at the visually left edge
-        (the start of the overlay text) to the next word, Right at the
-        visually right edge (the end) to the previous one — or, with no
-        adjacent word, hides the overlay and leaves the cursor at the word's
-        visually left edge.
+        Everything is derived from the signal arguments: the committed word
+        from the selected row's :class:`Suggestion` — ``""`` when no row is
+        selected, :meth:`RomanInputEngine.learnRomanWord` for the
+        undefined-word row's blank ``Suggestion`` (``isUndefined()`` true),
+        the row's ``arabic`` otherwise — and the separator from the
+        committing keystroke: the literal ``"\\n"`` for a plain ``Key_Return``
+        (whose ``keyText`` is platform-dependent), ``keyText`` for
+        ``Key_Space`` and typed punctuation, and the empty string for
+        ``Key_Return`` with ``ControlModifier`` (Ctrl+Enter commits the word
+        without a newline) and for an edge commit (``Key_Left`` /
+        ``Key_Right``, unmodified).
+
+        A separator-key commit inserts the committed word plus the separator
+        as a single undoable edit: over an existing word (scenario 2) the
+        word's span is replaced, at a bare cursor (scenario 1) the text is
+        inserted at the anchor position — or, if the cursor had a selection,
+        that selection is replaced. The word and the separator both carry the
+        :class:`RomanUrdu` region background. An edge commit writes nothing
+        and moves the cursor to the adjacent Arabic word in visual order —
+        Left at the visually left edge (the start of the overlay text) to the
+        next word, Right at the visually right edge (the end) to the previous
+        one — or, with no adjacent word, hides the overlay and leaves the
+        cursor at the word's visually left edge.
 
         ``romanWordCommitted`` is emitted for a non-empty committed word, and
         ``regionsChanged`` only for an empty-text scenario-2 commit, which
@@ -957,24 +968,33 @@ class PyRaya(QPlainTextEdit):
         resync = True
         try:
             word = ""
-            if typedRoman:
-                if isPlaceholder:
+            if isinstance(selected, Suggestion):
+                if selected.isUndefined():
                     word = engine.learnRomanWord(typedRoman)
-                elif isinstance(selected, Suggestion):
+                else:
                     word = selected.arabic
-            if separator == "":
+            edge = key in (Qt.Key.Key_Left, Qt.Key.Key_Right)
+            if edge:
+                separator = ""
+            elif key == Qt.Key.Key_Return:
+                # Enter's keyText is platform-dependent, so the newline is
+                # literal; Ctrl+Enter commits without one.
+                separator = "" if modifiers & Qt.KeyboardModifier.ControlModifier.value else "\n"
+            else:
+                separator = keyText
+            if edge:
                 # Edge commit: nothing is written to the document. Left at the
                 # visually left edge (the start of the overlay text) moves to
                 # the next Arabic word; Right at the visually right edge (the
                 # end) to the previous one. With no adjacent word the cursor
                 # lands at the word's visually left edge, outside the word, so
                 # the overlay does not re-activate on the next key press.
-                atStart = overlay.lineEdit().cursorPosition() == 0
+                forward = key == Qt.Key.Key_Left
                 if self._activeWord is not None:
-                    reference = self._activeWord[1] if atStart else self._activeWord[0]
+                    reference = self._activeWord[1] if forward else self._activeWord[0]
                 else:
                     reference = self._anchorPosition or 0
-                adjacent = self._adjacentWord(reference, not atStart)
+                adjacent = self._adjacentWord(reference, not forward)
                 if adjacent is None:
                     if self._activeWord is not None:
                         cursor = self.textCursor()
