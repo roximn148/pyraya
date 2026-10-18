@@ -1653,12 +1653,13 @@ def testCtrlReturnCommitsWithoutNewline(app: QApplication) -> None:
 def testEdgeCommits(app: QApplication) -> None:
     """Edge commits insert nothing and jump in visual (screen) order.
 
-    Activation places the line edit cursor at the position corresponding to
-    the document cursor, so arrow keys move in visual order and edge commits
-    fire only at the actual edges: Right at the overlay's visually right edge
-    (the text end) commits to the previous word, and Left at its visually left
-    edge (the text start) commits to the next word. With no adjacent word, the
-    overlay hides and the cursor lands at the word's visually left edge.
+    Activation places the line edit cursor at the position that
+    proportionally mirror-maps the document cursor across the word, so arrow
+    keys move in visual order and edge commits fire only at the actual edges:
+    Right at the overlay's visually right edge (the text end) commits to the
+    previous word, and Left at its visually left edge (the text start) commits
+    to the next word. With no adjacent word, the overlay hides and the cursor
+    lands at the word's visually left edge.
     """
     widget = PyRaya()
     widget.show()
@@ -1670,15 +1671,16 @@ def testEdgeCommits(app: QApplication) -> None:
     overlay = widget._overlay
     assert overlay is not None and overlay.isVisible()
     assert overlay.lineEdit().text() == "khosh"
-    # The document cursor sits inside the word (after its first character),
-    # so the line edit cursor is placed at the corresponding interior
-    # position, not at the text end.
-    assert overlay.lineEdit().cursorPosition() == 1
+    # The document cursor sits one third of the way from the word's visually
+    # right edge, so the proportional mirror map places the line edit cursor
+    # the same fraction from the text end (position 3 of "khosh"), not at
+    # the text end.
+    assert overlay.lineEdit().cursorPosition() == 3
 
     # Walking Right reaches the visually right edge (the text end), where the
     # next Right edge-commits: no Arabic word before خوش -> the overlay hides
     # and the cursor lands at the word's visually left edge (9).
-    for _ in range(4):
+    for _ in range(2):
         _sendKey(overlay.lineEdit(), Qt.Key.Key_Right, "")
     assert overlay.lineEdit().cursorPosition() == 5
     _sendKey(overlay.lineEdit(), Qt.Key.Key_Right, "")
@@ -1693,13 +1695,17 @@ def testEdgeCommits(app: QApplication) -> None:
     overlay = widget._overlay
     assert overlay is not None and overlay.isVisible()
     assert overlay.lineEdit().text() == "dost"
-    # The document cursor lands at the word's start, so the line edit cursor
-    # is placed at the text start (the visually left edge).
-    assert overlay.lineEdit().cursorPosition() == 0
+    # The document cursor lands at the word's start (its visually right
+    # edge), so the mirror map places the line edit cursor at the text end
+    # (the visually right edge).
+    assert overlay.lineEdit().cursorPosition() == 4
 
-    # Left at the visually left edge overflows immediately; no next word
-    # exists, so the overlay hides at the line's visually left edge
-    # (position 20).
+    # Walking Left reaches the visually left edge (the text start), where
+    # the next Left edge-commits; no next word exists, so the overlay hides
+    # at the line's visually left edge (position 20).
+    for _ in range(4):
+        _sendKey(overlay.lineEdit(), Qt.Key.Key_Left, "")
+    assert overlay.lineEdit().cursorPosition() == 0
     _sendKey(overlay.lineEdit(), Qt.Key.Key_Left, "")
     assert widget.textCursor().position() == 20
     _assertNoOverlay(widget)
@@ -1716,23 +1722,23 @@ def testEdgeCommits(app: QApplication) -> None:
     overlay3 = widget3._overlay
     assert overlay3 is not None and overlay3.isVisible()
     assert overlay3.lineEdit().text() == "dost"
-    assert overlay3.lineEdit().cursorPosition() == 1
+    # The document cursor sits one quarter of the way from the word's
+    # visually right edge, so the mirror map places the line edit cursor the
+    # same fraction from the text end (position 3 of "dost").
+    assert overlay3.lineEdit().cursorPosition() == 3
     # Walk to the visually right edge (the text end).
-    for _ in range(3):
-        _sendKey(overlay3.lineEdit(), Qt.Key.Key_Right, "")
+    _sendKey(overlay3.lineEdit(), Qt.Key.Key_Right, "")
     assert overlay3.lineEdit().cursorPosition() == 4
     # Right at the end edge-commits to the previous word (خوش), whose line
-    # edit cursor is placed at the text start.
+    # edit cursor is placed at the text end: the document cursor lands at
+    # the word's visually right edge (the word's start).
     _sendKey(overlay3.lineEdit(), Qt.Key.Key_Right, "")
     overlay3 = widget3._overlay
     assert overlay3 is not None and overlay3.isVisible()
     assert overlay3.lineEdit().text() == "khosh"
-    assert overlay3.lineEdit().cursorPosition() == 0
-    # Walk to the end again; Right edge-commits with no previous word, so the
-    # overlay hides at the word's visually left edge (9).
-    for _ in range(5):
-        _sendKey(overlay3.lineEdit(), Qt.Key.Key_Right, "")
     assert overlay3.lineEdit().cursorPosition() == 5
+    # Right at the end edge-commits with no previous word, so the overlay
+    # hides at the word's visually left edge (9).
     _sendKey(overlay3.lineEdit(), Qt.Key.Key_Right, "")
     assert widget3.toPlainText() == text
     assert widget3.textCursor().position() == 9
@@ -1750,9 +1756,13 @@ def testEdgeCommits(app: QApplication) -> None:
     overlay2 = widget2._overlay
     assert overlay2 is not None and overlay2.isVisible()
     assert overlay2.lineEdit().text() == "khosh"
-    assert overlay2.lineEdit().cursorPosition() == 1
+    # The document cursor sits one third of the way from the word's visually
+    # right edge, so the mirror map places the line edit cursor the same
+    # fraction from the text end (position 3 of "khosh").
+    assert overlay2.lineEdit().cursorPosition() == 3
     # Walk to the visually left edge (the text start).
-    _sendKey(overlay2.lineEdit(), Qt.Key.Key_Left, "")
+    for _ in range(3):
+        _sendKey(overlay2.lineEdit(), Qt.Key.Key_Left, "")
     assert overlay2.lineEdit().cursorPosition() == 0
     # Left at the start overflows with no next word -> the overlay hides at
     # the word's visually left edge (9).

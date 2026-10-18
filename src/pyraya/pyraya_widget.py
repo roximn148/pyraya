@@ -821,10 +821,12 @@ class PyRaya(QPlainTextEdit):
         """Show the overlay over the word with its romanization as text.
 
         Focus moves into the overlay's line edit, where all subsequent typing
-        happens; the document is left untouched until a commit. The line edit's
-        cursor is placed at the position corresponding to the document cursor
-        (``p - start``), so arrow keys continue to move in visual order
-        without immediately triggering an edge commit.
+        happens; the document is left untouched until a commit. The line
+        edit's cursor is placed at the position that proportionally
+        mirror-maps the document cursor position across the word
+        (0..len(roman)) — the document cursor's fraction of the word's
+        visual width, scaled to the roman word's length — so arrow keys start
+        at the visually corresponding position in visual order.
         """
         engine = self.romanEngine()
         if engine is None:
@@ -833,9 +835,9 @@ class PyRaya(QPlainTextEdit):
         document = self.document()
         roman = engine.romanizeArabic(document.toPlainText()[word[0] : word[1]])
         overlay.setText(roman)
-        # Place the line edit cursor at the position corresponding to the
-        # document cursor, so arrow keys move in visual order without
-        # immediately triggering an edge commit.
+        # Place the line edit cursor at the position that proportionally
+        # mirror-maps the document cursor across the word, so arrow keys
+        # move in visual order from the visually corresponding position.
         docPos = self.textCursor().position()
         # Mirror-map docPos (in the document word) into the roman word, 0..len(roman),
         # rounded to the nearest character
