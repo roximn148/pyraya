@@ -1602,10 +1602,12 @@ def testSeparatorCommits(app: QApplication) -> None:
 def testEdgeCommits(app: QApplication) -> None:
     """Edge commits insert nothing and jump in visual (screen) order.
 
-    Right at the overlay's visually right edge (the text end) commits to the
-    previous word; Left at its visually left edge (the text start) commits to
-    the next word. With no adjacent word, the overlay hides and the cursor
-    lands at the word's visually left edge.
+    Activation places the line edit cursor at the position corresponding to
+    the document cursor, so arrow keys move in visual order and edge commits
+    fire only at the actual edges: Right at the overlay's visually right edge
+    (the text end) commits to the previous word, and Left at its visually left
+    edge (the text start) commits to the next word. With no adjacent word, the
+    overlay hides and the cursor lands at the word's visually left edge.
     """
     widget = PyRaya()
     widget.show()
@@ -1617,10 +1619,17 @@ def testEdgeCommits(app: QApplication) -> None:
     overlay = widget._overlay
     assert overlay is not None and overlay.isVisible()
     assert overlay.lineEdit().text() == "khosh"
-    assert overlay.lineEdit().cursorPosition() == 5  # at the word's right edge
+    # The document cursor sits inside the word (after its first character),
+    # so the line edit cursor is placed at the corresponding interior
+    # position, not at the text end.
+    assert overlay.lineEdit().cursorPosition() == 1
 
-    # Right at the visually right edge: no word before خوش -> the overlay
-    # hides and the cursor lands at the word's visually left edge (9).
+    # Walking Right reaches the visually right edge (the text end), where the
+    # next Right edge-commits: no Arabic word before خوش -> the overlay hides
+    # and the cursor lands at the word's visually left edge (9).
+    for _ in range(4):
+        _sendKey(overlay.lineEdit(), Qt.Key.Key_Right, "")
+    assert overlay.lineEdit().cursorPosition() == 5
     _sendKey(overlay.lineEdit(), Qt.Key.Key_Right, "")
     assert widget.toPlainText() == text  # nothing inserted
     assert widget.textCursor().position() == 9
@@ -1633,18 +1642,20 @@ def testEdgeCommits(app: QApplication) -> None:
     overlay = widget._overlay
     assert overlay is not None and overlay.isVisible()
     assert overlay.lineEdit().text() == "dost"
+    # The document cursor lands at the word's start, so the line edit cursor
+    # is placed at the text start (the visually left edge).
+    assert overlay.lineEdit().cursorPosition() == 0
 
-    # Continuing Left traverses the roman word and overflows at the visually
-    # left edge; no next word exists, so the overlay hides at the line's
-    # visually left edge (position 20).
-    for _ in range(5):
-        _sendKey(overlay.lineEdit(), Qt.Key.Key_Left, "")
-    assert widget.toPlainText() == text
+    # Left at the visually left edge overflows immediately; no next word
+    # exists, so the overlay hides at the line's visually left edge
+    # (position 20).
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Left, "")
     assert widget.textCursor().position() == 20
     _assertNoOverlay(widget)
 
-    # Mirror: Right from دوست reaches خوش, then Right at its visually right
-    # edge hides the overlay at position 9.
+    # Mirror: Right from دوست walks to its visually right edge, then
+    # edge-commits to خوش, whose visually right edge is reached and
+    # edge-committed again with no previous word -> the overlay hides at 9.
     widget3 = PyRaya()
     widget3.show()
     widget3.setPlainText(text)
@@ -1654,17 +1665,31 @@ def testEdgeCommits(app: QApplication) -> None:
     overlay3 = widget3._overlay
     assert overlay3 is not None and overlay3.isVisible()
     assert overlay3.lineEdit().text() == "dost"
+    assert overlay3.lineEdit().cursorPosition() == 1
+    # Walk to the visually right edge (the text end).
+    for _ in range(3):
+        _sendKey(overlay3.lineEdit(), Qt.Key.Key_Right, "")
+    assert overlay3.lineEdit().cursorPosition() == 4
+    # Right at the end edge-commits to the previous word (خوش), whose line
+    # edit cursor is placed at the text start.
     _sendKey(overlay3.lineEdit(), Qt.Key.Key_Right, "")
     overlay3 = widget3._overlay
     assert overlay3 is not None and overlay3.isVisible()
     assert overlay3.lineEdit().text() == "khosh"
+    assert overlay3.lineEdit().cursorPosition() == 0
+    # Walk to the end again; Right edge-commits with no previous word, so the
+    # overlay hides at the word's visually left edge (9).
+    for _ in range(5):
+        _sendKey(overlay3.lineEdit(), Qt.Key.Key_Right, "")
+    assert overlay3.lineEdit().cursorPosition() == 5
     _sendKey(overlay3.lineEdit(), Qt.Key.Key_Right, "")
     assert widget3.toPlainText() == text
     assert widget3.textCursor().position() == 9
     _assertNoOverlay(widget3)
 
-    # A single-word document: Left from the visually right edge overflows
-    # with no next word -> the overlay hides at the visually left edge.
+    # A single-word document: Left from the interior reaches the visually
+    # left edge, where the next Left overflows with no next word -> the
+    # overlay hides at the word's visually left edge.
     widget2 = PyRaya()
     widget2.show()
     widget2.setPlainText("world خوش")
@@ -1673,9 +1698,13 @@ def testEdgeCommits(app: QApplication) -> None:
     _moveCursor(widget2, 7)
     overlay2 = widget2._overlay
     assert overlay2 is not None and overlay2.isVisible()
-    for _ in range(5):
-        _sendKey(overlay2.lineEdit(), Qt.Key.Key_Left, "")
+    assert overlay2.lineEdit().text() == "khosh"
+    assert overlay2.lineEdit().cursorPosition() == 1
+    # Walk to the visually left edge (the text start).
+    _sendKey(overlay2.lineEdit(), Qt.Key.Key_Left, "")
     assert overlay2.lineEdit().cursorPosition() == 0
+    # Left at the start overflows with no next word -> the overlay hides at
+    # the word's visually left edge (9).
     _sendKey(overlay2.lineEdit(), Qt.Key.Key_Left, "")
     assert widget2.toPlainText() == "world خوش"
     assert widget2.textCursor().position() == 9
