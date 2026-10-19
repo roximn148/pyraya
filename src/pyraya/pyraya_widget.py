@@ -17,7 +17,7 @@ identified by a unique background color, compared including its alpha
 channel.
 """
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import cast
 
 from PySide6.QtCore import QPoint, QRect, QRegularExpression, Qt, Signal
@@ -60,6 +60,9 @@ pyrayaFonts: tuple[str, ...] = (
 #: Default point size applied to the default font.
 defaultFontSize: float = 14.0
 
+#: Muted brick red used for the spell-check underline.
+spellCheckUnderlineColor: QColor = QColor("#B22222")
+
 
 def _isArabicChar(char: str) -> bool:
     """Whether a character belongs to the Arabic script block (U+0600-U+06FF)."""
@@ -85,11 +88,22 @@ class PyRayaHighlighter(QSyntaxHighlighter):
 
     Args:
         document: The document to highlight.
+        engineProvider: Optional callable returning the roman-input
+            engine (or ``None``) that the spell-check pass queries for
+            dictionary membership; ``None`` disables the pass. When
+            provided, the pass is gated by the highlighter's own
+            :meth:`isSpellCheckEnabled` flag.
     """
 
     # ==========================================================================
-    def __init__(self, document: QTextDocument) -> None:
+    def __init__(
+        self,
+        document: QTextDocument,
+        engineProvider: Callable[[], RomanInputEngine | None] | None = None,
+    ) -> None:
         super().__init__(document)
+        self._engineProvider = engineProvider
+        self._spellCheckEnabled = True
         self._rules: list[tuple[QRegularExpression, QTextCharFormat]] = []
         self._installDefaultRules()
 
@@ -133,7 +147,10 @@ class PyRayaHighlighter(QSyntaxHighlighter):
         After the rules, runs of characters without a recognized region
         background are painted with the
         :data:`~pyraya.regions.defaultRegionKind` background in the text
-        layout.
+        layout. When spell check is enabled, RomanUrdu words the
+        dictionary does not know additionally get the wavy spell-check
+        underline, painted into the text layout only (see
+        :meth:`setSpellCheckEnabled`).
 
         Args:
             block: The text of the block to highlight.
@@ -146,6 +163,7 @@ class PyRayaHighlighter(QSyntaxHighlighter):
                 length = match.capturedLength(0)
                 self.setFormat(start, length, charFormat)
         self._paintDefaultRegions(block)
+        self._underlineUnknownWords(block)
 
     # ==========================================================================
     def _paintDefaultRegions(self, block: str) -> None:
@@ -185,6 +203,101 @@ class PyRayaHighlighter(QSyntaxHighlighter):
         """Return True if the format carries a recognized region background."""
         color = charFormat.background().color()
         return any(color == regionColor for regionColor in RegionColors.values())
+
+    # ==========================================================================
+    def setSpellCheckEnabled(self, enabled: bool) -> None:
+        """Enable or disable the spell-check underline, re-highlighting.
+
+        While enabled, RomanUrdu words the dictionary does not know get
+        the wavy :data:`spellCheckUnderlineColor` underline in the text
+        layout (display only — the document's character formats and the
+        undo stack are never touched). Toggling re-highlights the whole
+        document, so the underline is removed or restored immediately.
+
+        Args:
+            enabled: Whether unknown RomanUrdu words are underlined.
+        """
+        if self._spellCheckEnabled == enabled:
+            return
+        self._spellCheckEnabled = enabled
+        self.rehighlight()
+
+    # ==========================================================================
+    def isSpellCheckEnabled(self) -> bool:
+        """Whether the spell-check underline is active."""
+        return self._spellCheckEnabled
+
+    # ==========================================================================
+    def _underlineUnknownWords(self, block: str) -> None:
+        """Paint the wavy spell-check underline under unknown RomanUrdu words.
+
+        The maximal Arabic-script runs whose ends both belong to RomanUrdu
+        regions are collected as candidate words first; with no candidates
+        the pass returns without touching the engine provider, so the
+        engine (and its dictionary cold load) is created only the first
+        time a block containing a candidate word is re-highlighted. Each
+        candidate is then consulted against the engine, and a word the
+        dictionary does not know is underlined with
+        :data:`spellCheckUnderlineColor` in the text layout, merged over
+        the character's other layout formats. The document's character
+        formats are never modified. The pass is also a no-op while spell
+        check is disabled, or when the engine provider returns ``None`` or
+        an unavailable engine (a missing dictionary must never underline
+        every word).
+
+        Args:
+            block: The text of the block being highlighted.
+        """
+        if not self._spellCheckEnabled:
+            return
+        base = self.currentBlock().position()
+        limit = len(block)
+        candidates: list[tuple[int, int]] = []
+        position = 0
+        while position < limit:
+            if not _isArabicChar(block[position]):
+                position += 1
+                continue
+            start = position
+            while position < limit and _isArabicChar(block[position]):
+                position += 1
+            end = position
+            if (
+                self._regionKindAt(base + start) is not RegionType.RomanUrdu
+                or self._regionKindAt(base + end - 1) is not RegionType.RomanUrdu
+            ):
+                continue
+            candidates.append((start, end))
+        if not candidates:
+            return
+        provider = self._engineProvider
+        engine = provider() if provider is not None else None
+        if engine is None or not engine.available:
+            return
+        for start, end in candidates:
+            if engine.hasWord(block[start:end]):
+                continue
+            for pos in range(start, end):
+                merged = self.format(pos)
+                merged.setUnderlineStyle(QTextCharFormat.UnderlineStyle.SpellCheckUnderline)
+                merged.setUnderlineColor(spellCheckUnderlineColor)
+                self.setFormat(pos, 1, merged)
+
+    # ==========================================================================
+    def _regionKindAt(self, position: int) -> RegionType:
+        """Return the region kind stored at a document character offset.
+
+        A character whose background matches no region color belongs to
+        :data:`~pyraya.regions.defaultRegionKind`, keeping the invariant
+        that every character belongs to exactly one kind.
+        """
+        cursor = QTextCursor(self.document())
+        cursor.setPosition(position + 1)
+        color = cursor.charFormat().background().color()
+        for kind, regionColor in RegionColors.items():
+            if color == regionColor:
+                return kind
+        return defaultRegionKind
 
     # ==========================================================================
     def _installDefaultRules(self) -> None:
@@ -262,7 +375,25 @@ class PyRaya(QPlainTextEdit):
         self._applyFont()
         self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self.setShowWhitespace(True)
-        self._highlighter = PyRayaHighlighter(self.document())
+        # Roman-input overlay state: the feature and assist mode are on by
+        # default so the widget is ready for roman Urdu out of the box; the
+        # dictionary and engine are owned by the widget (the engine is
+        # created lazily on demand). All of these fields must exist before
+        # the highlighter is constructed: its constructor re-highlights
+        # (even the empty) document, and the spell-check pass queries the
+        # shared engine through the provider passed below.
+        self._romanInputEnabled = True
+        self._assistMode = True
+        self._localDictionary = Vocabulary()
+        self._romanEngine: RomanInputEngine | None = None
+        self._activeWord: tuple[int, int] | None = None
+        self._anchorPosition: int | None = None
+        self._selectionRange: tuple[int, int] | None = None
+        self._committing = False
+        self._mouseActive = False
+        self._minOverlayWidth: int = 0
+        self._overlay: RomanOverlay | None = None
+        self._highlighter = PyRayaHighlighter(self.document(), engineProvider=self._spellEngine)
         # Aligning the initial (empty) document records an undo command;
         # disable undo/redo around it so no phantom command is left behind.
         document = self.document()
@@ -277,21 +408,6 @@ class PyRaya(QPlainTextEdit):
         # context menu event reaches the widget's viewport.
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._onCustomContextMenuRequested)
-        # Roman-input overlay state: the feature and assist mode are on by
-        # default so the widget is ready for roman Urdu out of the box; the
-        # dictionary and engine are owned by the widget (the engine is
-        # created lazily on demand).
-        self._romanInputEnabled = True
-        self._assistMode = True
-        self._localDictionary = Vocabulary()
-        self._romanEngine: RomanInputEngine | None = None
-        self._activeWord: tuple[int, int] | None = None
-        self._anchorPosition: int | None = None
-        self._selectionRange: tuple[int, int] | None = None
-        self._committing = False
-        self._mouseActive = False
-        self._minOverlayWidth: int = 0
-        self._overlay: RomanOverlay | None = None
         # PySide6 emits the widget's cursorPositionChanged without its
         # position argument to Python slots, so the sync handler must be
         # argument-free; the document's cursorPositionChanged is not emitted
@@ -611,9 +727,53 @@ class PyRaya(QPlainTextEdit):
         """
         if not self._romanInputEnabled:
             return None
+        return self._ensureEngine()
+
+    # ==========================================================================
+    def setSpellCheckEnabled(self, enabled: bool) -> None:
+        """Enable or disable the spell-check underline.
+
+        On by default, fully independent of the roman-input feature:
+        RomanUrdu words the dictionary does not keep getting the wavy
+        underline while roman input is disabled, and vice versa. Toggling
+        re-highlights the whole document.
+
+        Args:
+            enabled: Whether unknown RomanUrdu words are underlined.
+        """
+        self._highlighter.setSpellCheckEnabled(enabled)
+
+    # ==========================================================================
+    def isSpellCheckEnabled(self) -> bool:
+        """Whether the spell-check underline is active."""
+        return self._highlighter.isSpellCheckEnabled()
+
+    # ==========================================================================
+    def _ensureEngine(self) -> RomanInputEngine:
+        """The shared roman-input engine, created lazily when either feature
+        needs it.
+
+        Both the roman-input overlay and the spell-check pass consult the
+        same engine instance, so the ~0.2 s dictionary cold load happens
+        at most once per widget.
+
+        Returns:
+            The shared engine, creating it on first use.
+        """
         if self._romanEngine is None:
             self._romanEngine = RomanInputEngine(self._localDictionary)
         return self._romanEngine
+
+    # ==========================================================================
+    def _spellEngine(self) -> RomanInputEngine:
+        """The spell-check pass's engine provider.
+
+        Returns the shared engine unconditionally: the highlighter gates
+        the pass on its own switch, and the widget accessor must not
+        depend on the roman-input flag or ``romanEngine()``'s
+        None-while-disabled contract.
+        """
+        return self._ensureEngine()
 
     # ==========================================================================
     def _syncOverlay(self, *, bypassMouse: bool = False) -> None:

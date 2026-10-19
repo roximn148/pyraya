@@ -198,6 +198,26 @@ class RomanInputEngine:
         return merged
 
     # ==========================================================================
+    def hasWord(self, arabicWord: str) -> bool:
+        """Whether the dictionary knows the given Arabic-script word.
+
+        A plain membership check on the romanalfaz engine (normalized
+        spelling comparison); no edit-distance suggestions are generated.
+
+        Args:
+            arabicWord: The Arabic-script word to check.
+
+        Returns:
+            True if the word is in the dictionary; False when the engine
+            is unavailable (mirroring ``suggest`` / ``suggestTiers``) or
+            the word is not known.
+        """
+        alfaz = self._alfaz
+        if not self.available or alfaz is None:
+            return False
+        return alfaz.hasWord(arabicWord)
+
+    # ==========================================================================
     def romanizeArabic(self, arabicWord: str) -> str:
         """Romanize an Arabic-script word into the encoded roman form.
 
