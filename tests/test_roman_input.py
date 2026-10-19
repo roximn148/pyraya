@@ -874,17 +874,97 @@ def testNoOverlayOnPartialContainment(app: QApplication) -> None:
 
 
 # ******************************************************************************
-def testNoOverlayAtTrailingTerminator(app: QApplication) -> None:
-    """A cursor on the trailing terminator never activates the overlay."""
+def testWordEndActivatesOverlay(app: QApplication) -> None:
+    """A cursor at a word's end is over the word and activates the overlay.
+
+    The containment includes the run's end: a cursor after the word's last
+    character — mid-document, or at the trailing terminator — activates the
+    overlay over the word, with the line edit cursor mirror-mapped to the
+    text start; a cursor with no word run behind it does not activate.
+    """
     widget = PyRaya()
     widget.show()
-    widget.setPlainText("hello خوش")
+    widget.setPlainText("hello خوش world")
     widget.setRomanInputEnabled(True)
     widget.setRegionType(RegionType.RomanUrdu, 6, 9)
-    _moveCursor(widget, 9)  # the trailing terminator position
+    _moveCursor(widget, 9)  # the word end, before the space
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    assert overlay.lineEdit().text() == "khosh"
+    assert overlay.lineEdit().cursorPosition() == 0  # mirror-mapped to the text start
+    # the trailing terminator position: the last word's end
+    widget.setPlainText("hello خوش")
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 9)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    assert overlay.lineEdit().text() == "khosh"
+    _moveCursor(widget, 0)  # no word run behind the cursor
     _assertNoOverlay(widget)
-    _moveCursor(widget, 0)  # back to a valid position: still no crash
+
+
+# ******************************************************************************
+def testOverlayStaysActiveAtWordEnd(app: QApplication) -> None:
+    """Walking to the word end keeps the overlay active; leaving the word hides it."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello خوش world")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    _moveCursor(widget, 8)  # still inside
+    assert overlay.isVisible()
+    _moveCursor(widget, 9)  # the word end: still over the word, no re-activation
+    assert overlay.isVisible()
+    assert overlay.lineEdit().text() == "khosh"
+    _moveCursor(widget, 10)  # past the word
     _assertNoOverlay(widget)
+
+
+# ******************************************************************************
+def testMouseReleaseAtWordEndReactivates(app: QApplication) -> None:
+    """A mouse release at the word end re-activates the overlay (scenario 2).
+
+    A release at the word's visually left edge lands the cursor at the word
+    end, which is over the word, so the release resync re-activates the
+    overlay with the romanized word.
+    """
+    widget = PyRaya()
+    widget.resize(640, 480)
+    widget.show()
+    widget.setPlainText("hello خوش world")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    wordRect = widget._wordRect(6, 9)
+    point = (wordRect.left() + 1, wordRect.top() + 5)  # one pixel inside the left edge
+    _sendMouse(widget, "press", point[0], point[1])
+    _sendMouse(widget, "release", point[0], point[1])
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    engine = widget.romanEngine()
+    assert engine is not None
+    assert overlay.lineEdit().text() == engine.romanizeArabic("خوش")
+
+
+# ******************************************************************************
+def testCtrlSpaceAtWordEndActivatesOverlay(app: QApplication) -> None:
+    """Ctrl+Space at the word end activates the overlay over the word."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello خوش world")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 9)  # the word end: the cursor move activates the overlay
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Escape, "")  # dismiss it (assist mode off)
+    _assertNoOverlay(widget)
+    _sendKey(widget, Qt.Key.Key_Space, " ", Qt.KeyboardModifier.ControlModifier)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    assert overlay.lineEdit().text() == "khosh"  # the word, not an empty seed
 
 
 # ******************************************************************************
@@ -1099,7 +1179,7 @@ def testOverlayStaysPinnedWhileEditing(app: QApplication) -> None:
     widget.show()
     widget.setPlainText("hello خوش ")
     widget.setRegionType(RegionType.RomanUrdu, 0, 10)
-    _moveCursor(widget, 9)  # a bare cursor in a RomanUrdu region
+    _moveCursor(widget, 10)  # the document end (a bare cursor position)
     _sendKey(widget, Qt.Key.Key_D, "d")  # seeds the overlay; several rows
     overlay = widget._overlay
     assert overlay is not None and overlay.isVisible()
@@ -1213,8 +1293,8 @@ def testRomanKeystrokeInterceptedInSpan(app: QApplication) -> None:
     widget.show()
     widget.setPlainText("hello خوش world")
     widget.setRomanInputEnabled(True)
-    widget.setRegionType(RegionType.RomanUrdu, 6, 10)  # word plus trailing space
-    _moveCursor(widget, 9)  # the space inside the span (a non-word position)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 11)  # word, space, and the Latin word
+    _moveCursor(widget, 10)  # the start of the Latin word (a non-word position)
     _assertNoOverlay(widget)
     _sendKey(widget, Qt.Key.Key_K, "k")
     overlay = widget._overlay
@@ -1264,8 +1344,8 @@ def testReactivationAfterCommit(app: QApplication) -> None:
     _moveCursor(widget, 7)
     overlay = widget._overlay
     assert overlay is not None and overlay.isVisible()
-    # simulate the post-commit state: cursor inside the span, no active word
-    _moveCursor(widget, 9)
+    # simulate the post-commit state: cursor at a non-word position, no active word
+    _moveCursor(widget, 10)
     _assertNoOverlay(widget)
     _sendKey(widget, Qt.Key.Key_K, "k")
     overlay = widget._overlay
@@ -1453,8 +1533,12 @@ def testDragAcrossWordCreatesSelection(app: QApplication) -> None:
     cursor = widget.textCursor()
     assert cursor.hasSelection()
     assert (cursor.selectionStart(), cursor.selectionEnd()) == (6, 9)
-    # The cursor settled on the word's trailing space, so no overlay.
-    assert not widget._overlayActive()
+    # The cursor settled on the word's end, which is over the word, so the
+    # release resync re-activates the overlay over it (line edit cursor at
+    # the text start, mirroring the word's end).
+    assert widget._overlayActive()
+    assert widget._activeWord == (6, 9)
+    assert overlay.lineEdit().text() == "khosh"
     assert not widget._mouseActive
 
 
@@ -1480,9 +1564,11 @@ def testShiftDragExtendsSelection(app: QApplication) -> None:
     cursor = widget.textCursor()
     assert cursor.hasSelection()
     # The shift press anchored the original cursor position (7); the drag
-    # extended the selection to the release point (the word's end).
+    # extended the selection to the release point (the word's end), which is
+    # over the word, so the release resync re-activates the overlay over it.
     assert (cursor.selectionStart(), cursor.selectionEnd()) == (7, 9)
-    assert not widget._overlayActive()
+    assert widget._overlayActive()
+    assert widget._activeWord == (6, 9)
     assert not widget._mouseActive
 
 
@@ -1644,6 +1730,13 @@ def testCtrlReturnCommitsWithoutNewline(app: QApplication) -> None:
     assert widget.textCursor().position() == 9  # no newline after the word
     assert widget._regionKindAt(8) == RegionType.RomanUrdu
     _assertNoOverlay(widget)
+    # the resync was skipped: the cursor rests at the committed word's end,
+    # over the word, but the overlay the user just dismissed is not shown;
+    # Ctrl+Space re-triggers it over the word
+    _sendKey(widget, Qt.Key.Key_Space, " ", Qt.KeyboardModifier.ControlModifier)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    assert overlay.lineEdit().text() == "khosh"
 
     # Plain Enter: the same commit plus a newline.
     widget, overlay = setup()
@@ -1663,12 +1756,12 @@ def testEdgeCommits(app: QApplication) -> None:
     Right at the overlay's visually right edge (the text end) commits to the
     previous word, and Left at its visually left edge (the text start) commits
     to the next word. When that word exists, the cursor lands at its edge
-    facing the active word — Right at its end (outside, so the resync hides
-    the overlay), Left at its start (inside, so the resync jumps the overlay
-    to it) — and with no adjacent word the target is the active word and the
-    cursor lands at the edge that mirrors the committing edge (Right at the
-    word's start, inside, so the resync re-activates the overlay) and hides
-    it over a Left one (outside).
+    facing the active word — Right at its end, Left at its start — and the
+    resync re-activates the overlay over the landed word (a cursor at the
+    word's end is over the word). With no adjacent word the target is the
+    active word itself and the cursor lands at the edge that mirrors the
+    committing edge — Right at its start, Left at its end — and the resync
+    re-activates the overlay over both.
     """
     widget = PyRaya()
     widget.show()
@@ -1716,19 +1809,23 @@ def testEdgeCommits(app: QApplication) -> None:
     assert overlay.lineEdit().cursorPosition() == 4
 
     # Walking Left reaches the visually left edge (the text start), where
-    # the next Left edge-commits; no next word exists, so the overlay hides
-    # at the line's visually left edge (position 20).
+    # the next Left edge-commits; no next word exists, so the cursor lands at
+    # the word's end (position 20) and the resync re-activates the overlay
+    # over the word — the mirror of the Right commit over the first word.
     for _ in range(4):
         _sendKey(overlay.lineEdit(), Qt.Key.Key_Left, "")
     assert overlay.lineEdit().cursorPosition() == 0
     _sendKey(overlay.lineEdit(), Qt.Key.Key_Left, "")
     assert widget.textCursor().position() == 20
-    _assertNoOverlay(widget)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    assert overlay.lineEdit().text() == "dost"
+    assert overlay.lineEdit().cursorPosition() == 0
 
     # Right from دوست walks to its visually right edge, then edge-commits to
     # the previous word (خوش): the cursor lands at that word's edge facing
-    # the active word (its end, 9, outside the word), and the resync hides
-    # the overlay.
+    # the active word (its end, 9), and the resync re-activates the overlay
+    # over it.
     widget3 = PyRaya()
     widget3.show()
     widget3.setPlainText(text)
@@ -1746,12 +1843,16 @@ def testEdgeCommits(app: QApplication) -> None:
     _sendKey(overlay3.lineEdit(), Qt.Key.Key_Right, "")
     assert overlay3.lineEdit().cursorPosition() == 4
     # Right at the end edge-commits to the previous word (خوش): the cursor
-    # lands at that word's edge facing the active word (its end, 9, outside
-    # the word), and the resync hides the overlay.
+    # lands at that word's edge facing the active word (its end, 9), and the
+    # resync re-activates the overlay over it (line edit cursor at the text
+    # start, mirroring the word's end).
     _sendKey(overlay3.lineEdit(), Qt.Key.Key_Right, "")
     assert widget3.toPlainText() == text
     assert widget3.textCursor().position() == 9
-    _assertNoOverlay(widget3)
+    overlay3 = widget3._overlay
+    assert overlay3 is not None and overlay3.isVisible()
+    assert overlay3.lineEdit().text() == "khosh"
+    assert overlay3.lineEdit().cursorPosition() == 0
 
     # Left from خوش walks to its visually left edge, then edge-commits to
     # the next word (دوست): the cursor lands at that word's edge facing the
@@ -1788,7 +1889,8 @@ def testEdgeCommits(app: QApplication) -> None:
 
     # A single-word document: Left from the interior reaches the visually
     # left edge, where the next Left overflows with no next word -> the
-    # overlay hides at the word's visually left edge.
+    # cursor lands at the word's end (9) and the resync re-activates the
+    # overlay over the word.
     widget2 = PyRaya()
     widget2.show()
     widget2.setPlainText("world خوش")
@@ -1806,12 +1908,16 @@ def testEdgeCommits(app: QApplication) -> None:
     for _ in range(3):
         _sendKey(overlay2.lineEdit(), Qt.Key.Key_Left, "")
     assert overlay2.lineEdit().cursorPosition() == 0
-    # Left at the start overflows with no next word -> the overlay hides at
-    # the word's visually left edge (9).
+    # Left at the start overflows with no next word -> the cursor lands at
+    # the word's end (9) and the resync re-activates the overlay over the
+    # word (line edit cursor at the text start, mirroring the word's end).
     _sendKey(overlay2.lineEdit(), Qt.Key.Key_Left, "")
     assert widget2.toPlainText() == "world خوش"
     assert widget2.textCursor().position() == 9
-    _assertNoOverlay(widget2)
+    overlay2 = widget2._overlay
+    assert overlay2 is not None and overlay2.isVisible()
+    assert overlay2.lineEdit().text() == "khosh"
+    assert overlay2.lineEdit().cursorPosition() == 0
 
 
 # ******************************************************************************
@@ -1911,7 +2017,7 @@ def testEmptyDocumentScenario1Commit(app: QApplication) -> None:
 # ******************************************************************************
 def testUndefinedWordCommitScenario1And2(app: QApplication) -> None:
     """Committing the undefined-word row learns and commits the typed roman word."""
-    # scenario 1: typed at the cursor inside the span
+    # scenario 1: typed at a bare cursor position past the span
     widget = PyRaya()
     widget.show()
     widget.setPlainText("hello خوش world")
@@ -1919,7 +2025,7 @@ def testUndefinedWordCommitScenario1And2(app: QApplication) -> None:
     widget.setRegionType(RegionType.RomanUrdu, 6, 10)
     committed: list[tuple[str, str]] = []
     widget.romanWordCommitted.connect(lambda w, r: committed.append((w, r)))
-    _moveCursor(widget, 9)  # the space inside the span
+    _moveCursor(widget, 10)  # the start of the Latin word (a bare position)
     _sendKey(widget, Qt.Key.Key_X, "x")
     overlay = widget._overlay
     assert overlay is not None and overlay.isVisible()
@@ -1927,9 +2033,9 @@ def testUndefinedWordCommitScenario1And2(app: QApplication) -> None:
     row = overlay.suggestionList().selectedRow()
     assert row is not None and row.suggestion.isUndefined()
     _sendKey(overlay.lineEdit(), Qt.Key.Key_Space, " ")
-    assert widget.toPlainText() == "hello خوشxqwzrty  world"
+    assert widget.toPlainText() == "hello خوش xqwzrty world"
     assert committed == [("xqwzrty", "xqwzrty")]
-    assert widget.textCursor().position() == 17
+    assert widget.textCursor().position() == 18
     _assertNoOverlay(widget)
     # localDictionary is unchanged (learnRomanWord is a no-op this session)
     assert list(widget.localDictionary().counter) == []

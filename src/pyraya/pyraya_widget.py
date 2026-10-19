@@ -647,12 +647,14 @@ class PyRaya(QPlainTextEdit):
 
     # ==========================================================================
     def _wordUnderCursor(self) -> tuple[int, int] | None:
-        """The maximal Arabic-script word run containing the document cursor.
+        """The maximal Arabic-script word run containing or ending at the document cursor.
 
-        The cursor must sit at the start of the run or inside it (``s <= p < e``);
-        a cursor past the run's end — including the document's trailing
-        terminator — belongs to no word. The run must be fully contained in a
-        RomanUrdu region; otherwise no word is returned.
+        The cursor may sit at the start of the run, inside it, or at its end
+        (``s <= p <= e`` with a non-empty run) — including the document's
+        trailing terminator position, which clamps to the last real
+        character. A cursor with no word run behind it belongs to no word.
+        The run must be fully contained in a RomanUrdu region; otherwise no
+        word is returned.
         """
         document = self.document()
         limit = document.characterCount() - 1
@@ -664,7 +666,7 @@ class PyRaya(QPlainTextEdit):
         end = position
         while end < len(text) and _isArabicChar(text[end]):
             end += 1
-        if not (start <= position < end):
+        if not (start < end and start <= position <= end):
             return None
         if (
             self._regionKindAt(start) is not RegionType.RomanUrdu
@@ -956,13 +958,13 @@ class PyRaya(QPlainTextEdit):
         next word, Right at the visually right edge (the end) to the previous
         one. When that word exists, the cursor lands at its edge facing the
         active word — Left at its start, Right at its end — and the post-commit
-        resync jumps the overlay to it over a Left commit (the cursor lands
-        inside) and hides it over a Right one (the cursor lands outside). With
-        no adjacent word, the target is the active word itself and the cursor
-        lands at the edge that mirrors the committing edge — Left at the
-        word's end, Right at its start — and the post-commit resync
-        re-activates the overlay over a Right commit (the cursor lands inside
-        the word) and hides it over a Left one (the cursor lands outside).
+        resync re-activates the overlay over the landed word (a cursor at the
+        word's end is over the word). With no adjacent word, the target is the
+        active word itself and the cursor lands at the edge that mirrors the
+        committing edge — Left at its end, Right at its start — and the
+        post-commit resync re-activates the overlay over both. A Ctrl+Enter
+        commit skips the resync, so the dismissed overlay is not re-triggered
+        and the cursor rests at the inserted word's end.
 
         ``romanWordCommitted`` is emitted for a non-empty committed word, and
         ``regionsChanged`` only for an empty-text scenario-2 commit, which
@@ -987,8 +989,15 @@ class PyRaya(QPlainTextEdit):
                 separator = ""
             elif key == Qt.Key.Key_Return:
                 # Enter's keyText is platform-dependent, so the newline is
-                # literal; Ctrl+Enter commits without one.
-                separator = "" if modifiers & Qt.KeyboardModifier.ControlModifier.value else "\n"
+                # literal; Ctrl+Enter commits without one and skips the
+                # resync: the cursor rests at the committed word's end, which
+                # is over the word, so the resync would only re-trigger the
+                # overlay the user just dismissed.
+                if modifiers & Qt.KeyboardModifier.ControlModifier.value:
+                    separator = ""
+                    resync = False
+                else:
+                    separator = "\n"
             else:
                 separator = keyText
             if edge:
@@ -997,14 +1006,13 @@ class PyRaya(QPlainTextEdit):
                 # the next Arabic word; Right at the visually right edge (the
                 # end) to the previous one. When that word exists, the cursor
                 # lands at its edge facing the active word — Left at its
-                # start, Right at its end — and the resync jumps the overlay
-                # to it over a Left commit and hides it over a Right one. With
-                # no adjacent word the target is the active word itself and
-                # the cursor lands at the edge that mirrors the committing
-                # edge — Left at the word's end, Right at its start — and the
-                # resync re-activates the overlay over a Right commit (the
-                # cursor lands inside the word) and hides it over a Left one
-                # (the cursor lands outside).
+                # start, Right at its end — and the resync re-activates the
+                # overlay over the landed word (a cursor at the word's end is
+                # over the word). With no adjacent word the target is the
+                # active word itself and the cursor lands at the edge that
+                # mirrors the committing edge — Left at the word's end, Right
+                # at its start — and the resync re-activates the overlay over
+                # both.
                 moveLeft = key == Qt.Key.Key_Left
                 if self._activeWord is not None:
                     reference = self._activeWord[1] if moveLeft else self._activeWord[0]
