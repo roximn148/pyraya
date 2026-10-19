@@ -157,7 +157,8 @@ def testSetSpellCheckDisabledRemovesUnderline(app: QApplication) -> None:
 # ******************************************************************************
 def testSpellCheckIndependentOfRomanInput(app: QApplication) -> None:
     """Spell check keeps working with roman input disabled; the engine
-    accessors keep their contracts."""
+    accessors keep their contracts; with both flags off the underline is
+    absent too (all four flag combinations)."""
     widget = PyRaya()
     widget.setRomanInputEnabled(False)
     assert widget.isRomanInputEnabled() is False
@@ -166,6 +167,12 @@ def testSpellCheckIndependentOfRomanInput(app: QApplication) -> None:
     assert [(start, end) for start, end, _, _ in _underlinedRanges(widget)] == [(0, 4)]
     assert widget.isSpellCheckEnabled() is True
     assert widget.isRomanInputEnabled() is False
+    # The fourth combination: both flags off — no underline, no overlay
+    # machinery, and the accessors keep their contracts.
+    widget.setSpellCheckEnabled(False)
+    assert _underlinedRanges(widget) == []
+    assert widget.isSpellCheckEnabled() is False
+    assert widget.romanEngine() is None
 
 
 # ******************************************************************************
