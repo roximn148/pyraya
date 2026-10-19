@@ -297,3 +297,5 @@ dmypy.json
 cython_debug/
 .idea/
 .vscode/
+.superpowers/
+.ruff_cache/
