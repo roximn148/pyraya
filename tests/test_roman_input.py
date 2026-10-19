@@ -1561,13 +1561,17 @@ def testPostCommitResyncBypassesMouseFlag(app: QApplication) -> None:
     widget._mouseActive = True
     overlay.lineEdit().setCursorPosition(0)
     _sendKey(overlay.lineEdit(), Qt.Key.Key_Left, "Left")
-    # the edge commit moved the cursor to the next word; the resync ran
-    # despite the mouse flag and re-activated the overlay on that word
+    # the edge commit moved the cursor to the next word's start (16, inside
+    # the word); the resync ran despite the mouse flag and jumped the overlay
+    # to the next word
     assert widget._activeWord == (16, 20)
-    assert overlay.lineEdit().text() == "dost"
     assert widget.textCursor().position() == 16
     assert widget._mouseActive
     assert widget.toPlainText() == "hello خوش world دوست"
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    assert overlay.lineEdit().text() == "dost"
+    assert overlay.lineEdit().cursorPosition() == 4
 
 
 # ******************************************************************************
@@ -1658,8 +1662,13 @@ def testEdgeCommits(app: QApplication) -> None:
     keys move in visual order and edge commits fire only at the actual edges:
     Right at the overlay's visually right edge (the text end) commits to the
     previous word, and Left at its visually left edge (the text start) commits
-    to the next word. With no adjacent word, the overlay hides and the cursor
-    lands at the word's visually left edge.
+    to the next word. When that word exists, the cursor lands at its edge
+    facing the active word — Right at its end (outside, so the resync hides
+    the overlay), Left at its start (inside, so the resync jumps the overlay
+    to it) — and with no adjacent word the target is the active word and the
+    cursor lands at the edge that mirrors the committing edge (Right at the
+    word's start, inside, so the resync re-activates the overlay) and hides
+    it over a Left one (outside).
     """
     widget = PyRaya()
     widget.show()
@@ -1678,19 +1687,25 @@ def testEdgeCommits(app: QApplication) -> None:
     assert overlay.lineEdit().cursorPosition() == 3
 
     # Walking Right reaches the visually right edge (the text end), where the
-    # next Right edge-commits: no Arabic word before خوش -> the overlay hides
-    # and the cursor lands at the word's visually left edge (9).
+    # next Right edge-commits: no Arabic word before خوش -> the cursor lands
+    # at the word's visually right edge (its start, 6), and the resync
+    # re-activates the overlay over the word (line edit cursor at the text
+    # end, mirroring the word's start).
     for _ in range(2):
         _sendKey(overlay.lineEdit(), Qt.Key.Key_Right, "")
     assert overlay.lineEdit().cursorPosition() == 5
     _sendKey(overlay.lineEdit(), Qt.Key.Key_Right, "")
     assert widget.toPlainText() == text  # nothing inserted
-    assert widget.textCursor().position() == 9
-    _assertNoOverlay(widget)
+    assert widget.textCursor().position() == 6
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    assert overlay.lineEdit().text() == "khosh"
+    assert overlay.lineEdit().cursorPosition() == 5
 
-    # Holding Left walks visually leftward through the Latin word and the
-    # space, then into دوست, where the overlay activates.
-    for _ in range(7):
+    # Holding Left walks visually leftward through the rest of خوش, the
+    # Latin word, and the space, then into دوست, where the overlay
+    # activates.
+    for _ in range(10):
         _sendKey(widget, Qt.Key.Key_Left, "")
     overlay = widget._overlay
     assert overlay is not None and overlay.isVisible()
@@ -1710,9 +1725,10 @@ def testEdgeCommits(app: QApplication) -> None:
     assert widget.textCursor().position() == 20
     _assertNoOverlay(widget)
 
-    # Mirror: Right from دوست walks to its visually right edge, then
-    # edge-commits to خوش, whose visually right edge is reached and
-    # edge-committed again with no previous word -> the overlay hides at 9.
+    # Right from دوست walks to its visually right edge, then edge-commits to
+    # the previous word (خوش): the cursor lands at that word's edge facing
+    # the active word (its end, 9, outside the word), and the resync hides
+    # the overlay.
     widget3 = PyRaya()
     widget3.show()
     widget3.setPlainText(text)
@@ -1729,20 +1745,46 @@ def testEdgeCommits(app: QApplication) -> None:
     # Walk to the visually right edge (the text end).
     _sendKey(overlay3.lineEdit(), Qt.Key.Key_Right, "")
     assert overlay3.lineEdit().cursorPosition() == 4
-    # Right at the end edge-commits to the previous word (خوش), whose line
-    # edit cursor is placed at the text end: the document cursor lands at
-    # the word's visually right edge (the word's start).
-    _sendKey(overlay3.lineEdit(), Qt.Key.Key_Right, "")
-    overlay3 = widget3._overlay
-    assert overlay3 is not None and overlay3.isVisible()
-    assert overlay3.lineEdit().text() == "khosh"
-    assert overlay3.lineEdit().cursorPosition() == 5
-    # Right at the end edge-commits with no previous word, so the overlay
-    # hides at the word's visually left edge (9).
+    # Right at the end edge-commits to the previous word (خوش): the cursor
+    # lands at that word's edge facing the active word (its end, 9, outside
+    # the word), and the resync hides the overlay.
     _sendKey(overlay3.lineEdit(), Qt.Key.Key_Right, "")
     assert widget3.toPlainText() == text
     assert widget3.textCursor().position() == 9
     _assertNoOverlay(widget3)
+
+    # Left from خوش walks to its visually left edge, then edge-commits to
+    # the next word (دوست): the cursor lands at that word's edge facing the
+    # active word (its start, 16, inside the word), and the resync jumps the
+    # overlay to it.
+    widget4 = PyRaya()
+    widget4.show()
+    widget4.setPlainText(text)
+    widget4.setRomanInputEnabled(True)
+    widget4.setRegionType(RegionType.RomanUrdu, 6, 20)
+    _moveCursor(widget4, 7)
+    overlay4 = widget4._overlay
+    assert overlay4 is not None and overlay4.isVisible()
+    assert overlay4.lineEdit().text() == "khosh"
+    # The document cursor sits one third of the way from the word's visually
+    # right edge, so the mirror map places the line edit cursor the same
+    # fraction from the text end (position 3 of "khosh").
+    assert overlay4.lineEdit().cursorPosition() == 3
+    # Walk to the visually left edge (the text start).
+    for _ in range(3):
+        _sendKey(overlay4.lineEdit(), Qt.Key.Key_Left, "")
+    assert overlay4.lineEdit().cursorPosition() == 0
+    # Left at the start edge-commits to the next word (دوست): the cursor
+    # lands at that word's edge facing the active word (its start, 16,
+    # inside the word), and the resync jumps the overlay to it (line edit
+    # cursor at the text end, mirroring the word's start).
+    _sendKey(overlay4.lineEdit(), Qt.Key.Key_Left, "")
+    assert widget4.toPlainText() == text
+    assert widget4.textCursor().position() == 16
+    overlay4 = widget4._overlay
+    assert overlay4 is not None and overlay4.isVisible()
+    assert overlay4.lineEdit().text() == "dost"
+    assert overlay4.lineEdit().cursorPosition() == 4
 
     # A single-word document: Left from the interior reaches the visually
     # left edge, where the next Left overflows with no next word -> the

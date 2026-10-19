@@ -954,8 +954,15 @@ class PyRaya(QPlainTextEdit):
         and moves the cursor to the adjacent Arabic word in visual order —
         Left at the visually left edge (the start of the overlay text) to the
         next word, Right at the visually right edge (the end) to the previous
-        one — or, with no adjacent word, hides the overlay and leaves the
-        cursor at the word's visually left edge.
+        one. When that word exists, the cursor lands at its edge facing the
+        active word — Left at its start, Right at its end — and the post-commit
+        resync jumps the overlay to it over a Left commit (the cursor lands
+        inside) and hides it over a Right one (the cursor lands outside). With
+        no adjacent word, the target is the active word itself and the cursor
+        lands at the edge that mirrors the committing edge — Left at the
+        word's end, Right at its start — and the post-commit resync
+        re-activates the overlay over a Right commit (the cursor lands inside
+        the word) and hides it over a Left one (the cursor lands outside).
 
         ``romanWordCommitted`` is emitted for a non-empty committed word, and
         ``regionsChanged`` only for an empty-text scenario-2 commit, which
@@ -988,24 +995,31 @@ class PyRaya(QPlainTextEdit):
                 # Edge commit: nothing is written to the document. Left at the
                 # visually left edge (the start of the overlay text) moves to
                 # the next Arabic word; Right at the visually right edge (the
-                # end) to the previous one. With no adjacent word the cursor
-                # lands at the word's visually left edge, outside the word, so
-                # the overlay does not re-activate on the next key press.
-                forward = key == Qt.Key.Key_Left
+                # end) to the previous one. When that word exists, the cursor
+                # lands at its edge facing the active word — Left at its
+                # start, Right at its end — and the resync jumps the overlay
+                # to it over a Left commit and hides it over a Right one. With
+                # no adjacent word the target is the active word itself and
+                # the cursor lands at the edge that mirrors the committing
+                # edge — Left at the word's end, Right at its start — and the
+                # resync re-activates the overlay over a Right commit (the
+                # cursor lands inside the word) and hides it over a Left one
+                # (the cursor lands outside).
+                moveLeft = key == Qt.Key.Key_Left
                 if self._activeWord is not None:
-                    reference = self._activeWord[1] if forward else self._activeWord[0]
+                    reference = self._activeWord[1] if moveLeft else self._activeWord[0]
                 else:
                     reference = self._anchorPosition or 0
-                adjacent = self._adjacentWord(reference, not forward)
+                adjacent = self._adjacentWord(reference, backwards=not moveLeft)
                 if adjacent is None:
                     if self._activeWord is not None:
                         cursor = self.textCursor()
-                        cursor.setPosition(self._activeWord[1])
+                        cursor.setPosition(self._activeWord[1 if moveLeft else 0])
                         self.setTextCursor(cursor)
                     self._deactivateOverlay()
                 else:
                     cursor = self.textCursor()
-                    cursor.setPosition(adjacent[0])
+                    cursor.setPosition(adjacent[0 if moveLeft else 1])
                     self.setTextCursor(cursor)
             else:
                 cursor = self.textCursor()
@@ -1040,15 +1054,15 @@ class PyRaya(QPlainTextEdit):
                 self._syncOverlay(bypassMouse=True)
 
     # ==========================================================================
-    def _adjacentWord(self, reference: int, atStart: bool) -> tuple[int, int] | None:
+    def _adjacentWord(self, reference: int, backwards: bool) -> tuple[int, int] | None:
         """The nearest Arabic-script word run adjacent to ``reference``.
 
-        When ``atStart`` is true the run is searched left of ``reference``
-        (the previous word); otherwise right of it (the next word). Non-Arabic
+        When ``backwards`` is true the run is searched at lower index values of ``reference``
+        (the previous word); otherwise greater index values (the next word). Non-Arabic
         characters — whitespace, digits, Latin letters — are skipped.
         """
         text = self.document().toPlainText()
-        if atStart:
+        if backwards:
             index = reference - 1
             while index >= 0 and not _isArabicChar(text[index]):
                 index -= 1
