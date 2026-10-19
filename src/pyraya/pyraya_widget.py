@@ -959,10 +959,12 @@ class PyRaya(QPlainTextEdit):
         one. When that word exists, the cursor lands at its edge facing the
         active word — Left at its start, Right at its end — and the post-commit
         resync re-activates the overlay over the landed word (a cursor at the
-        word's end is over the word). With no adjacent word, the target is the
-        active word itself and the cursor lands at the edge that mirrors the
-        committing edge — Left at its end, Right at its start — and the
-        post-commit resync re-activates the overlay over both. A Ctrl+Enter
+        word's end is over the word). With no adjacent word — the commit
+        landed on a boundary word, whose far side is only whitespace — the
+        overlay is closed and the resync skipped, so the deactivation sticks
+        and the cursor rests at the boundary edge (Left at the word's end,
+        Right at its start) until the next trigger (a cursor move, a click,
+        or Ctrl+Space). A Ctrl+Enter
         commit skips the resync, so the dismissed overlay is not re-triggered
         and the cursor rests at the inserted word's end.
 
@@ -1008,11 +1010,12 @@ class PyRaya(QPlainTextEdit):
                 # lands at its edge facing the active word — Left at its
                 # start, Right at its end — and the resync re-activates the
                 # overlay over the landed word (a cursor at the word's end is
-                # over the word). With no adjacent word the target is the
-                # active word itself and the cursor lands at the edge that
-                # mirrors the committing edge — Left at the word's end, Right
-                # at its start — and the resync re-activates the overlay over
-                # both.
+                # over the word). With no adjacent word — the commit landed on
+                # a boundary word, whose far side is only whitespace — the
+                # overlay is closed and the resync skipped, so the
+                # deactivation sticks and the cursor rests at the boundary
+                # edge (Left at the word's end, Right at its start) until the
+                # next trigger.
                 moveLeft = key == Qt.Key.Key_Left
                 if self._activeWord is not None:
                     reference = self._activeWord[1] if moveLeft else self._activeWord[0]
@@ -1020,6 +1023,14 @@ class PyRaya(QPlainTextEdit):
                     reference = self._anchorPosition or 0
                 adjacent = self._adjacentWord(reference, backwards=not moveLeft)
                 if adjacent is None:
+                    # No adjacent word: the commit landed on a boundary
+                    # word, whose far side is only whitespace (the cursor
+                    # has walked off the paragraph's word run). The
+                    # deactivation must stick, so the resync is skipped —
+                    # the landing edge is over the active word and the
+                    # resync would only re-trigger the overlay the user is
+                    # leaving, pinning the cursor on the boundary word.
+                    resync = False
                     if self._activeWord is not None:
                         cursor = self.textCursor()
                         cursor.setPosition(self._activeWord[1 if moveLeft else 0])
