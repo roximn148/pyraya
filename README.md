@@ -17,7 +17,7 @@ punctuation.
 ------------------------------
 ## ⚠️ Alpha Status
 
-PyRaya is at **version 0.1.0-alpha.5**. The widget is a drop-in `QPlainTextEdit`. The following are now **implemented**:
+PyRaya is at **version 0.1.0-alpha.6**. The widget is a drop-in `QPlainTextEdit`. The following are now **implemented**:
 
 - **Native RTL layout** — right-to-left alignment and paragraph handling.
 - **Noto typography** — a configurable font stack defaulting to Noto Naskh Arabic.
@@ -25,8 +25,9 @@ PyRaya is at **version 0.1.0-alpha.5**. The widget is a drop-in `QPlainTextEdit`
 - **Configurable formatting** — a dedicated rule-based syntax highlighter.
 - **Text regions** — spans tagged as *Latin* or *Roman Urdu* (`RegionType`), rendered with a subtle, type-specific background color; tag a selection from the right-click context menu, via the `Ctrl+1` / `Ctrl+2` keyboard shortcuts, or via `setRegionType`. Every character belongs to exactly one region kind at all times: untagged text belongs to `defaultRegionKind` (Roman Urdu), each kind's identity is its unique background color (compared including the alpha channel), and clearing regions resets the text to `defaultRegionKind`.
 - **Roman-script input overlay** — on by default. An Arabic-script word inside a *Roman Urdu* region gets a small frameless, non-modal overlay line edit matched to the word's geometry; the typed roman text is edited there (the visual document stays Arabic-script), a tier-colored suggestion list (green = exact, orange = edit distance 1, red = distance 2) hangs below — at most five rows, scrolling so the highlighted row stays visible — and committing (Space / Enter / typed punctuation, or Left/Right at the word's text edges) writes the selected Arabic word — plus the separator character, if typed — to the document (a plain Enter commits the word plus a newline; Ctrl+Enter commits the word without one). An edge commit (Left at the visually left edge of the word, Right at the visually right edge) writes nothing and moves the cursor in visual order to the adjacent word — the next word or the previous one — landing at that word's edge facing the active word (Left at its start, Right at its end), and the post-commit resync re-activates the overlay over the landed word (a cursor at the word's end is over the word); with no adjacent word — the commit lands on a boundary word, whose far side is only whitespace — the overlay is closed and the resync skipped, so the deactivation sticks and the cursor rests at the boundary edge (Left at the word's end, Right at its start). A Ctrl+Enter commit skips the resync, so a dismissed overlay is not re-triggered and the cursor rests at the inserted word's end. A zero-match typed word offers a `+ Learn <word>` undefined-word row; committing it commits the typed roman word (a no-op hook for the future learning feature) and leaves the local dictionary unchanged. Assist mode is on by default: Esc on an active overlay dismisses it and turns assist mode off, leaving the user alone (typing and the mouse no longer activate the overlay) until `Ctrl+Space` in the document turns it back on — over the Roman Urdu word under the cursor with its romanized text, or, with no such word, an empty overlay at the cursor; committing never turns the mode off.
+- **Spell-check underline** — on by default. An Arabic-script word belonging to a *Roman Urdu* region (explicitly tagged, or untagged text carrying the default kind) that the romanalfaz dictionary does not know gets a wavy underline in a muted brick red (`spellCheckUnderlineColor`) — display only: no correction, no suggestions, and nothing touches the document's character formats or the undo stack. Toggled by `setSpellCheckEnabled`, independently of the roman-input feature (all four flag combinations behave); the two features share one lazily created `RomanInputEngine`, and with the dictionary missing (an unavailable engine) the underline is simply absent.
 
-The **inbuilt spell-checker** (real-time Urdu tokenization and misspelling highlighting) is **roadmap** and *not yet implemented*. Do not assume it works yet.
+The **inbuilt spell-checker**'s **correction and suggestion** side (real-time Urdu tokenization and fixing) remains **roadmap** and is *not yet implemented*. Do not assume it works yet.
 
 ------------------------------
 ## Key Features
@@ -38,7 +39,7 @@ The **inbuilt spell-checker** (real-time Urdu tokenization and misspelling highl
 * **Configurable Formatting** *(available)*: A dedicated rule-based highlighter for Urdu and mixed-script text.
 * **Text Regions** *(available)*: Tag a selection (or any character range) as Latin or Roman Urdu from the context menu, the `Ctrl+1` / `Ctrl+2` shortcuts, or `setRegionType`; each type renders with a subtle background color that is its unique identity (including the alpha channel). Every character belongs to exactly one region kind — untagged text belongs to `defaultRegionKind` (Roman Urdu) — clearing regions resets the text to that kind, and regions survive edits and undo/redo.
 * **Roman-Script Input Overlay** *(available)*: While enabled, editing an Arabic-script word inside a Roman Urdu region happens in a small frameless overlay line edit — the visual document stays Arabic-script until a commit. Suggestions are tier-colored (exact / distance 1 / distance 2), shown up to five rows at a time and scrolling to keep the selected row visible; committing writes the selected Arabic word, plus the typed separator character, to the document; zero-match words commit their typed roman via the `+ Learn` undefined-word row. Assist mode is on by default: Esc on the overlay turns it off, leaving the user alone until `Ctrl+Space` re-enters it.
-* **Inbuilt Spell-Checker** *(roadmap)*: Real-time tokenization and highlighting of misspelled Urdu words.
+* **Inbuilt Spell-Checker** *(available, display-only)*: A wavy underline under Roman Urdu words the romanalfaz dictionary does not know, behind a `setSpellCheckEnabled` switch independent of the roman-input feature; real-time correction and suggestion remain roadmap.
 * **Multilingual Harmony** *(roadmap)*: Smooth rendering when blending Nastaliq prose with English text strings.
 
 ------------------------------
@@ -72,9 +73,23 @@ editor.setAssistEnabled(False)  # optional: leave the user alone until Ctrl+Spac
 
 - `setRomanInputEnabled(enabled)` / `isRomanInputEnabled()` — toggle the overlay feature; re-enabling it also turns assist mode back on.
 - `setAssistEnabled(enabled)` / `isAssistEnabled()` — toggle assist mode; disabling hides a shown overlay, enabling only marks the mode ready.
-- `romanEngine()` — the lazily created `RomanInputEngine` (loaded on first overlay activation), or `None` while the feature is off.
+- `romanEngine()` — the lazily created `RomanInputEngine` (loaded on first use: first overlay activation, or the first spell-check re-highlight over Roman Urdu text), or `None` while the feature is off.
 - `localDictionary()` — the engine's document-local in-memory `Vocabulary`; a hook for the future learning feature, not mutated this session.
 - `romanWordCommitted(word, typedRoman)` — signal emitted whenever a word is committed to the document.
 - `RomanInputEngine` / `RomanOverlay` — the engine and the overlay widgets, re-exported from `pyraya`.
 
 Committing (Space / Enter / typed punctuation, or Left/Right at the word's text edges) writes the selected Arabic word — plus the typed separator character, when one is typed — into the word's span, or at the cursor for a new word, tagged as a *Roman Urdu* region. An edge commit — Left at the visually left edge of the word, Right at the visually right edge — writes nothing and moves the cursor in visual order to the adjacent word (the next word or the previous one), landing at that word's edge facing the active word (Left at its start, Right at its end); the post-commit resync re-activates the overlay over the landed word (a cursor at the word's end is over the word), and with no adjacent word — the commit lands on a boundary word, whose far side is only whitespace — the overlay is closed and the resync skipped, so the deactivation sticks and the cursor rests at the boundary edge (Left at the word's end, Right at its start); a Ctrl+Enter commit likewise skips the resync, so a dismissed overlay is not re-triggered and the cursor rests at the inserted word's end. Plain Left/Right arrow keys elsewhere in the document move the cursor in visual (screen) order, since Qt's default logical movement is flipped in this right-to-left document; Ctrl/Shift variants keep the logical behavior. A zero-match typed word commits its typed roman text via the `+ Learn <word>` undefined-word row.
+
+------------------------------
+## Spell Check
+
+The underline feature is **on by default**: an Arabic-script word belonging to a Roman Urdu region (explicitly tagged, or untagged text carrying the default kind) that the romanalfaz dictionary does not know is underlined with a wavy line in a muted brick red, so unknown words are visible without interrupting the flow. The underline is display-only — painted into the text layout, never touching the document's character formats or the undo stack — and offers no correction or suggestion (that remains roadmap). Latin-region text and non-Arabic runs are never underlined.
+
+The switch is **independent** of the roman-input feature: spell check keeps working with roman input disabled (and vice versa), and the two share one lazily created `RomanInputEngine`. If the dictionary cannot be loaded, the engine is unavailable and the underline pass is a no-op — a missing dictionary never underlines every word.
+
+```python
+editor.setSpellCheckEnabled(False)  # optional: no underline
+```
+
+- `setSpellCheckEnabled(enabled)` / `isSpellCheckEnabled()` — toggle the underline; toggling re-highlights the whole document, so the underline is removed or restored immediately.
+- `spellCheckUnderlineColor` — the muted brick red (`#B22222`) used for the underline, re-exported from `pyraya`.
