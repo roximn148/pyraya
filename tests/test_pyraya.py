@@ -582,7 +582,7 @@ def testKeyboardShortcutsIgnoredWithoutSelection(app: QApplication) -> None:
 
 # ******************************************************************************
 def testDefaultRegionKindIsDefined() -> None:
-    """defaultRegionKind is a RegionType member."""
+    """DefaultRegionKind is a RegionType member."""
     assert DefaultRegionKind in set(RegionType)
     assert DefaultRegionKind is RegionType.RomanUrdu
 

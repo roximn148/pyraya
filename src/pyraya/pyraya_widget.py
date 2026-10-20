@@ -12,7 +12,7 @@ text regions: spans tagged with a :class:`~pyraya.regions.RegionType` and
 rendered with a subtle, type-specific background color. Every character of
 the document belongs to exactly one region kind at all times — text without
 an explicit tag carries the background color of
-:data:`~pyraya.regions.defaultRegionKind` — and each region kind is
+:data:`~pyraya.regions.DefaultRegionKind` — and each region kind is
 identified by a unique background color, compared including its alpha
 channel.
 """
@@ -88,7 +88,7 @@ class PyRayaHighlighter(QSyntaxHighlighter):
 
     The highlighter also keeps the region invariant: on every re-highlight,
     runs whose background matches no region color are painted with the
-    :data:`~pyraya.regions.defaultRegionKind` background in the text
+    :data:`~pyraya.regions.DefaultRegionKind` background in the text
     layout, which Qt merges with the document's character formats at
     display time. That maintenance paints the layout rather than editing
     the document, so it is not recorded in the document's undo stack and
@@ -154,7 +154,7 @@ class PyRayaHighlighter(QSyntaxHighlighter):
 
         After the rules, characters without a recognized region
         background get the
-        :data:`~pyraya.regions.defaultRegionKind` background merged into
+        :data:`~pyraya.regions.DefaultRegionKind` background merged into
         the text layout (:meth:`_paintDefaultRegions`). When spell
         check is enabled, RomanUrdu words the
         dictionary does not know additionally get the wavy spell-check
@@ -179,7 +179,7 @@ class PyRayaHighlighter(QSyntaxHighlighter):
         """Paint runs without a recognized region background.
 
         Runs are painted with the
-        :data:`~pyraya.regions.defaultRegionKind` background in the text
+        :data:`~pyraya.regions.DefaultRegionKind` background in the text
         layout; the document's character formats are not modified. The
         background is merged into each untagged character's current
         layout format (read back with :meth:`format`) rather than painted
@@ -296,7 +296,7 @@ class PyRayaHighlighter(QSyntaxHighlighter):
         """Return the region kind stored at a document character offset.
 
         A character whose background matches no region color belongs to
-        :data:`~pyraya.regions.defaultRegionKind`, keeping the invariant
+        :data:`~pyraya.regions.DefaultRegionKind`, keeping the invariant
         that every character belongs to exactly one kind.
         """
         cursor = QTextCursor(self.document())
@@ -358,7 +358,7 @@ class PyRaya(QPlainTextEdit):
     regions: spans tagged with a :class:`~pyraya.regions.RegionType` and
     rendered with a subtle, type-specific background color. All text belongs
     to exactly one region kind at any time — untagged text is the
-    :data:`~pyraya.regions.defaultRegionKind` kind — and clearing regions
+    :data:`~pyraya.regions.DefaultRegionKind` kind — and clearing regions
     resets the text to that kind.
     """
 
@@ -514,7 +514,7 @@ class PyRaya(QPlainTextEdit):
         """Replace the entire document text.
 
         The replacement text carries no region tags: all of it belongs to
-        the :data:`~pyraya.regions.defaultRegionKind` kind (the
+        the :data:`~pyraya.regions.DefaultRegionKind` kind (the
         highlighter paints untagged runs with the default background at
         display time), and ``regionsChanged`` is emitted for a non-empty
         replacement.
@@ -556,7 +556,7 @@ class PyRaya(QPlainTextEdit):
 
         The spans always partition the whole text: text without a
         non-default tag carries the background color of
-        :data:`~pyraya.regions.defaultRegionKind` and is reported as a span
+        :data:`~pyraya.regions.DefaultRegionKind` and is reported as a span
         of that kind.
 
         Returns:
@@ -602,7 +602,7 @@ class PyRaya(QPlainTextEdit):
             The :class:`~pyraya.regions.RegionType` of the region containing
             the offset. Every text offset belongs to exactly one kind (text
             without a non-default tag belongs to
-            :data:`~pyraya.regions.defaultRegionKind`), so None is returned
+            :data:`~pyraya.regions.DefaultRegionKind`), so None is returned
             only for offsets at or past the document's trailing terminator.
         """
         if not 0 <= position < self.document().characterCount() - 1:
@@ -611,7 +611,7 @@ class PyRaya(QPlainTextEdit):
 
     # ==========================================================================
     def clearRegions(self) -> None:
-        """Reset all text to :data:`~pyraya.regions.defaultRegionKind`.
+        """Reset all text to :data:`~pyraya.regions.DefaultRegionKind`.
 
         Every region tag is removed and the text is repainted with the
         default kind's background color, so the whole document becomes a
@@ -1722,7 +1722,7 @@ class PyRaya(QPlainTextEdit):
 
     # ==========================================================================
     def _clearRange(self, start: int, end: int) -> None:
-        """Reset a character range to :data:`~pyraya.regions.defaultRegionKind`.
+        """Reset a character range to :data:`~pyraya.regions.DefaultRegionKind`.
 
         Cleared characters are repainted with the default kind's background
         color, because a format merge cannot restore a ``NoBrush`` background
@@ -1757,7 +1757,7 @@ class PyRaya(QPlainTextEdit):
 
         Every character belongs to exactly one region kind — text without a
         recognized region background counts as
-        :data:`~pyraya.regions.defaultRegionKind` — so the spans partition
+        :data:`~pyraya.regions.DefaultRegionKind` — so the spans partition
         the whole text. The trailing terminator character of the last block
         is never part of a region, so the scan stops before it.
         """
@@ -1777,7 +1777,7 @@ class PyRaya(QPlainTextEdit):
         """Return the region kind stored at a character offset.
 
         A character whose background matches no region color belongs to
-        :data:`~pyraya.regions.defaultRegionKind`, keeping the invariant
+        :data:`~pyraya.regions.DefaultRegionKind`, keeping the invariant
         that every character belongs to exactly one kind.
         """
         color = self._charFormatAt(position).background().color()
@@ -1827,7 +1827,7 @@ class PyRaya(QPlainTextEdit):
         characterCount() - 1``) resolves to the kind of the last real
         character before the cursor — the trailing terminator itself never
         belongs to a region — and an empty document to
-        :data:`~pyraya.regions.defaultRegionKind`; any other position
+        :data:`~pyraya.regions.DefaultRegionKind`; any other position
         resolves the region containing it. Positions past the document end
         return None.
         """

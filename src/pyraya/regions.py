@@ -10,7 +10,7 @@ so spans survive edits and undo/redo without manual bookkeeping.
 
 Every character of the document belongs to exactly one region kind at any
 time: text without an explicit tag carries the background color of
-:data:`defaultRegionKind`, so the document's regions always partition the
+:data:`DefaultRegionKind`, so the document's regions always partition the
 whole text. Each region kind is identified by its background color —
 including the alpha channel — and every kind must have a unique color
 (``PyRaya.setRegionColor`` enforces that).
@@ -21,7 +21,7 @@ from enum import Enum
 
 from PySide6.QtGui import QColor
 
-__all__ = ["RegionColors", "RegionType", "TextRegion", "defaultRegionKind"]
+__all__ = ["RegionColors", "RegionType", "TextRegion", "DefaultRegionKind"]
 
 
 # ******************************************************************************
@@ -63,7 +63,7 @@ class TextRegion:
 #: color of this kind, so all text at any time belongs to exactly one region
 #: kind; clearing regions resets the text to this kind rather than leaving
 #: it untagged.
-defaultRegionKind: RegionType = RegionType.RomanUrdu
+DefaultRegionKind: RegionType = RegionType.RomanUrdu
 
 
 # ******************************************************************************
