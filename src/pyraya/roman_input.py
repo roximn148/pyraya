@@ -580,9 +580,12 @@ class RomanOverlay(QWidget):
     A small child widget (typically parented to the host widget's viewport,
     so it scrolls with the text automatically) containing a
     :class:`RomanLineEdit` — where all editing happens — and a passive
-    :class:`SuggestionList` below it. The overlay uses a right-to-left layout
-    direction with right-aligned text, so typed text grows leftward from the
-    word's right edge, matching the document flow.
+    :class:`SuggestionList`: below the line edit by default, or above it in
+    the flipped orientation (:meth:`setListAbove`), so the host can keep the
+    line edit pinned to a low anchor when the list no longer fits below. The
+    overlay uses a right-to-left layout direction with right-aligned text, so
+    typed text grows leftward from the word's right edge, matching the
+    document flow.
 
     The overlay is mouse-transparent (``WA_TransparentForMouseEvents``): no
     part of it intercepts mouse presses, so clicks, drags, shift-drags, and
@@ -644,7 +647,13 @@ class RomanOverlay(QWidget):
         self._lineEdit.setAlignment(Qt.AlignmentFlag.AlignRight)
         self._list = SuggestionList(font, self)
         # self._list.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        # The default orientation: the line edit on top, the suggestion list
+        # below it. ``setListAbove`` swaps the two when the host needs the
+        # list above the line edit (the flipped orientation over a low
+        # anchor); the footprint is the same in both.
+        self._listAbove = False
         layout = QVBoxLayout(self)
+        self._layout = layout
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
         layout.addWidget(self._lineEdit)
@@ -652,8 +661,9 @@ class RomanOverlay(QWidget):
         # A trailing stretch absorbs any leftover vertical space when the
         # suggestion list is shorter than the overlay (or hidden for empty
         # text). Without it, QBoxLayout splits the leftover across the layout
-        # gaps, and the line edit drifts down away from its top anchor every
-        # time the list's height changes during editing.
+        # gaps, and the line edit drifts away from its anchor edge — down in
+        # the default orientation, up in the flipped one — every time the
+        # list's height changes during editing.
         layout.addStretch()
 
     # ==========================================================================
@@ -668,8 +678,50 @@ class RomanOverlay(QWidget):
 
     # ==========================================================================
     def suggestionList(self) -> SuggestionList:
-        """The passive suggestion row display below the line edit."""
+        """The passive suggestion row display (below the line edit by default,
+        above it in the flipped orientation)."""
         return self._list
+
+    # ==========================================================================
+    def listAbove(self) -> bool:
+        """Whether the suggestion list is laid out above the line edit."""
+        return self._listAbove
+
+    # ==========================================================================
+    def setListAbove(self, above: bool) -> None:
+        """Lay the suggestion list above or below the line edit.
+
+        The default orientation has the list below the line edit; the
+        flipped orientation, which the host uses when the list would
+        overflow the viewport below the anchor, puts the list above it.
+        The line edit's slot in the layout swaps accordingly — the host
+        re-places the overlay so the line edit stays pinned to the anchor
+        in both orientations — while the trailing stretch remains last, so
+        the line edit stays anchored to the orientation's outer edge and
+        the list's height changes during editing never displace it. The
+        swap is applied immediately (the layout is re-activated), so the
+        caller can read the line edit's in-overlay position right away
+        even when the overlay's size is unchanged.
+
+        Args:
+            above: True for the flipped orientation (the list above the
+                line edit), False for the default (the list below it).
+        """
+        if above == self._listAbove:
+            return
+        self._listAbove = above
+        layout = self._layout
+        layout.removeWidget(self._list)
+        layout.insertWidget(0 if above else 1, self._list)
+        # ``update()`` only queues a layout request, which the event loop
+        # processes after the current call returns: if the host then re-
+        # places the overlay without a size change (the flipped footprint
+        # can equal the previous one, so the resize is a no-op and the
+        # layout is not re-run), the swap would not be applied yet and the
+        # host would read the line edit's in-overlay position stale.
+        # ``activate()`` applies the new order immediately, so the host's
+        # re-anchor sees the swapped layout.
+        layout.activate()
 
     # ==========================================================================
     def setText(self, roman: str) -> None:
@@ -758,7 +810,12 @@ class RomanOverlay(QWidget):
 
     # ==========================================================================
     def sizeHint(self) -> QSize:
-        """Preferred size: the line edit plus the suggestion list below it."""
+        """Preferred size: the line edit plus the suggestion list.
+
+        The height is the same in both orientations — the line edit, the
+        4 px spacing, and the list — so the host can flip the list without
+        re-deriving the overlay's footprint.
+        """
         line = self._lineEdit.sizeHint()
         listHint = self._list.sizeHint()
         width = max(line.width(), listHint.width())

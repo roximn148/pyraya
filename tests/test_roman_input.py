@@ -1271,6 +1271,358 @@ def testSeededOverlayReanchorsOnResize(app: QApplication) -> None:
 
 
 # ******************************************************************************
+def _lineTopInView(overlay: RomanOverlay, viewport: QWidget) -> int:
+    """The overlay's line edit top edge in viewport coordinates.
+
+    The overlay's own top edge moves when the suggestion list flips
+    above or below the line edit, but the line edit itself must always
+    sit over the word it edits: mapping the line edit's origin into the
+    viewport is the orientation-independent observation point of the
+    pinning.
+    """
+    return overlay.lineEdit().mapTo(viewport, QPoint(0, 0)).y()
+
+
+# ******************************************************************************
+def _listAbove(overlay: RomanOverlay) -> bool:
+    """Whether the overlay's suggestion list is laid out above the line edit."""
+    return bool(getattr(overlay, "listAbove", lambda: False)())
+
+
+# ******************************************************************************
+def _wordSpanOnLine(widget: PyRaya, word: str, which: str) -> tuple[int, int] | None:
+    """The span of a word occurrence on the first or the lowest line.
+
+    Scans the word's occurrences in the document and returns the span on
+    the first line the word occurs on (``"first"``) or on the lowest such
+    line (``"lowest"``), reading the line's top from the block layout's
+    own geometry so the result tracks the font actually in use.
+    """
+    offset = widget.contentOffset()
+    best: tuple[int, int, int] | None = None  # (top, start, end) of the lowest line
+    first: tuple[int, int] | None = None
+    block = widget.document().begin()
+    while block.isValid():
+        local = 0
+        while (local := block.text().find(word, local)) >= 0:
+            start = block.position() + local
+            top = round(
+                block.layout().boundingRect().top()
+                + widget.blockBoundingGeometry(block).y()
+                + offset.y()
+            )
+            if which == "lowest":
+                if best is None or top > best[0]:
+                    best = (top, start, start + len(word))
+            elif first is None:
+                first = (start, start + len(word))
+            local += len(word)
+        block = block.next()
+    if which == "lowest":
+        return (best[1], best[2]) if best is not None else None
+    return first
+
+
+# ******************************************************************************
+def _setSizeToViewport(app: QApplication, widget: PyRaya, width: int, target: int) -> None:
+    """Resize the widget until its viewport is exactly ``target`` tall.
+
+    The viewport is the widget's height minus the frame (and any
+    scrollbars), so each iteration adds back the shortfall read after the
+    previous resize; the frame is stable, so the fixed point is reached in
+    a couple of iterations.
+    """
+    height = widget.height()
+    for _ in range(4):
+        widget.resize(width, height)
+        app.processEvents()
+        if widget.viewport().height() == target:
+            break
+        height += target - widget.viewport().height()
+    assert widget.viewport().height() == target
+
+
+# ******************************************************************************
+def testOverlayFlipsListAboveOnLowWord(app: QApplication) -> None:
+    """The line edit stays over a low word; only the list flips above it.
+
+    The overlay is activated in a viewport tall enough for the list to
+    sit below the word; the viewport is then shrunk to one pixel short of
+    the word's line plus the overlay's own footprint, so the list can no
+    longer fit below. The overlay flips only the list above the line edit
+    — the line edit itself never moves off the word it covers — and the
+    flipped overlay still fits the viewport.
+    """
+    widget = PyRaya()
+    widget.show()
+    widget.resize(640, 600)
+    widget.setPlainText("due\nteen\nhello خوش")
+    widget.setRomanInputEnabled(True)
+    span = _wordSpanOnLine(widget, "خوش", "lowest")
+    assert span is not None
+    widget.setRegionType(RegionType.RomanUrdu, *span)
+    _moveCursor(widget, span[0] + 1)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    # The overlay's actual footprint over this word: the line edit plus the
+    # list the engine offers for it, read from the widget's own geometry so
+    # the test tracks the font actually in use.
+    top = widget._wordRect(*span).top()
+    assert top > 0  # the word is not on the first line
+    height = overlay.sizeHint().height()
+    # One pixel short of the word's line plus the footprint: the list can
+    # no longer fit below the word, so the flip is forced.
+    _setSizeToViewport(app, widget, 640, top + height - 1)
+    assert top + height > widget.viewport().height()
+    wordRect = widget._wordRect(*span)
+    assert wordRect.top() == top  # the width is unchanged; the line did not reflow
+    lineTop = _lineTopInView(overlay, widget.viewport())
+    assert lineTop == wordRect.top()  # the line edit still sits over the word
+    assert lineTop + overlay.lineEdit().sizeHint().height() >= wordRect.bottom() + 1
+    assert _listAbove(overlay)  # the list flipped above the line edit
+    listTop = overlay.suggestionList().mapTo(widget.viewport(), QPoint(0, 0)).y()
+    assert 0 <= listTop < lineTop  # the list sits above the line edit
+    assert listTop + overlay.suggestionList().height() <= lineTop  # no overlap
+    geom = overlay.geometry()
+    assert geom.right() == wordRect.right()  # the right edge stays on the word
+    assert 0 <= geom.top() < lineTop
+    assert geom.bottom() <= widget.viewport().height()  # the flipped overlay fits
+
+
+# ******************************************************************************
+def testOverlayDoesNotFlipWithRoomBelow(app: QApplication) -> None:
+    """With room below, the list stays below the line edit (no flip).
+
+    A word on a line with enough room for the full list keeps the
+    default orientation: the overlay's top is the line edit's top (the
+    word's top) and the list sits below the line edit.
+    """
+    widget = PyRaya()
+    widget.resize(640, 480)
+    widget.show()
+    widget.setPlainText("hello خوش world دوست")
+    widget.setRomanInputEnabled(True)
+    span = _wordSpanOnLine(widget, "خوش", "first")
+    assert span is not None
+    widget.setRegionType(RegionType.RomanUrdu, *span)
+    _moveCursor(widget, span[0] + 1)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    wordRect = widget._wordRect(*span)
+    assert not _listAbove(overlay)  # the default orientation holds
+    lineTop = _lineTopInView(overlay, widget.viewport())
+    assert lineTop == wordRect.top()
+    assert overlay.geometry().top() == lineTop  # the overlay's top is the line edit's
+    listTop = overlay.suggestionList().mapTo(widget.viewport(), QPoint(0, 0)).y()
+    assert listTop > lineTop
+    geom = overlay.geometry()
+    assert 0 <= geom.top()
+    assert geom.bottom() <= widget.viewport().height()
+
+
+# ******************************************************************************
+def testOverlayUnflipsOnTallerResize(app: QApplication) -> None:
+    """A resize that restores room below flips the list back under the line edit.
+
+    The flip follows the available space on every re-placement: the
+    overlay flipped at a short viewport goes back to the list-below
+    orientation when a taller resize leaves room below the word again,
+    and the line edit sits over the word in both orientations.
+    """
+    widget = PyRaya()
+    widget.show()
+    widget.resize(640, 600)
+    widget.setPlainText("due\nteen\nhello خوش")
+    widget.setRomanInputEnabled(True)
+    span = _wordSpanOnLine(widget, "خوش", "lowest")
+    assert span is not None
+    widget.setRegionType(RegionType.RomanUrdu, *span)
+    _moveCursor(widget, span[0] + 1)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    top = widget._wordRect(*span).top()
+    height = overlay.sizeHint().height()
+    _setSizeToViewport(app, widget, 640, top + height - 1)
+    assert _listAbove(overlay)  # flipped at the short viewport
+    # The taller resize restores room below the word: the list flips back down.
+    widget.resize(640, widget.height() + 200)
+    app.processEvents()
+    wordRect = widget._wordRect(*span)
+    assert wordRect.top() == top  # the width is unchanged; the line did not reflow
+    lineTop = _lineTopInView(overlay, widget.viewport())
+    assert not _listAbove(overlay)
+    assert lineTop == wordRect.top()  # the line edit stayed over the word
+    assert overlay.geometry().top() == lineTop  # the list is below again
+    listTop = overlay.suggestionList().mapTo(widget.viewport(), QPoint(0, 0)).y()
+    assert listTop > lineTop
+    assert overlay.geometry().bottom() <= widget.viewport().height()
+
+
+# ******************************************************************************
+def testSeededOverlayFlipsListAboveAtLowCursor(app: QApplication) -> None:
+    """A seeded overlay at a low cursor flips the list above the line edit.
+
+    Scenario 1 (no word to cover) anchors the line edit to the cursor's
+    line: the overlay is seeded in a tall viewport, then the viewport is
+    shrunk until the space above the anchor exceeds the space below —
+    both too small for the full list — so the flip picks the larger
+    space and the line edit stays pinned to the anchor's line.
+    """
+    widget = PyRaya()
+    widget.show()
+    widget.resize(640, 600)
+    widget.setPlainText("due\nteen\nhello world ")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 9, 21)  # the last line
+    _moveCursor(widget, 20)  # the end of the last line's text
+    _sendKey(widget, Qt.Key.Key_D, "d")
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    anchor = widget._anchorPosition
+    assert anchor is not None
+    rightX, top = widget._cursorAnchor(anchor)
+    assert top > 0  # the cursor is not on the first line
+    height = overlay.sizeHint().height()
+    listHint = overlay.suggestionList().sizeHint().height()
+    # One pixel short of equalizing the two spaces: the room below the
+    # line edit (top + height leaves the deficit) falls one pixel under
+    # the gap above the anchor, and both leave the list short — the
+    # flip now has strictly more room above than below.
+    _setSizeToViewport(app, widget, 640, top + (top - 4) + height - listHint - 1)
+    belowRoom = widget.viewport().height() - top - height + listHint
+    assert belowRoom < top - 4  # the above space is strictly larger
+    assert listHint > belowRoom  # and the list does not fit below either
+    rightX, top = widget._cursorAnchor(anchor)  # the width is unchanged; no reflow
+    assert overlay.isVisible()
+    assert overlay.lineEdit().text() == "d"  # the typed text survived the resize
+    lineTop = _lineTopInView(overlay, widget.viewport())
+    assert lineTop == top  # the line edit sits on the anchor's line
+    assert _listAbove(overlay)
+    listTop = overlay.suggestionList().mapTo(widget.viewport(), QPoint(0, 0)).y()
+    assert 0 <= listTop < lineTop
+    assert listTop + overlay.suggestionList().height() <= lineTop  # no overlap
+    geom = overlay.geometry()
+    assert geom.right() + 1 == rightX  # the right edge stays on the cursor
+    assert 0 <= geom.top()
+    assert geom.bottom() <= widget.viewport().height()  # the flipped overlay fits
+
+
+# ******************************************************************************
+def testSeededOverlayStaysBelowWithRoom(app: QApplication) -> None:
+    """A seeded overlay with room below keeps the list below the line edit."""
+    widget = PyRaya()
+    widget.resize(800, 600)
+    widget.show()
+    widget.setPlainText("hello world ")
+    widget.setRomanInputEnabled(True)
+    span = _wordSpanOnLine(widget, "world", "first")
+    assert span is not None
+    widget.setRegionType(RegionType.RomanUrdu, 6, 12)
+    _moveCursor(widget, 11)
+    _sendKey(widget, Qt.Key.Key_D, "d")
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    assert not _listAbove(overlay)
+    anchor = widget._anchorPosition
+    assert anchor is not None
+    rightX, top = widget._cursorAnchor(anchor)
+    lineTop = _lineTopInView(overlay, widget.viewport())
+    assert lineTop == top
+    assert overlay.geometry().top() == lineTop  # the list is below the line edit
+    assert overlay.geometry().bottom() <= widget.viewport().height()
+
+
+# ******************************************************************************
+def testOverlayStaysBelowWhenAboveSpaceIsSmaller(app: QApplication) -> None:
+    """The list stays below when the space above is smaller than the below.
+
+    A word on the document's first line has almost no space above it, so
+    when the list no longer fits below the anchor line the overlay does
+    NOT flip: the smaller space (above) would clip the list to nothing,
+    while the too-small-below space still holds most of it. The overlay
+    keeps the default orientation, the line edit stays pinned over the
+    word, and the list is truncated at the viewport's bottom edge instead
+    of painting out of bounds above the viewport's top edge.
+    """
+    widget = PyRaya()
+    widget.show()
+    widget.resize(640, 600)
+    widget.setPlainText("hello خوش world دوست")
+    widget.setRomanInputEnabled(True)
+    span = _wordSpanOnLine(widget, "خوش", "first")
+    assert span is not None
+    widget.setRegionType(RegionType.RomanUrdu, *span)
+    _moveCursor(widget, span[0] + 1)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    top = widget._wordRect(*span).top()
+    hint = overlay.sizeHint().height()
+    listHint = overlay.suggestionList().sizeHint().height()
+    # One pixel short of the overlay's below footprint: the list cannot
+    # fully fit below — the space above is the smaller of the two.
+    _setSizeToViewport(app, widget, 640, top + hint - 1)
+    top = widget._wordRect(*span).top()
+    # The width is unchanged; the line did not reflow, and the budget
+    # relation that makes this the "above is smaller" case still holds:
+    # below the line edit the list's bottom edge is the overlay's bottom
+    # (top + hint), above it the flipped list is clamped to top - 4.
+    belowRoom = widget.viewport().height() - top - hint + listHint
+    aboveRoom = top - 4
+    assert belowRoom == listHint - 1
+    assert aboveRoom < belowRoom
+    assert not _listAbove(overlay)  # the smaller space above loses
+    lineTop = _lineTopInView(overlay, widget.viewport())
+    assert lineTop == top  # the line edit stays pinned over the word
+    assert overlay.geometry().top() == lineTop  # nothing is placed above
+    listTop = overlay.suggestionList().mapTo(widget.viewport(), QPoint(0, 0)).y()
+    assert listTop > lineTop  # the list is below the line edit
+    # QRect.bottom() is inclusive; the exclusive bottom edge is the height.
+    assert overlay.geometry().y() + overlay.geometry().height() == widget.viewport().height()
+    assert overlay.lineEdit().sizeHint().height() <= widget.viewport().height() - lineTop
+
+
+# ******************************************************************************
+def testOverlayFavorsBelowWhenSpacesAreEqual(app: QApplication) -> None:
+    """Equal spaces above and below favor the lower (default) orientation.
+
+    A word on the second line leaves a small gap above it; the viewport
+    is sized so the gap above equals the room below the line edit, both
+    too small for the full list. The tie stays below: the overlay keeps
+    the default orientation, the line edit stays pinned over the word,
+    and the list is truncated at the viewport's bottom edge.
+    """
+    widget = PyRaya()
+    widget.show()
+    widget.resize(640, 600)
+    widget.setPlainText("due\nhello خوش")
+    widget.setRomanInputEnabled(True)
+    span = _wordSpanOnLine(widget, "خوش", "lowest")
+    assert span is not None
+    widget.setRegionType(RegionType.RomanUrdu, *span)
+    _moveCursor(widget, span[0] + 1)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    top = widget._wordRect(*span).top()
+    hint = overlay.sizeHint().height()
+    listHint = overlay.suggestionList().sizeHint().height()
+    assert 0 < top - 4 < listHint  # the tie is decisive: both spaces too small
+    # Size the viewport so the room below the line edit equals the gap
+    # above the anchor: belowRoom == aboveRoom == top - 4.
+    _setSizeToViewport(app, widget, 640, top + (top - 4) + hint - listHint)
+    top = widget._wordRect(*span).top()  # the width is unchanged; no reflow
+    belowRoom = widget.viewport().height() - top - hint + listHint
+    assert belowRoom == top - 4  # the tie holds after the resize
+    assert not _listAbove(overlay)  # the tie favors below
+    lineTop = _lineTopInView(overlay, widget.viewport())
+    assert lineTop == top  # the line edit stays pinned over the word
+    assert overlay.geometry().top() == lineTop  # nothing is placed above
+    listTop = overlay.suggestionList().mapTo(widget.viewport(), QPoint(0, 0)).y()
+    assert listTop > lineTop  # the list is below the line edit
+    # QRect.bottom() is inclusive; the exclusive bottom edge is the height.
+    assert overlay.geometry().y() + overlay.geometry().height() == widget.viewport().height()
+
+
+# ******************************************************************************
 def testDeactivatesWhenCursorLeaves(app: QApplication) -> None:
     """Leaving the word hides the overlay; the document is untouched."""
     widget = PyRaya()

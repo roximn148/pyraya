@@ -889,7 +889,9 @@ class PyRaya(QPlainTextEdit):
         The overlay's right edge is anchored to the word's right edge (so the
         right-aligned line edit grows leftward, matching the document flow);
         the width floor is the word's rect width, so the overlay never
-        narrows below the word it covers.
+        narrows below the word it covers. The line edit stays over the word
+        in both orientations: when the list does not fit below the word, it
+        flips above the line edit (see :meth:`_placeOverlay`).
         """
         wordRect = self._wordRect(word[0], word[1])
         self._minOverlayWidth = wordRect.width()
@@ -904,24 +906,68 @@ class PyRaya(QPlainTextEdit):
         The right-aligned line edit grows leftward from ``rightX``, matching
         the document flow; the width is the wider of the size hint and the
         activation width floor (``_minOverlayWidth``), so typed text that
-        outgrows the anchor width still fits. The overlay is clamped to stay
-        inside the viewport, flipping above the anchor when the suggestion
-        list would overflow the bottom.
+        outgrows the anchor width still fits. The line edit is pinned to
+        ``top`` in both orientations: the suggestion list flips above the
+        line edit only when it does not fit below the anchor *and* the
+        space above is the larger of the two, so the flipped list is
+        clamped to strictly more room than the below orientation offered;
+        on a tie — and for a word near the viewport's top, where the space
+        above can never hold the list — the default (below) orientation
+        wins and the list is truncated below instead of painting out of
+        bounds at the viewport's top edge.
         """
         overlay = self._overlay
         if overlay is None:
             return
         hint = overlay.sizeHint()
-        width = max(hint.width(), self._minOverlayWidth)
         viewport = self.viewport()
+        width = max(hint.width(), self._minOverlayWidth)
+        # The line edit itself stays pinned to the anchor line in both
+        # orientations; only the list's side is decided here. The space
+        # budgets are the list's: below the line edit the list's bottom
+        # edge is the overlay's bottom (``top + hint.height()``), and the
+        # flipped list is clamped to the gap over the anchor (``top - 4``).
+        listHint = overlay.suggestionList().sizeHint().height()
+        belowRoom = viewport.height() - top - hint.height() + listHint
+        aboveRoom = top - 4
+        # Flip above only when below cannot hold the list AND the space
+        # above is strictly larger: ties favor the default orientation,
+        # so a first-line word's overlay stays below (clamped) rather
+        # than flipping into a space that can never fit the list.
+        flip = belowRoom < listHint and aboveRoom > belowRoom
+        overlay.setListAbove(flip)
+        if flip:
+            # The flipped list is clamped to the space above the line
+            # edit, which the flip decision guarantees is larger than the
+            # space below the anchor would have left it.
+            listHeight = min(listHint, max(0, aboveRoom))
+            height = overlay.lineEdit().sizeHint().height() + 4 + listHeight
+            y = top - 4 - listHeight
+        else:
+            y = top
+            height = hint.height()
         x = rightX - width
-        y = top
-        if y + hint.height() > viewport.height():
-            y = top - hint.height()
         x = max(0, min(x, viewport.width() - width))
         y = max(0, y)
+        # A viewport shorter than even the flipped overlay is clamped so the
+        # overlay still fits, rather than spilling past the viewport's top.
+        if y + height > viewport.height():
+            height = max(0, viewport.height() - y)
         overlay.move(x, y)
-        overlay.resize(width, hint.height())
+        overlay.resize(width, height)
+        # The layout may round the flipped list's allocation a pixel short,
+        # which would leave the line edit a hair off the anchor line: read
+        # the line edit's settled position in the overlay and shift the
+        # overlay so the pinning is exact in the viewport. (In the default
+        # orientation the line edit leads the layout, so its slot is exact
+        # and this is a no-op; when the shift would push the overlay past
+        # the viewport's bottom, the overlay is re-clamped to fit.)
+        lineY = overlay.lineEdit().y()
+        if y + lineY != top:
+            y = max(0, top - lineY)
+            if y + overlay.height() > viewport.height():
+                overlay.resize(overlay.width(), max(0, viewport.height() - y))
+            overlay.move(x, y)
 
     # ==========================================================================
     def _cursorAnchor(self, position: int) -> tuple[int, int]:
@@ -1436,7 +1482,9 @@ class PyRaya(QPlainTextEdit):
         word or anchor it is active over, so activation is never
         re-evaluated — doing so would clobber the typed text (scenario
         1) or deactivate the overlay when the cursor is not inside a
-        word.
+        word. The list's orientation follows the room the reflow leaves
+        below the anchor: a taller resize can flip a flipped list back
+        below the line edit.
 
         Args:
             event: The resize event.
