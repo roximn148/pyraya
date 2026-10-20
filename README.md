@@ -17,7 +17,7 @@ punctuation.
 ------------------------------
 ## ⚠️ Alpha Status
 
-PyRaya is at **version 0.1.0-alpha.6**. The widget is a drop-in `QPlainTextEdit`. The following are now **implemented**:
+PyRaya is at **version 0.1.0-alpha.7**. The widget is a drop-in `QPlainTextEdit`. The following are now **implemented**:
 
 - **Native RTL layout** — right-to-left alignment and paragraph handling.
 - **Noto typography** — a configurable font stack defaulting to Noto Naskh Arabic.
