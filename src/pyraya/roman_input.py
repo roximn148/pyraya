@@ -47,11 +47,29 @@ from romanalfaz import DictionaryNotFoundError, RomanAlfaz
 from romanalfaz.algorithm import tafseerUrduAr2Rm
 from romanalfaz.engine import Suggestion, Vocabulary
 
-__all__ = ["RomanInputEngine", "RomanOverlay"]
+__all__ = ["RomanInputEngine", "RomanOverlay", "ArabicScriptSeparators"]
 
-#: Characters that trigger a separator-key commit: every punctuation mark,
-#: plus space and newline.
-_SEPARATORS = set(string.punctuation) | {" ", "\n"}
+#: The punctuation marks of the Arabic script itself (U+0600-U+06FF): the
+#: Arabic comma, semicolon, question mark, and the Urdu full stop, plus the
+#: Arabic date, decimal, and thousands separators. They terminate a word run
+#: exactly like the Latin marks do, and a separator-key commit on one of
+#: them writes it out together with the committed word.
+ArabicScriptSeparators: frozenset[str] = frozenset(
+    {
+        "\u060c",  # ، Arabic comma
+        "\u060d",  # ؜ Arabic date separator
+        "\u061b",  # ؛ Arabic semicolon
+        "\u061f",  # ؟ Arabic question mark
+        "\u066b",  # ٫ Arabic decimal separator
+        "\u066c",  # ٬ Arabic thousands separator
+        "\u06d4",  # ۔ full stop
+    }
+)
+
+#: Characters that trigger a separator-key commit: every punctuation mark
+#: of the keyboard, plus space, newline, and the Arabic script's own
+#: separator marks (:data:`arabicScriptSeparators`).
+_SEPARATORS = set(string.punctuation) | {" ", "\n"} | ArabicScriptSeparators
 
 #: Subtle tier tints: green = exact, orange = edit distance 1, red = distance 2.
 _TIER_COLORS = {
@@ -347,6 +365,30 @@ class SuggestionList(QWidget):
             self._selectedIndex = index
             self._scrollToRow(index)
             self.update()
+
+    # ==========================================================================
+    def rowHeight(self) -> int:
+        """One row's height: the font line height plus padding."""
+        return self._rowHeight()
+
+    # ==========================================================================
+    def quantizedHeight(self, height: int) -> int:
+        """The greatest exact number of rows that fits in ``height``.
+
+        Args:
+            height: A pixel height, typically the widget's own current height.
+
+        Returns:
+            ``height`` rounded down to an integral multiple of the row
+            height (``0`` before the first row's threshold): the widget's
+            own panel only ever reaches the bottom edge of its last
+            visible row, so no blank strip of list background is painted
+            below the rows.
+        """
+        rowHeight = self._rowHeight()
+        if rowHeight <= 0:
+            return max(0, height)
+        return max(0, height - (height % rowHeight))
 
     # ==========================================================================
     def selectedRow(self) -> _SuggestionRow | None:

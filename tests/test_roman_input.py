@@ -1324,6 +1324,22 @@ def _wordSpanOnLine(widget: PyRaya, word: str, which: str) -> tuple[int, int] | 
 
 
 # ******************************************************************************
+def _wordSpanOnBlock(widget: PyRaya, word: str, blockIndex: int) -> tuple[int, int]:
+    """The span of ``word`` inside the block at ``blockIndex``.
+
+    Reads the block position and the in-block offset directly, so the
+    result tracks the document layout. Raises ``ValueError`` when the
+    word does not occur in that block.
+    """
+    block = widget.document().begin()
+    for _ in range(blockIndex):
+        block = block.next()
+    local = block.text().index(word)
+    start = block.position() + local
+    return (start, start + len(word))
+
+
+# ******************************************************************************
 def _setSizeToViewport(app: QApplication, widget: PyRaya, width: int, target: int) -> None:
     """Resize the widget until its viewport is exactly ``target`` tall.
 
@@ -1508,6 +1524,512 @@ def testSeededOverlayFlipsListAboveAtLowCursor(app: QApplication) -> None:
 
 
 # ******************************************************************************
+def testClickActivationPinsLineEditOverFlippedList(app: QApplication) -> None:
+    """A click-activated overlay's line edit sits exactly on the word.
+
+    The press deactivates and hides the overlay, so the release places a
+    hidden widget whose layout has not run for the size about to be set:
+    the previous word's list height is baked into the widget's slots, and
+    this word's suggestions have a different height. Reading the line
+    edit's slot back therefore answers with the previous word's value and
+    drags the whole overlay off the word by the slot difference; the pin
+    must come from the same numbers the geometry is built from.
+    """
+    widget = PyRaya()
+    widget.show()
+    widget.resize(640, 800)
+    widget.setPlainText("due\nteen\nhello دوست ژنگز")
+    widget.setRomanInputEnabled(True)
+    spanShort = _wordSpanOnLine(widget, "دوست", "lowest")
+    spanLong = _wordSpanOnLine(widget, "ژنگز", "lowest")
+    assert spanShort is not None
+    assert spanLong is not None
+    widget.setRegionType(RegionType.RomanUrdu, *spanShort)
+    widget.setRegionType(RegionType.RomanUrdu, *spanLong)
+    _moveCursor(widget, spanShort[0] + 1)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    top = widget._wordRect(*spanShort).top()
+    assert top > 0  # the words are not on the first line
+    height = overlay.sizeHint().height()
+    # Deactivate first, then shrink: an inactive overlay is not re-placed
+    # on resize, so the click re-activates it with only this word
+    # Whereas the settled layout still holds this word's slots.
+    widget._deactivateOverlay()
+    app.processEvents()
+    assert not overlay.isVisible()
+    # One pixel short of the short-list word's footprint: the click will
+    # flip the list above the line edit.
+    _setSizeToViewport(app, widget, 640, top + height - 1)
+    wordRect = widget._wordRect(*spanLong)
+    assert wordRect.top() == top  # the width is unchanged; no reflow
+    point = (wordRect.right(), wordRect.top() + 5)
+    _sendMouse(widget, "press", point[0], point[1])
+    _sendMouse(widget, "release", point[0], point[1])
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    app.processEvents()
+    assert _listAbove(overlay)
+    assert _lineTopInView(overlay, widget.viewport()) == wordRect.top()
+
+
+# ******************************************************************************
+def testFlippedPlacementIsIdempotent(app: QApplication) -> None:
+    """Placement from identical arguments yields identical geometry.
+
+    A click-path placement runs while the overlay is hidden, so its
+    layout has not run for the size being set; a second identical call
+    — after the overlay is shown and the layout has settled — must
+    reproduce the exact geometry. The placement is a pure function of
+    the anchor and the viewport, not of whatever slots the layout
+    happened to hold when it was called.
+    """
+    widget = PyRaya()
+    widget.show()
+    widget.resize(640, 800)
+    widget.setPlainText("due\nteen\nhello دوست ژنگز")
+    widget.setRomanInputEnabled(True)
+    spanShort = _wordSpanOnLine(widget, "دوست", "lowest")
+    spanLong = _wordSpanOnLine(widget, "ژنگز", "lowest")
+    assert spanShort is not None
+    assert spanLong is not None
+    widget.setRegionType(RegionType.RomanUrdu, *spanShort)
+    widget.setRegionType(RegionType.RomanUrdu, *spanLong)
+    _moveCursor(widget, spanShort[0] + 1)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    top = widget._wordRect(*spanShort).top()
+    assert top > 0  # the words are not on the first line
+    height = overlay.sizeHint().height()
+    widget._deactivateOverlay()
+    app.processEvents()
+    _setSizeToViewport(app, widget, 640, top + height - 1)
+    wordRect = widget._wordRect(*spanLong)
+    rightX = wordRect.right() + 1
+    # Place the long-list word while the overlay is hidden, let the layout
+    # settle under the placed size, then place again from the same
+    # arguments: a pure placement must reproduce the same geometry.
+    widget._placeOverlay(rightX, wordRect.top())  # hidden: called on a stale layout
+    overlay.show()
+    app.processEvents()
+    first = overlay.geometry()
+    widget._placeOverlay(rightX, wordRect.top())  # identical arguments, settled
+    second = overlay.geometry()
+    widget._placeOverlay(rightX, wordRect.top())  # and once more, for good measure
+    app.processEvents()
+    assert overlay.geometry() == second
+    assert second == first
+
+
+# ******************************************************************************
+def testRightEdgeHugPinsOverlayRight(app: QApplication) -> None:
+    """A word hugging the viewport's right edge keeps the overlay pinned.
+
+    Placement pins the overlay's right edge to the word's right edge in
+    both orientations: a viewport too narrow to show the whole overlay
+    clips it on the left instead of pulling the right edge off the word.
+    The overlay input staying over the trigger word is the invariant — a
+    viewport that cannot show the overlay is adjusted (resized or
+    scrolled) by the user, never worked around by moving the overlay.
+    """
+    widget = PyRaya()
+    widget.show()
+    widget.resize(200, 400)
+    widget.setPlainText("due\nteen\nhello دوست")
+    widget.setRomanInputEnabled(True)
+    span = _wordSpanOnLine(widget, "دوست", "lowest")
+    assert span is not None
+    widget.setRegionType(RegionType.RomanUrdu, *span)
+    _moveCursor(widget, span[0] + 1)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    wordRect = widget._wordRect(*span)
+    assert wordRect.right() >= widget.viewport().width() - 30  # hugging the edge
+    # Typed text wider than everything left of the viewport's edge: the
+    # placement width floor no longer fits.
+    overlay.setText(ZERO_MATCH_WORDS[0] * 6)
+    app.processEvents()
+    assert overlay.width() > wordRect.right() + 1  # the case bites at all
+    assert overlay.geometry().right() == wordRect.right()
+    assert _lineTopInView(overlay, widget.viewport()) == wordRect.top()
+
+
+# ******************************************************************************
+def testScrollReanchorsActiveOverlay(app: QApplication) -> None:
+    """Scrolling keeps the overlay over its word while the word is visible.
+
+    The overlay is a viewport child and never scrolls by itself: a scroll
+    moves the document under it, so an active overlay must be re-placed
+    over its word. Small scrolls pass through Qt's viewport blit (which
+    shifts child widgets with the painted content); large jumps repaint
+    without moving children — the placement must be re-derived in both
+    cases, accumulating no drift. The off/on-screen decision is made on
+    the WORD's rect, never on the overlay widget: a word scrolled
+    partially out of the viewport keeps the overlay active and pinned,
+    and a word scrolled fully out of it deactivates the overlay even
+    though the overlay's own box would still overlap the viewport.
+    Scrolling back resumes the suspension: view events (scroll, resize,
+    reflow) suspend and resume the overlay both ways, while user
+    decisions (a mouse press, Esc, a new activation) and document edits
+    drop it.
+    """
+    widget = PyRaya()
+    widget.show()
+    widget.resize(400, 240)
+    widget.setPlainText("\n".join(["hello دوست"] * 24))
+    widget.setRomanInputEnabled(True)
+    span = _wordSpanOnBlock(widget, "دوست", 3)  # a mid-document word
+    widget.setRegionType(RegionType.RomanUrdu, *span)
+    _moveCursor(widget, span[0] + 1)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    app.processEvents()
+    assert _lineTopInView(overlay, widget.viewport()) == widget._wordRect(*span).top()
+    scrollbar = widget.verticalScrollBar()
+    assert scrollbar.maximum() >= 5  # headroom for the whole-line scrolls
+    # Fully visible: the +3 whole-line jump (large scroll, repaint path)
+    # re-places the overlay over the word, accumulating no drift.
+    scrollbar.setValue(3)
+    app.processEvents()
+    wordRect = widget._wordRect(*span)
+    assert 0 <= wordRect.top() and wordRect.bottom() <= widget.viewport().height()
+    assert widget._overlayActive()
+    assert _lineTopInView(overlay, widget.viewport()) == wordRect.top()
+    # Fully out: a further whole-line scroll leaves no visible edge of the
+    # word, and the overlay is deactivated — the hit test is on the word
+    # rect, never the overlay widget, which reaches further than its word.
+    scrollbar.setValue(5)
+    app.processEvents()
+    assert widget._wordRect(*span).bottom() < 0  # the word fully above
+    assert not widget._overlayActive()
+    # Scrolling back re-activates the view-suspended overlay over the
+    # word — view events (scroll, resize, reflow) suspend and resume the
+    # overlay both ways, with no manual trigger. The resumption is the
+    # standard activation: the word's full romanization, line-edit
+    # focus, exact pinning.
+    scrollbar.setValue(3)
+    app.processEvents()
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    assert widget._activeWord == span
+    assert _lineTopInView(overlay, widget.viewport()) == widget._wordRect(*span).top()
+    # Partially visible: shrinking the viewport until its bottom edge
+    # falls inside the word's rect keeps the overlay active and pinned
+    # over the word (only one visible edge matters — the word's, never
+    # the overlay's).
+    scrollbar.setValue(2)
+    app.processEvents()
+    wordRect = widget._wordRect(*span)
+    assert wordRect.top() > 0
+    _setSizeToViewport(app, widget, 400, wordRect.top() + 6)
+    assert widget._wordRect(*span).bottom() > widget.viewport().height()  # clipped below
+    assert widget._overlayActive()
+    assert _lineTopInView(overlay, widget.viewport()) == widget._wordRect(*span).top()
+    # Fully out of the reflowed viewport (the word's top edge is no less
+    # visible than any overlay pixel): the overlay deactivates.
+    _setSizeToViewport(app, widget, 400, wordRect.top())
+    assert widget._wordRect(*span).top() >= widget.viewport().height()
+    assert not widget._overlayActive()
+    # Granting room back resumes the suspended overlay over the word —
+    # the reflow-caused hiding is a view suspension, not a user decision.
+    _setSizeToViewport(app, widget, 400, 240)
+    app.processEvents()
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    assert widget._activeWord == span
+    assert _lineTopInView(overlay, widget.viewport()) == widget._wordRect(*span).top()
+
+
+# ******************************************************************************
+def testScrollOutDeactivatesOnWordRectLeavingViewport(app: QApplication) -> None:
+    """A word scrolled fully below the viewport deactivates the overlay.
+
+    The decision is on the WORD's rect, never the overlay widget: the
+    word is activated in the viewport's bottom band with its tall
+    suggestion list flipped above it, so when the word slides out at the
+    viewport's bottom edge the flipped list would still hang far up
+    inside the viewport — an overlay-based hit test would keep the popup
+    alive over nothing. Scrolling back restores the suspension.
+    """
+    widget = PyRaya()
+    widget.show()
+    widget.resize(640, 600)
+    widget.setPlainText("\n".join(["hello ژنگز"] * 90))
+    widget.setRomanInputEnabled(True)
+    blockIndex = 46  # a word with plenty of document below it
+    span = _wordSpanOnBlock(widget, "ژنگز", blockIndex)
+    widget.setRegionType(RegionType.RomanUrdu, *span)
+    lineHeight = round(widget.blockBoundingGeometry(widget.document().begin()).height())
+    # Scroll the word into the viewport's bottom band, leaving room below
+    # for less than the tall list: the list flips above the anchor.
+    scrollbar = widget.verticalScrollBar()
+    value = blockIndex - ((widget.viewport().height() - 4 * lineHeight - 4) // lineHeight)
+    scrollbar.setValue(max(0, value))
+    _moveCursor(widget, span[0] + 1)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    app.processEvents()
+    wordRect = widget._wordRect(*span)
+    assert wordRect.top() > 0 and wordRect.bottom() <= widget.viewport().height()
+    assert _listAbove(overlay)  # flipped above the near-bottom anchor
+    # Scroll toward the document's start: the word leaves the viewport at
+    # its bottom edge, and the overlay is deactivated on the word rect.
+    scrollbar.setValue(0)
+    app.processEvents()
+    assert widget._wordRect(*span).top() >= widget.viewport().height()
+    assert not widget._overlayActive()
+    # Scrolling back restores the suspended overlay over the word — the
+    # bottom-edge hiding is the same view suspension as any other.
+    scrollbar.setValue(max(0, value))
+    app.processEvents()
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    assert widget._activeWord == span
+    assert _lineTopInView(overlay, widget.viewport()) == widget._wordRect(*span).top()
+
+
+# ******************************************************************************
+def testSeededAnchorOutOfViewportDeactivates(app: QApplication) -> None:
+    """A seeded overlay deactivates when its anchor line scrolls off.
+
+    The scenario 1 (seeded, no word) equivalent of the word-rect hit
+    test: the anchor's cursor line. The overlay is seeded mid-document,
+    typed further, and then scrolled fully out of the viewport; the
+    overlay suspends, and scrolling back resumes it at the anchor with
+    the typed text intact.
+    """
+    widget = PyRaya()
+    widget.show()
+    widget.resize(400, 240)
+    widget.setPlainText("\n".join(["hello world"] * 24))
+    widget.setRomanInputEnabled(True)
+    block = widget.document().begin()
+    for _ in range(4):
+        block = block.next()
+    position = block.position() + 4
+    _moveCursor(widget, position)
+    _sendKey(widget, Qt.Key.Key_D, "d")
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_O, "o")  # typed text survives
+    app.processEvents()
+    scrollbar = widget.verticalScrollBar()
+    assert scrollbar.maximum() >= 5  # the anchor can be scrolled fully out
+    scrollbar.setValue(scrollbar.maximum())
+    app.processEvents()
+    assert not widget._overlayActive()  # the anchor line is above the viewport
+    # Scrolling back resumes the suspended seeded overlay at the anchor
+    # with the typed text intact — no manual trigger needed.
+    scrollbar.setValue(0)
+    app.processEvents()
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    assert widget._activeWord is None
+    assert widget._anchorPosition == position
+    assert overlay.lineEdit().text() == "do"
+
+
+# ******************************************************************************
+def testUserDeactivationSuppressesRestore(app: QApplication) -> None:
+    """User decisions drop the suspension; view events never override them.
+
+    The word-rect hit test's hiding is a view suspension that resumes
+    when the word returns. A user decision — a mouse press anywhere, or
+    Esc turning assist mode off — is an explicit active/inactive state:
+    once the user walked away, scrolling back must not resurrect the
+    overlay over them.
+    """
+    widget = PyRaya()
+    widget.show()
+    widget.resize(400, 240)
+    widget.setPlainText("\n".join(["hello دوست"] * 24))
+    widget.setRomanInputEnabled(True)
+    span = _wordSpanOnBlock(widget, "دوست", 3)
+    widget.setRegionType(RegionType.RomanUrdu, *span)
+    _moveCursor(widget, span[0] + 1)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    app.processEvents()
+    scrollbar = widget.verticalScrollBar()
+    scrollbar.setValue(5)  # the word leaves the viewport: suspended
+    app.processEvents()
+    assert not widget._overlayActive()
+    # A mouse press is a user decision: the suspension is dropped and
+    # scrolling back stays quiet.
+    _sendMouse(widget, "press", 50, 200)
+    _sendMouse(widget, "release", 50, 200)
+    scrollbar.setValue(3)
+    app.processEvents()
+    assert not widget._overlayActive()
+    # Esc on an active overlay turns assist mode off; the user is left
+    # alone — no suspension outlives the assist-off state.
+    widget2 = PyRaya()
+    widget2.show()
+    widget2.resize(400, 240)
+    widget2.setPlainText("\n".join(["hello دوست"] * 24))
+    widget2.setRomanInputEnabled(True)
+    span2 = _wordSpanOnBlock(widget2, "دوست", 3)
+    widget2.setRegionType(RegionType.RomanUrdu, *span2)
+    _moveCursor(widget2, span2[0] + 1)
+    overlay2 = widget2._overlay
+    assert overlay2 is not None and overlay2.isVisible()
+    _sendKey(overlay2.lineEdit(), Qt.Key.Key_Escape, "")  # assist mode off
+    app.processEvents()
+    assert not widget2._assistMode
+    scrollbar2 = widget2.verticalScrollBar()
+    scrollbar2.setValue(scrollbar2.maximum())
+    app.processEvents()
+    scrollbar2.setValue(0)
+    app.processEvents()
+    assert not widget2._overlayActive()  # never suspended: nothing to resume
+
+
+# ******************************************************************************
+def testDocumentEditWhileSuspendedDropsRestore(app: QApplication) -> None:
+    """A document edit while suspended makes the suspension stale.
+
+    The suspension remembers the anchor for the document as it was: an
+    edit bumps the document revision, so the suspension is dropped
+    rather than re-activating over text that no longer matches.
+    """
+    widget = PyRaya()
+    widget.show()
+    widget.resize(400, 240)
+    widget.setPlainText("\n".join(["hello دوست"] * 24))
+    widget.setRomanInputEnabled(True)
+    span = _wordSpanOnBlock(widget, "دوست", 3)
+    widget.setRegionType(RegionType.RomanUrdu, *span)
+    _moveCursor(widget, span[0] + 1)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    app.processEvents()
+    scrollbar = widget.verticalScrollBar()
+    scrollbar.setValue(5)
+    app.processEvents()
+    assert not widget._overlayActive()  # suspended
+    before = widget.document().toPlainText()
+    _sendKey(widget, Qt.Key.Key_Backspace, "")  # the document regained focus
+    after = widget.document().toPlainText()
+    assert after != before  # the edit really happened while suspended
+    scrollbar.setValue(3)
+    app.processEvents()
+    assert not widget._overlayActive()  # the stale suspension is dropped
+    assert widget._suspendedOverlay is None
+
+
+# ******************************************************************************
+def testAssistOffWhileSuspendedDropsRestore(app: QApplication) -> None:
+    """Assist mode turning off while suspended drops the suspension.
+
+    ``setAssistEnabled(False)`` is a user decision (the user is left
+    alone); the suspension it voids stays dropped even after assist mode
+    is marked ready again.
+    """
+    widget = PyRaya()
+    widget.show()
+    widget.resize(400, 240)
+    widget.setPlainText("\n".join(["hello دوست"] * 24))
+    widget.setRomanInputEnabled(True)
+    span = _wordSpanOnBlock(widget, "دوست", 3)
+    widget.setRegionType(RegionType.RomanUrdu, *span)
+    _moveCursor(widget, span[0] + 1)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    app.processEvents()
+    scrollbar = widget.verticalScrollBar()
+    scrollbar.setValue(5)
+    app.processEvents()
+    assert not widget._overlayActive()  # suspended
+    widget.setAssistEnabled(False)  # the user is left alone
+    widget.setAssistEnabled(True)  # ready again — the suspension stays gone
+    scrollbar.setValue(3)
+    app.processEvents()
+    assert not widget._overlayActive()
+    assert widget._suspendedOverlay is None
+
+
+# ******************************************************************************
+def testFlippedClampedListHeightIsIntegralRows(app: QApplication) -> None:
+    """A clamped flipped list is an exact number of rows tall.
+
+    A click-path placement gives the clamped list whatever fraction of a
+    row the viewport leaves above the anchor: the panel's unpainted
+    remainder between the last row and the list's bottom edge shows as a
+    blank strip of list background. The list's height is snapped down to
+    an integral multiple of the row height (the same rows stay visible;
+    only the blank strip goes away).
+    """
+    widget = PyRaya()
+    widget.show()
+    widget.resize(640, 800)
+    widget.setPlainText("due\nteen\nhello دوست ژنگز")
+    widget.setRomanInputEnabled(True)
+    spanShort = _wordSpanOnLine(widget, "دوست", "lowest")
+    spanLong = _wordSpanOnLine(widget, "ژنگز", "lowest")
+    assert spanShort is not None
+    assert spanLong is not None
+    widget.setRegionType(RegionType.RomanUrdu, *spanShort)
+    widget.setRegionType(RegionType.RomanUrdu, *spanLong)
+    _moveCursor(widget, spanShort[0] + 1)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    top = widget._wordRect(*spanShort).top()
+    assert top > 0
+    height = overlay.sizeHint().height()
+    widget._deactivateOverlay()
+    app.processEvents()
+    _setSizeToViewport(app, widget, 640, top + height - 1)
+    # Click path: the release re-activates over the long-list word.
+    wordRect = widget._wordRect(*spanLong)
+    point = (wordRect.right(), wordRect.top() + 5)
+    _sendMouse(widget, "press", point[0], point[1])
+    _sendMouse(widget, "release", point[0], point[1])
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    app.processEvents()
+    sugList = overlay.suggestionList()
+    assert _listAbove(overlay)  # the flipped orientation, clamped
+    assert sugList.rowCount() >= 2  # the clamp leaves less than all rows
+    assert sugList.height() < sugList.sizeHint().height()  # the clamp engaged
+    rowHeight = sugList.rowHeight()
+    assert rowHeight > 0
+    assert sugList.height() % rowHeight == 0  # no blank strip above the edge
+    assert sugList.height() > 0  # some rows remain visible
+
+
+# ******************************************************************************
+def testTruncatedListHeightIsIntegralRows(app: QApplication) -> None:
+    """A bottom-truncated list is an exact number of rows tall.
+
+    A first-line anchor with a tall suggestion list stays in the default
+    orientation (the viewport's top can never hold the list), so the list
+    is truncated at the viewport's bottom edge — from an arbitrary pixel
+    height, whose remainder is the blank panel strip below the last row.
+    The height snaps down to an integral multiple of the row height.
+    """
+    widget = PyRaya()
+    widget.show()
+    widget.resize(400, 120)
+    widget.setPlainText("hello ژنگز")
+    widget.setRomanInputEnabled(True)
+    span = _wordSpanOnLine(widget, "ژنگز", "first")
+    assert span is not None
+    widget.setRegionType(RegionType.RomanUrdu, *span)
+    _moveCursor(widget, span[0] + 1)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    app.processEvents()
+    sugList = overlay.suggestionList()
+    assert not _listAbove(overlay)  # the default orientation, truncated
+    assert sugList.rowCount() >= 2
+    assert sugList.height() < sugList.sizeHint().height()  # the truncation engaged
+    rowHeight = sugList.rowHeight()
+    assert rowHeight > 0
+    assert sugList.height() % rowHeight == 0  # no blank strip below the last row
+    assert sugList.height() > 0  # some rows remain visible
+
+
+# ******************************************************************************
 def testSeededOverlayStaysBelowWithRoom(app: QApplication) -> None:
     """A seeded overlay with room below keeps the list below the line edit."""
     widget = PyRaya()
@@ -1576,8 +2098,13 @@ def testOverlayStaysBelowWhenAboveSpaceIsSmaller(app: QApplication) -> None:
     assert overlay.geometry().top() == lineTop  # nothing is placed above
     listTop = overlay.suggestionList().mapTo(widget.viewport(), QPoint(0, 0)).y()
     assert listTop > lineTop  # the list is below the line edit
-    # QRect.bottom() is inclusive; the exclusive bottom edge is the height.
-    assert overlay.geometry().y() + overlay.geometry().height() == widget.viewport().height()
+    # The truncated overlay fits the viewport and ends flush at the bottom
+    # edge of its last visible row — the list is truncated in whole rows,
+    # so no blank strip of list background is painted below the rows.
+    assert overlay.geometry().y() + overlay.geometry().height() <= widget.viewport().height()
+    rowHeight = overlay.suggestionList().rowHeight()
+    assert rowHeight > 0
+    assert overlay.suggestionList().height() % rowHeight == 0
     assert overlay.lineEdit().sizeHint().height() <= widget.viewport().height() - lineTop
 
 
@@ -1618,8 +2145,13 @@ def testOverlayFavorsBelowWhenSpacesAreEqual(app: QApplication) -> None:
     assert overlay.geometry().top() == lineTop  # nothing is placed above
     listTop = overlay.suggestionList().mapTo(widget.viewport(), QPoint(0, 0)).y()
     assert listTop > lineTop  # the list is below the line edit
-    # QRect.bottom() is inclusive; the exclusive bottom edge is the height.
-    assert overlay.geometry().y() + overlay.geometry().height() == widget.viewport().height()
+    # The truncated overlay fits the viewport and ends flush at the bottom
+    # edge of its last visible row — the list is truncated in whole rows,
+    # so no blank strip of list background is painted below the rows.
+    assert overlay.geometry().y() + overlay.geometry().height() <= widget.viewport().height()
+    rowHeight = overlay.suggestionList().rowHeight()
+    assert rowHeight > 0
+    assert overlay.suggestionList().height() % rowHeight == 0
 
 
 # ******************************************************************************
@@ -2052,6 +2584,77 @@ def testSeparatorCommits(app: QApplication) -> None:
     assert widget.textCursor().position() == 10
     assert widget._regionKindAt(9) == RegionType.RomanUrdu
     assert not overlay.isVisible()
+
+
+# ******************************************************************************
+def testArabicSeparatorsCommitAsSeparatorKeys(app: QApplication) -> None:
+    """The Arabic script's own separator marks commit like ASCII ones.
+
+    A typed Arabic separator — the Arabic question mark, comma,
+    semicolon, the Urdu full stop, and the Arabic date, decimal, and
+    thousands separators — commits the selected word plus the separator
+    character: the mark is written out and tagged as ``roman urdu``
+    together with the word, and the overlay stays deactivated
+    afterwards, ready for the next word.
+    """
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello دوست")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 10)
+    marks = (
+        "\u061f",  # ؟ Arabic question mark
+        "\u060c",  # ، Arabic comma
+        "\u061b",  # ؛ Arabic semicolon
+        "\u06d4",  # ۔ full stop
+        "\u066b",  # ٫ Arabic decimal separator
+        "\u066c",  # ٬ Arabic thousands separator
+        "\u060d",  # ؜ Arabic date separator
+    )
+    keys = (
+        Qt.Key.Key_Question,
+        Qt.Key.Key_Comma,
+        Qt.Key.Key_Semicolon,
+        Qt.Key.Key_Period,
+        Qt.Key.Key_Comma,
+        Qt.Key.Key_Comma,
+        Qt.Key.Key_Period,
+    )
+    for index, (mark, key) in enumerate(zip(marks, keys, strict=True)):
+        _moveCursor(widget, 7)  # re-activate the overlay over the word
+        overlay = widget._overlay
+        assert overlay is not None and overlay.isVisible()
+        _sendKey(overlay.lineEdit(), key, mark)  # type the Arabic separator
+        # Each commit replaces the word span (never the earlier marks), so
+        # its separator lands directly after the word and earlier marks
+        # drift right — the accumulated marks appear in reverse order.
+        assert widget.toPlainText() == ("hello دوست" + "".join(reversed(marks[: index + 1])))
+        assert widget.textCursor().position() == 11  # after word + separator
+        assert not overlay.isVisible()
+    text = widget.toPlainText()
+    assert widget._regionKindAt(len(text) - 1) == RegionType.RomanUrdu
+
+
+# ******************************************************************************
+def testArabicSeparatorsAreWordBoundaries(app: QApplication) -> None:
+    """The Arabic separator marks terminate a word run like Latin ones.
+
+    ``_isArabicChar`` spans the whole U+0600-U+06FF block, so the scan
+    today treats the Arabic script's own punctuation as word matter —
+    ``کام۔`` is scanned as the single word ``کام۔``. The separator ends
+    the run instead: the word under the cursor inside ``کام`` is ``کام``
+    alone, and the word after the separator starts behind it.
+    """
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("کام۔ دوست")
+    widget.setRomanInputEnabled(True)
+    # Untagged text belongs to the default (RomanUrdu) kind, so the run
+    # scan accepts it.
+    _moveCursor(widget, 2)  # inside کام
+    assert widget._activeWord == (0, 3)  # the full stop ends the run
+    _moveCursor(widget, 6)  # inside دوست
+    assert widget._activeWord == (5, 9)  # and the next word starts past it
 
 
 # ******************************************************************************

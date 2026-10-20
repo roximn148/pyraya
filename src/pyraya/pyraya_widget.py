@@ -38,17 +38,18 @@ from PySide6.QtGui import (
     QTextDocument,
     QTextOption,
 )
-from PySide6.QtWidgets import QMenu, QPlainTextEdit, QWidget
+from PySide6.QtWidgets import QLayout, QMenu, QPlainTextEdit, QWidget
 from romanalfaz.engine import Suggestion, Vocabulary
 
-from .regions import RegionColors, RegionType, TextRegion, defaultRegionKind
-from .roman_input import RomanInputEngine, RomanOverlay
+from .regions import DefaultRegionKind, RegionColors, RegionType, TextRegion
+from .roman_input import ArabicScriptSeparators, RomanInputEngine, RomanOverlay
 
 __all__ = ["PyRaya", "PyRayaHighlighter"]
 
 # ******************************************************************************
 #: Preferred font stack, in order of preference. The first entry is the default.
 pyrayaFonts: tuple[str, ...] = (
+    "Baloo Bhaijaan 2",
     "Noto Naskh Arabic",
     "Noto Nastaliq Urdu",
     "Noto Sans Arabic",
@@ -65,8 +66,15 @@ spellCheckUnderlineColor: QColor = QColor("#B22222")
 
 
 def _isArabicChar(char: str) -> bool:
-    """Whether a character belongs to the Arabic script block (U+0600-U+06FF)."""
-    return "\u0600" <= char <= "\u06ff"
+    """Whether a character is Arabic-script word matter.
+
+    The Arabic script block (U+0600-U+06FF) minus the Arabic script's own
+    separator marks (:data:`arabicScriptSeparators`): the marks terminate
+    a word run exactly like the Latin marks do, so ``کام۔`` is the word
+    ``کام`` followed by the separator ``۔`` — the separator commits as a
+    separator key and is never scanned as part of a word.
+    """
+    return "\u0600" <= char <= "\u06ff" and char not in ArabicScriptSeparators
 
 
 # ******************************************************************************
@@ -144,10 +152,11 @@ class PyRayaHighlighter(QSyntaxHighlighter):
     def highlightBlock(self, block: str) -> None:
         """Apply the formatting rules to a single text block.
 
-        After the rules, runs of characters without a recognized region
-        background are painted with the
-        :data:`~pyraya.regions.defaultRegionKind` background in the text
-        layout. When spell check is enabled, RomanUrdu words the
+        After the rules, characters without a recognized region
+        background get the
+        :data:`~pyraya.regions.defaultRegionKind` background merged into
+        the text layout (:meth:`_paintDefaultRegions`). When spell
+        check is enabled, RomanUrdu words the
         dictionary does not know additionally get the wavy spell-check
         underline, painted into the text layout only (see
         :meth:`setSpellCheckEnabled`).
@@ -171,7 +180,15 @@ class PyRayaHighlighter(QSyntaxHighlighter):
 
         Runs are painted with the
         :data:`~pyraya.regions.defaultRegionKind` background in the text
-        layout; the document's character formats are not modified.
+        layout; the document's character formats are not modified. The
+        background is merged into each untagged character's current
+        layout format (read back with :meth:`format`) rather than painted
+        as a background-only format: ``QSyntaxHighlighter.setFormat``
+        replaces the whole per-character format, so a background-only
+        write would wipe the rules' foregrounds — untagged text would
+        fall back to the default ink instead of the rule colors, and with
+        visible whitespace the space's designed light-gray dot would
+        render as a heavy black mark.
 
         Args:
             block: The text of the block being highlighted.
@@ -180,22 +197,13 @@ class PyRayaHighlighter(QSyntaxHighlighter):
         base = current.position()
         limit = len(block)
         cursor = QTextCursor(self.document())
-        position = 0
-        while position < limit:
+        for position in range(limit):
             cursor.setPosition(base + position + 1)
             if self._hasRegionBackground(cursor.charFormat()):
-                position += 1
                 continue
-            start = position
-            while position < limit:
-                cursor.setPosition(base + position + 1)
-                if not self._hasRegionBackground(cursor.charFormat()):
-                    position += 1
-                else:
-                    break
-            fmt = QTextCharFormat()
-            fmt.setBackground(QBrush(RegionColors[defaultRegionKind]))
-            self.setFormat(start, position - start, fmt)
+            merged = self.format(position)
+            merged.setBackground(QBrush(RegionColors[DefaultRegionKind]))
+            self.setFormat(position, 1, merged)
 
     # ==========================================================================
     @staticmethod
@@ -297,7 +305,7 @@ class PyRayaHighlighter(QSyntaxHighlighter):
         for kind, regionColor in RegionColors.items():
             if color == regionColor:
                 return kind
-        return defaultRegionKind
+        return DefaultRegionKind
 
     # ==========================================================================
     def _installDefaultRules(self) -> None:
@@ -388,6 +396,14 @@ class PyRaya(QPlainTextEdit):
         self._romanEngine: RomanInputEngine | None = None
         self._activeWord: tuple[int, int] | None = None
         self._anchorPosition: int | None = None
+        # A view-caused suspension of the overlay: the word-rect hit test
+        # (scroll, resize, reflow) deactivated the overlay while its word
+        # was fully outside the viewport, and remembered
+        # ``(word, anchorPosition, typedText, documentRevision)`` so the
+        # resumption on a view event that reveals the anchor is possible.
+        # User decisions (a mouse press, Esc, a new activation) and
+        # document edits drop it.
+        self._suspendedOverlay: tuple[tuple[int, int] | None, int, str, int] | None = None
         self._selectionRange: tuple[int, int] | None = None
         self._committing = False
         self._mouseActive = False
@@ -414,6 +430,11 @@ class PyRaya(QPlainTextEdit):
         # at all by cursor moves, hence the widget-level signal.
         self.cursorPositionChanged.connect(self._syncOverlay)
         document.contentsChanged.connect(self._syncOverlay)
+        # The overlay is a viewport child and does not scroll by itself:
+        # its position is re-derived from the document's geometry after
+        # every scroll so it stays over the word it edits (argument-free
+        # receiver like the cursor sync handler above).
+        self.verticalScrollBar().valueChanged.connect(self._onScrollChanged)
 
     # ==========================================================================
     @property
@@ -789,6 +810,16 @@ class PyRaya(QPlainTextEdit):
         commit has already reconciled the overlay state, and the button
         being held down is unrelated, so suppressing there would delay the
         reconciliation until the release.
+
+        The activation is viewport-aware, like the rest of the off/on
+        contract: a word the cursor is fully inside the viewport of is
+        activated, while a cursor move or keyboard edit that lands the
+        cursor on a word scrolled out of the viewport (e.g. a backspace
+        inside a scrolled-out word) stays quiet — the cursor's position
+        is not a view decision, and a popup over an invisible word would
+        be. The same-word resync goes through
+        :meth:`_repositionActiveOverlay`, so the word-rect hit test and
+        its view-driven suspension apply to cursor moves as well.
         """
         if (
             not self._romanInputEnabled
@@ -800,10 +831,12 @@ class PyRaya(QPlainTextEdit):
         word = self._wordUnderCursor()
         if word is None:
             self._deactivateOverlay()
-        elif self._overlay is None or self._activeWord != word:
+            return
+        if self._activeWord == word:
+            self._repositionActiveOverlay()
+            return
+        if self.viewport().rect().intersects(self._wordRect(*word)):
             self._activateOverlay(word)
-        else:
-            self._positionOverlay(word)
 
     # ==========================================================================
     def _wordUnderCursor(self) -> tuple[int, int] | None:
@@ -939,34 +972,63 @@ class PyRaya(QPlainTextEdit):
         if flip:
             # The flipped list is clamped to the space above the line
             # edit, which the flip decision guarantees is larger than the
-            # space below the anchor would have left it.
-            listHeight = min(listHint, max(0, aboveRoom))
-            height = overlay.lineEdit().sizeHint().height() + 4 + listHeight
-            y = top - 4 - listHeight
+            # space below the anchor would have left it. A hidden list
+            # occupies no slot, so the line edit pins to ``top`` exactly.
+            listSlot = min(listHint, max(0, aboveRoom))
+            height = overlay.lineEdit().sizeHint().height() + 4 + listSlot
+            y = top - 4 - listSlot
         else:
             y = top
             height = hint.height()
+            # A viewport shorter than the overlay is clamped so the
+            # overlay still fits: the line edit leads the layout, so the
+            # truncation only squeezes the list against the bottom edge.
+            if y + height > viewport.height():
+                height = max(0, viewport.height() - y)
         x = rightX - width
-        x = max(0, min(x, viewport.width() - width))
-        y = max(0, y)
-        # A viewport shorter than even the flipped overlay is clamped so the
-        # overlay still fits, rather than spilling past the viewport's top.
-        if y + height > viewport.height():
-            height = max(0, viewport.height() - y)
+        # The right edge is pinned to the anchor in both orientations; a
+        # viewport too narrow to show the whole overlay lets it clip on
+        # the left — the overlay input stays over the trigger word, and a
+        # viewport that cannot show the overlay is adjusted (resized or
+        # scrolled) by the user, never worked around by moving the
+        # overlay off the word.
         overlay.move(x, y)
         overlay.resize(width, height)
-        # The layout may round the flipped list's allocation a pixel short,
-        # which would leave the line edit a hair off the anchor line: read
-        # the line edit's settled position in the overlay and shift the
-        # overlay so the pinning is exact in the viewport. (In the default
-        # orientation the line edit leads the layout, so its slot is exact
-        # and this is a no-op; when the shift would push the overlay past
-        # the viewport's bottom, the overlay is re-clamped to fit.)
+        # A QBoxLayout only re-runs for a visible parent, so a placement
+        # on a hidden overlay — a click hides it before the release
+        # re-activates it over the word — cannot read the line edit's
+        # slot straight back: it answers with the previous word's slots
+        # and drags the whole overlay off the word by the slot
+        # difference. Force the layout to resolve for the size just set
+        # (activation runs while hidden), then read the settled slot and
+        # shift the overlay so the pinning is exact in the viewport:
+        # ``lineY <= top`` always, since the flipped list's slot is
+        # clamped to the gap over the anchor. This is a plain geometry
+        # correction: it never touches the document or its undo stack.
+        # The overlay's box layout is installed in its constructor, but
+        # Qt types ``QWidget.layout`` as nullable, so cast to the
+        # concrete shape.
+        layout = cast("QLayout", overlay.layout())
+        layout.invalidate()
+        layout.activate()
+        # Snap the overlay's height so the list's allocation is an exact
+        # number of rows: a clamped or truncated placement hands the
+        # layout an arbitrary pixel height, and the squeezed remainder
+        # would paint as a blank strip of list background below the last
+        # row. Shrinking by the remainder takes the surplus out of the
+        # list (its Maximum size policy absorbs the deficit), leaving the
+        # same visible rows on an exact panel.
+        sugList = overlay.suggestionList()
+        if sugList.rowCount() > 0 and sugList.rowHeight() > 0:
+            snapped = sugList.quantizedHeight(sugList.height())
+            slack = sugList.height() - snapped
+            if slack:
+                overlay.resize(width, overlay.height() - slack)
+                layout.invalidate()
+                layout.activate()
         lineY = overlay.lineEdit().y()
         if y + lineY != top:
             y = max(0, top - lineY)
-            if y + overlay.height() > viewport.height():
-                overlay.resize(overlay.width(), max(0, viewport.height() - y))
             overlay.move(x, y)
 
     # ==========================================================================
@@ -1010,10 +1072,13 @@ class PyRaya(QPlainTextEdit):
     def _ensureOverlay(self, engine: RomanInputEngine) -> RomanOverlay:
         """Return the overlay, creating and wiring it lazily on demand.
 
-        The overlay is created at most once, as a child of the viewport so it
-        scrolls with the text automatically; its ``canceled`` and ``committed``
-        signals, and the line edit's ``textChanged`` signal (the width
-        re-placement hook), are wired at creation.
+        The overlay is created at most once, as a child of the viewport:
+        small scrolls shift it with Qt's viewport blit, and the scroll
+        re-anchoring hook (:meth:`_onScrollChanged`) re-derives its
+        placement after every scroll so it stays exactly over its word.
+        Its ``canceled`` and ``committed`` signals, and the line edit's
+        ``textChanged`` signal (the width re-placement hook), are wired
+        at creation.
         """
         overlay = self._overlay
         if overlay is None:
@@ -1040,6 +1105,9 @@ class PyRaya(QPlainTextEdit):
         if engine is None:
             return
         overlay = self._ensureOverlay(engine)
+        # An explicit activation is a user decision that outranks any
+        # pending view suspension.
+        self._suspendedOverlay = None
         document = self.document()
         roman = engine.romanizeArabic(document.toPlainText()[word[0] : word[1]])
         overlay.setText(roman)
@@ -1072,6 +1140,9 @@ class PyRaya(QPlainTextEdit):
         if engine is None:
             return
         overlay = self._ensureOverlay(engine)
+        # An explicit activation is a user decision that outranks any
+        # pending view suspension.
+        self._suspendedOverlay = None
         cursor = self.textCursor()
         self._selectionRange = (
             (cursor.selectionStart(), cursor.selectionEnd()) if cursor.hasSelection() else None
@@ -1090,13 +1161,21 @@ class PyRaya(QPlainTextEdit):
 
     # ==========================================================================
     def _deactivateOverlay(self) -> None:
-        """Hide the overlay, clear the overlay state, and refocus the document."""
+        """Hide the overlay, clear the overlay state, and refocus the document.
+
+        A view-caused suspension (:attr:`_suspendedOverlay`) is dropped
+        too: every caller of this method is a user decision (a mouse
+        press, Esc, a programmatic feature or assist switch, an edge
+        commit over a boundary word) or an explicit re-evaluation, and
+        the user's active/inactive state outranks the view's suspension.
+        """
         if self._overlay is not None:
             self._overlay.hide()
         self._activeWord = None
         self._anchorPosition = None
         self._selectionRange = None
         self._minOverlayWidth = 0
+        self._suspendedOverlay = None
         self.setFocus()
 
     # ==========================================================================
@@ -1129,11 +1208,134 @@ class PyRaya(QPlainTextEdit):
         """
         if not self._overlayActive() or self._committing:
             return
-        if self._activeWord is not None:
-            self._positionOverlay(self._activeWord)
-        elif self._anchorPosition is not None:
-            rightX, top = self._cursorAnchor(self._anchorPosition)
+        self._repositionActiveOverlay()
+
+    # ==========================================================================
+    def _repositionActiveOverlay(self) -> None:
+        """Re-place the active overlay over its stored anchor.
+
+        The pinning invariant — the overlay input stays over the trigger
+        word — holds everywhere and always: the placement is re-derived
+        from the document's geometry (the word's rect, or at a seeded
+        cursor the stored anchor) so document changes, resizes, and
+        scrolls all leave the overlay exactly on its word. It is never
+        moved off the word, and never clamped or squeezed out of the
+        viewport: a viewport that cannot show the overlay is adjusted
+        (resized or scrolled) by the user.
+
+        The off/on-screen hit test is decided on the WORD's rect — the
+        seeded anchor's cursor line in scenario 1 — never on the overlay
+        widget: the overlay reaches further than its word (a flipped
+        suggestion list hangs up into the viewport), so a box-based test
+        would keep the popup alive after its word has already left. A
+        word whose rect is fully outside the viewport suspends the
+        overlay — a view event, remembered in ``_suspendedOverlay`` and
+        resumed by the next view event that reveals the anchor — while a
+        partially visible word keeps it pinned.
+        """
+        word = self._activeWord
+        anchorPosition = self._anchorPosition
+        if word is not None:
+            anchorRect = self._wordRect(*word)
+        elif anchorPosition is not None:
+            cursor = QTextCursor(self.document())
+            cursor.setPosition(anchorPosition)
+            anchorRect = self.cursorRect(cursor)
+        else:
+            return
+        if not self.viewport().rect().intersects(anchorRect):
+            # A view event (scroll, resize, reflow) hid the word — not a
+            # user decision. Suspend the overlay so the resumption is
+            # keyed on the anchor returning into view: a view event that
+            # reveals it (a scroll back, a resize grant, a reflow) can
+            # resume without a manual trigger. The seeded overlay's
+            # typed text is carried across; a scenario 2 resumption
+            # re-derives the word's romanization like any re-activation.
+            typedText = (
+                "" if word is not None or self._overlay is None else self._overlay.lineEdit().text()
+            )
+            self._deactivateOverlay()
+            self._suspendedOverlay = (
+                word,
+                anchorPosition or 0,
+                typedText,
+                self.document().revision(),
+            )
+            return
+        if word is not None:
+            self._positionOverlay(word)
+        elif anchorPosition is not None:
+            rightX, top = self._cursorAnchor(anchorPosition)
             self._placeOverlay(rightX, top)
+
+    # ==========================================================================
+    def _restoreSuspendedOverlay(self) -> None:
+        """Resume the overlay suspended by its word leaving the viewport.
+
+        The word-rect hit test's deactivation is a view event, not a user
+        decision: :attr:`_suspendedOverlay` remembers the anchor, and a
+        view event that reveals it — a scroll back, a resize grant, a
+        reflow — resumes the overlay without a manual trigger. The
+        resumption is the standard activation: scenario 2 re-activates
+        over the (unchanged) word with its romanization, scenario 1
+        resumes the seeded overlay at the anchor with its typed text.
+
+        The suspension is dropped when it is no longer trustworthy: the
+        user decided anything in between (a mouse press, Esc, a new
+        activation, the feature or assist switch — all funnel
+        :meth:`_deactivateOverlay`), or the document was edited while
+        suspended (the remembered document revision no longer matches,
+        so the anchor may no longer be the word it was). While a mouse
+        button is down the resumption is deferred: starting a pop-up
+        mid-drag would steal the gesture.
+        """
+        suspended = self._suspendedOverlay
+        if suspended is None or self._overlayActive() or self._committing:
+            return
+        if not self._romanInputEnabled or not self._assistMode or self._mouseActive:
+            self._suspendedOverlay = None
+            return
+        word, anchorPosition, typedText, revision = suspended
+        if self.document().revision() != revision:
+            self._suspendedOverlay = None
+            return
+        if word is not None:
+            anchorRect = self._wordRect(*word)
+        else:
+            cursor = QTextCursor(self.document())
+            cursor.setPosition(anchorPosition)
+            anchorRect = self.cursorRect(cursor)
+        if not self.viewport().rect().intersects(anchorRect):
+            return  # still off-screen: stay suspended
+        self._suspendedOverlay = None
+        if word is not None:
+            self._activateOverlay(word)
+        else:
+            self._activateOverlayAt(typedText, anchorPosition)
+
+    # ==========================================================================
+    def _onScrollChanged(self) -> None:
+        """Re-place or resume the overlay after the document scrolled.
+
+        The overlay follows its word on any scroll: small scrolls shift it
+        through Qt's viewport blit (which moves viewport children with the
+        painted content), but large jumps repaint without moving children
+        — and incremental blits can still leave a drift of a whole line.
+        Re-deriving the placement from the document's geometry after every
+        scroll settles the overlay exactly on its word. The word's rect
+        against the viewport also decides on/off-screen on every scroll,
+        in both directions: a word scrolled fully out of the viewport
+        suspends the overlay (the hit test is on the word rect, never the
+        overlay widget, which reaches further than its word), and a
+        suspended anchor scrolling back into the viewport resumes the
+        overlay without a manual trigger.
+        """
+        if self._committing:
+            return
+        if self._overlayActive():
+            self._repositionActiveOverlay()
+        else:
+            self._restoreSuspendedOverlay()
 
     # ==========================================================================
     def _onOverlayCommitted(
@@ -1439,12 +1641,15 @@ class PyRaya(QPlainTextEdit):
         makes the press deactivate the overlay before the default handling
         (which places the cursor and starts any selection), and marks the
         mouse as active so ``_syncOverlay`` is suppressed until the button
-        is released (:meth:`mouseReleaseEvent`).
+        is released (:meth:`mouseReleaseEvent`). A view-caused suspension
+        is dropped with it: the press is the user's explicit decision to
+        walk away from the overlay, and scrolling the suspended anchor
+        back must not resurrect it afterwards.
 
         Args:
             event: The mouse press event.
         """
-        if self._overlayActive():
+        if self._overlayActive() or self._suspendedOverlay is not None:
             self._deactivateOverlay()
         self._mouseActive = True
         super().mousePressEvent(event)
@@ -1478,25 +1683,28 @@ class PyRaya(QPlainTextEdit):
         first, since it updates the viewport and the text layout; the
         overlay is then re-placed from its stored anchor, exactly as
         :meth:`_onOverlayTextChanged` does on text edits. Only the
-        active overlay is re-placed: a resize does not change which
-        word or anchor it is active over, so activation is never
-        re-evaluated — doing so would clobber the typed text (scenario
-        1) or deactivate the overlay when the cursor is not inside a
-        word. The list's orientation follows the room the reflow leaves
-        below the anchor: a taller resize can flip a flipped list back
-        below the line edit.
+        active overlay is re-placed, and activation is never
+        re-evaluated for the ACTIVE overlay: doing so would clobber the
+        typed text (scenario 1) or deactivate the overlay when the
+        cursor is not inside a word. The list's orientation follows the
+        room the reflow leaves below the anchor: a taller resize can
+        flip a flipped list back below the line edit.
+
+        The reflow's word-rect hit test applies in both directions as a
+        view decision (never a user one): the reflow pushing the word
+        fully out of the viewport suspends the overlay, and a resize
+        grant that reveals a suspended anchor resumes it.
 
         Args:
             event: The resize event.
         """
         super().resizeEvent(event)
-        if not self._overlayActive():
+        if self._committing:
             return
-        if self._activeWord is not None:
-            self._positionOverlay(self._activeWord)
-        elif self._anchorPosition is not None:
-            rightX, top = self._cursorAnchor(self._anchorPosition)
-            self._placeOverlay(rightX, top)
+        if self._overlayActive():
+            self._repositionActiveOverlay()
+        else:
+            self._restoreSuspendedOverlay()
 
     # ==========================================================================
     def _applyRegionFormat(self, start: int, end: int, kind: RegionType) -> None:
@@ -1528,7 +1736,7 @@ class PyRaya(QPlainTextEdit):
         cursor.setPosition(start)
         cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
         fmt = QTextCharFormat()
-        fmt.setBackground(QBrush(RegionColors[defaultRegionKind]))
+        fmt.setBackground(QBrush(RegionColors[DefaultRegionKind]))
         cursor.mergeCharFormat(fmt)
         self.viewport().update()
 
@@ -1576,7 +1784,7 @@ class PyRaya(QPlainTextEdit):
         for kind, regionColor in RegionColors.items():
             if color == regionColor:
                 return kind
-        return defaultRegionKind
+        return DefaultRegionKind
 
     # ==========================================================================
     def _regionAt(self, position: int) -> TextRegion | None:
@@ -1637,7 +1845,7 @@ class PyRaya(QPlainTextEdit):
             return None
         if position == limit:
             if document.characterCount() == 1:
-                return defaultRegionKind
+                return DefaultRegionKind
             return self._regionKindAt(position - 1)
         return self._regionKindAt(position)
 
