@@ -68,33 +68,33 @@ ArabicScriptSeparators: frozenset[str] = frozenset(
 
 #: Characters that trigger a separator-key commit: every punctuation mark
 #: of the keyboard, plus space, newline, and the Arabic script's own
-#: separator marks (:data:`arabicScriptSeparators`).
-_SEPARATORS = set(string.punctuation) | {" ", "\n"} | ArabicScriptSeparators
+#: separator marks (:data:`ArabicScriptSeparators`).
+_Separators = set(string.punctuation) | {" ", "\n"} | ArabicScriptSeparators
 
 #: Subtle tier tints: green = exact, orange = edit distance 1, red = distance 2.
-_TIER_COLORS = {
+_TierColors = {
     0: QColor(0x4F, 0x9D, 0x4F, 30),
     1: QColor(0xE8, 0x8A, 0x1A, 30),
     2: QColor(0xC4, 0x3B, 0x3B, 30),
 }
 
 #: The stronger tint and accent border applied to the selected row.
-_SELECTED_ALPHA = 90
-_ACCENT_BORDER = QColor(0x1D, 0x4E, 0x89)
+_SelectedAlpha = 90
+_AccentBorder = QColor(0x1D, 0x4E, 0x89)
 
 #: The dashed gray style of the undefined-word (Learn) row.
-_UNDEFINED_WORD_COLOR = QColor(0x8A, 0x8F, 0x98, 30)
+_UndefinedWordColor = QColor(0x8A, 0x8F, 0x98, 30)
 
 #: The suggestion list's panel style: an opaque base, a subtle border, and
 #: the rounded-corner radius. The list floats over the document text, so
 #: the base must be opaque for the rows to stay readable.
-_LIST_BACKGROUND = QColor(0xFF, 0xFF, 0xFF)
-_LIST_BORDER = QColor(0xD0, 0xD5, 0xDD)
-_LIST_RADIUS = 6
+_ListBackground = QColor(0xFF, 0xFF, 0xFF)
+_ListBorder = QColor(0xD0, 0xD5, 0xDD)
+_ListRadius = 6
 
 #: The maximum number of suggestion rows shown at once; the list scrolls to
 #: keep the selected row visible while navigating.
-MAX_VISIBLE_ROWS: int = 5
+MaxVisibleRows: int = 5
 
 
 # ******************************************************************************
@@ -297,7 +297,7 @@ class SuggestionList(QWidget):
         self,
         font: QFont,
         parent: QWidget | None = None,
-        maxVisibleRows: int = MAX_VISIBLE_ROWS,
+        maxVisibleRows: int = MaxVisibleRows,
         margin: int = 6,
     ) -> None:
         """Create the suggestion list.
@@ -475,13 +475,13 @@ class SuggestionList(QWidget):
         path = QPainterPath()
         path.addRoundedRect(
             QRectF(0.5, 0.5, self.width() - 1, self.height() - 1),
-            _LIST_RADIUS,
-            _LIST_RADIUS,
+            _ListRadius,
+            _ListRadius,
         )
         # The opaque base is painted first, so the translucent tier tints
         # composite over it rather than over the document behind.
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(_LIST_BACKGROUND)
+        painter.setBrush(_ListBackground)
         painter.drawPath(path)
         # The rows are clipped to the panel so no tint pokes past the
         # rounded corners.
@@ -495,14 +495,14 @@ class SuggestionList(QWidget):
             y = (i - self._firstRow) * rowHeight
             row = self._rows[i]
             undefined = row.suggestion.isUndefined()
-            color = _UNDEFINED_WORD_COLOR if undefined else _TIER_COLORS[row.tier]
+            color = _UndefinedWordColor if undefined else _TierColors[row.tier]
             if i == self._selectedIndex:
-                color = QColor(color.red(), color.green(), color.blue(), _SELECTED_ALPHA)
+                color = QColor(color.red(), color.green(), color.blue(), _SelectedAlpha)
             painter.fillRect(QRect(0, y, self.width(), rowHeight), QBrush(color))
             if i == self._selectedIndex:
-                painter.setPen(QPen(_ACCENT_BORDER, 1))
+                painter.setPen(QPen(_AccentBorder, 1))
             elif undefined:
-                painter.setPen(QPen(_UNDEFINED_WORD_COLOR, 1, Qt.PenStyle.DashLine))
+                painter.setPen(QPen(_UndefinedWordColor, 1, Qt.PenStyle.DashLine))
             else:
                 painter.setPen(Qt.PenStyle.NoPen)
             painter.drawRect(0, y, self.width() - 1, rowHeight - 1)
@@ -515,7 +515,7 @@ class SuggestionList(QWidget):
         # The border is stroked on top of the rows, after clearing the clip
         # so the outer half of the stroke is not clipped away.
         painter.setClipping(False)
-        painter.setPen(QPen(_LIST_BORDER, 1))
+        painter.setPen(QPen(_ListBorder, 1))
         painter.drawPath(path)
         painter.end()
 
@@ -599,7 +599,7 @@ class RomanLineEdit(QLineEdit):
             return
         text = event.text()
         modifiers = event.modifiers().value
-        if key in (Qt.Key.Key_Space, Qt.Key.Key_Return) or (text and text in _SEPARATORS):
+        if key in (Qt.Key.Key_Space, Qt.Key.Key_Return) or (text and text in _Separators):
             overlay.commit(key, text, modifiers)
             event.accept()
             return

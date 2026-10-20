@@ -5,7 +5,7 @@
 
 Runs headless via the offscreen Qt platform so no window is opened. The
 underline is a display-only layout format (wavy `SpellCheckUnderline` in
-`spellCheckUnderlineColor`) painted over `roman urdu` words the romanalfaz
+`SpellCheckUnderlineColor`) painted over `roman urdu` words the romanalfaz
 dictionary does not know, behind a `setSpellCheckEnabled` switch that is
 independent of the roman-input feature.
 """
@@ -23,7 +23,7 @@ from romanalfaz import DictionaryNotFoundError
 from pyraya import (
     PyRaya,
     RegionType,
-    spellCheckUnderlineColor,
+    SpellCheckUnderlineColor,
 )
 
 
@@ -106,7 +106,7 @@ def testUnknownRomanUrduWordUnderlined(app: QApplication) -> None:
     start, end, style, color = ranges[0]
     assert (start, end) == (5, 9)
     assert style == QTextCharFormat.UnderlineStyle.SpellCheckUnderline
-    assert color == spellCheckUnderlineColor
+    assert color == SpellCheckUnderlineColor
     # Document formats stay untouched: no underline at the known word (0)
     # or the unknown word (5).
     assert _documentCharFormat(widget, 0).underlineStyle() == (

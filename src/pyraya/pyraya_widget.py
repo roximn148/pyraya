@@ -48,7 +48,7 @@ __all__ = ["PyRaya", "PyRayaHighlighter"]
 
 # ******************************************************************************
 #: Preferred font stack, in order of preference. The first entry is the default.
-pyrayaFonts: tuple[str, ...] = (
+PyRayaFonts: tuple[str, ...] = (
     "Baloo Bhaijaan 2",
     "Noto Naskh Arabic",
     "Noto Nastaliq Urdu",
@@ -59,17 +59,17 @@ pyrayaFonts: tuple[str, ...] = (
 )
 
 #: Default point size applied to the default font.
-defaultFontSize: float = 14.0
+DefaultFontSize: float = 14.0
 
 #: Muted brick red used for the spell-check underline.
-spellCheckUnderlineColor: QColor = QColor("#B22222")
+SpellCheckUnderlineColor: QColor = QColor("#B22222")
 
 
 def _isArabicChar(char: str) -> bool:
     """Whether a character is Arabic-script word matter.
 
     The Arabic script block (U+0600-U+06FF) minus the Arabic script's own
-    separator marks (:data:`arabicScriptSeparators`): the marks terminate
+    separator marks (:data:`ArabicScriptSeparators`): the marks terminate
     a word run exactly like the Latin marks do, so ``کام۔`` is the word
     ``کام`` followed by the separator ``۔`` — the separator commits as a
     separator key and is never scanned as part of a word.
@@ -217,7 +217,7 @@ class PyRayaHighlighter(QSyntaxHighlighter):
         """Enable or disable the spell-check underline, re-highlighting.
 
         While enabled, RomanUrdu words the dictionary does not know get
-        the wavy :data:`spellCheckUnderlineColor` underline in the text
+        the wavy :data:`SpellCheckUnderlineColor` underline in the text
         layout (display only — the document's character formats and the
         undo stack are never touched). Toggling re-highlights the whole
         document, so the underline is removed or restored immediately.
@@ -246,7 +246,7 @@ class PyRayaHighlighter(QSyntaxHighlighter):
         time a block containing a candidate word is re-highlighted. Each
         candidate is then consulted against the engine, and a word the
         dictionary does not know is underlined with
-        :data:`spellCheckUnderlineColor` in the text layout, merged over
+        :data:`SpellCheckUnderlineColor` in the text layout, merged over
         the character's other layout formats. The document's character
         formats are never modified. The pass is also a no-op while spell
         check is disabled, or when the engine provider returns ``None`` or
@@ -288,7 +288,7 @@ class PyRayaHighlighter(QSyntaxHighlighter):
             for pos in range(start, end):
                 merged = self.format(pos)
                 merged.setUnderlineStyle(QTextCharFormat.UnderlineStyle.SpellCheckUnderline)
-                merged.setUnderlineColor(spellCheckUnderlineColor)
+                merged.setUnderlineColor(SpellCheckUnderlineColor)
                 self.setFormat(pos, 1, merged)
 
     # ==========================================================================
@@ -378,7 +378,7 @@ class PyRaya(QPlainTextEdit):
         """
         super().__init__(parent)
         self._fontFamily = self._resolveDefaultFont()
-        self._fontSize: float = defaultFontSize
+        self._fontSize: float = DefaultFontSize
         self._alignment: Qt.AlignmentFlag = Qt.AlignmentFlag.AlignRight
         self._applyFont()
         self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
@@ -1874,10 +1874,10 @@ class PyRaya(QPlainTextEdit):
             preferred fonts are installed.
         """
         available = set(QFontDatabase.families())
-        for family in pyrayaFonts:
+        for family in PyRayaFonts:
             if family in available:
                 return family
-        return pyrayaFonts[0]
+        return PyRayaFonts[0]
 
     # ==========================================================================
     def _applyFont(self) -> None:

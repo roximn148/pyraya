@@ -30,10 +30,10 @@ from romanalfaz.engine import Suggestion, Vocabulary
 from pyraya import PyRaya
 from pyraya.regions import RegionType
 from pyraya.roman_input import (
-    _LIST_BORDER,
     RomanInputEngine,
     RomanOverlay,
     SuggestionList,
+    _ListBorder,
     _SuggestionRow,
 )
 
@@ -476,7 +476,7 @@ def testSuggestionListRendersOpaquePanel(
 
     # The panel border along the left edge and along the top edge past
     # the corner radius.
-    border = _LIST_BORDER
+    border = _ListBorder
     left = image.pixelColor(0, hint.height() // 2)
     assert abs(left.red() - border.red()) <= 3
     assert abs(left.green() - border.green()) <= 3
