@@ -352,6 +352,39 @@ def testInTextCursorKeysKeepTheSelection(app: QApplication) -> None:
 
 
 # ******************************************************************************
+class _TierThreeEngine(RomanInputEngine):
+    """An engine whose only suggestion sits in the deep tier 3."""
+
+    def __init__(self) -> None:
+        self._localVocabulary = None
+        self._distance = 3
+        self._maxPredictions = 5
+        self._maxSuggestions = 10
+        self._alfaz = None
+        self.available = True
+
+    def suggestTiers(self, romanWord: str) -> list[tuple[Suggestion, int]]:
+        return [(Suggestion(arabic="کلم", encodedRoman=romanWord, frequency=1), 3)]
+
+
+# ******************************************************************************
+def testDeepTierSuggestionClampsToThePalette(app: QApplication) -> None:
+    """A suggestion from a deep tier renders with the deepest palette tint.
+
+    The suggestion list's palette stops at distance 2 while the engine's
+    ``distance`` parameter accepts deeper tiers; the row's tier is clamped
+    at build time so the paint never asks the palette for a missing tint.
+    """
+    overlay, _ = _makeOverlay(app, _TierThreeEngine())
+    overlay.setText("kam")
+    suggestionList = overlay.suggestionList()
+    row = suggestionList.selectedRow()
+    assert row is not None
+    assert row.tier == 2
+    suggestionList.grab()  # exercises the paint event
+
+
+# ******************************************************************************
 def testSuggestionListCappedSizeHint(app: QApplication) -> None:
     """The list's size hint caps at the visible-row limit, not the row count."""
     overlay, _ = _makeOverlay(app, _StubEngine(12))

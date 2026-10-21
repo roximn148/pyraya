@@ -797,11 +797,14 @@ class RomanOverlay(QWidget):
             return
         rows: list[_SuggestionRow] = []
         for suggestion, tier in self._engine.suggestTiers(text):
+            # The row palette stops at the deepest tint it defines: an
+            # engine built with a larger ``distance`` yields deeper tiers,
+            # which are clipped to the palette so the paint stays total.
             rows.append(
                 _SuggestionRow(
                     suggestion=suggestion,
                     arabic=suggestion.arabic,
-                    tier=tier,
+                    tier=min(tier, len(_TierColors) - 1),
                 ),
             )
         if not rows and self._engine.available:
