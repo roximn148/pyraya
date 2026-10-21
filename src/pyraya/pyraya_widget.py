@@ -2053,8 +2053,14 @@ class PyRaya(QPlainTextEdit):
             self._restoreSuspendedOverlay()
 
     # ==========================================================================
-    def _applyRegionFormat(self, start: int, end: int, kind: RegionType) -> None:
-        """Merge the region's background format over a character range."""
+    def _paintRange(self, start: int, end: int, kind: RegionType) -> None:
+        """Merge a region kind's background format over a character range.
+
+        The one owner of the range paint (B4): the range is clamped to the
+        document's real text offsets (:meth:`_clampRange`) and the kind's
+        identity color (:meth:`_regionColors`) is merged over the selection
+        on a throwaway document cursor.
+        """
         start, end = self._clampRange(start, end)
         if start >= end:
             return
@@ -2067,6 +2073,11 @@ class PyRaya(QPlainTextEdit):
         self.viewport().update()
 
     # ==========================================================================
+    def _applyRegionFormat(self, start: int, end: int, kind: RegionType) -> None:
+        """Merge the region's background format over a character range."""
+        self._paintRange(start, end, kind)
+
+    # ==========================================================================
     def _clearRange(self, start: int, end: int) -> None:
         """Reset a character range to :data:`~pyraya.regions.DefaultRegionKind`.
 
@@ -2075,16 +2086,7 @@ class PyRaya(QPlainTextEdit):
         once one has been set and the document must never contain untagged
         text.
         """
-        start, end = self._clampRange(start, end)
-        if start >= end:
-            return
-        cursor = self.textCursor()
-        cursor.setPosition(start)
-        cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
-        fmt = QTextCharFormat()
-        fmt.setBackground(QBrush(self._regionColors[DefaultRegionKind]))
-        cursor.mergeCharFormat(fmt)
-        self.viewport().update()
+        self._paintRange(start, end, DefaultRegionKind)
 
     # ==========================================================================
     def _clampRange(self, start: int, end: int) -> tuple[int, int]:
