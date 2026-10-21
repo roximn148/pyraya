@@ -78,12 +78,35 @@ def _isArabicChar(char: str) -> bool:
     return "\u0600" <= char <= "\u06ff" and char not in ArabicScriptSeparators
 
 
+def _regionColorMatch(color: QColor, palette: dict[RegionType, QColor]) -> RegionType | None:
+    """Return the palette entry kind an observed background color matches.
+
+    The single executor of the palette comparison: a color equal (including
+    the alpha channel) to a palette entry's color matches that entry's
+    kind; a color equal to no entry's color matches none and is reported
+    as ``None`` — the identity rule (:func:`_regionKindFor`) turns that
+    into the default kind.
+
+    Args:
+        color: The observed background color of a character or run.
+        palette: The palette whose colors carry the region identities.
+
+    Returns:
+        The :class:`~pyraya.regions.RegionType` the color matches, or
+        ``None`` when it matches no palette entry.
+    """
+    for kind, regionColor in palette.items():
+        if color == regionColor:
+            return kind
+    return None
+
+
 def _regionKindFor(color: QColor, palette: dict[RegionType, QColor]) -> RegionType:
     """Map an observed background color to its region kind.
 
     The single owner of the region identity rule: a background matching
-    a palette color (compared including the alpha channel) identifies
-    that palette entry's kind; a background matching no palette color
+    a palette color identifies that palette entry's kind (through
+    :func:`_regionColorMatch`); a background matching no palette color
     belongs to :data:`~pyraya.regions.DefaultRegionKind`, keeping the
     invariant that every character belongs to exactly one kind.
 
@@ -94,10 +117,52 @@ def _regionKindFor(color: QColor, palette: dict[RegionType, QColor]) -> RegionTy
     Returns:
         The :class:`~pyraya.regions.RegionType` the color identifies.
     """
-    for kind, regionColor in palette.items():
-        if color == regionColor:
-            return kind
-    return DefaultRegionKind
+    match = _regionColorMatch(color, palette)
+    return DefaultRegionKind if match is None else match
+
+
+def _charFormatAt(document: QTextDocument, position: int) -> QTextCharFormat:
+    """Return the character format stored at a document offset.
+
+    ``QTextCursor.charFormat()`` reports the format of the character
+    before the cursor, so the cursor is placed one offset past the target.
+    The offset must therefore stay below ``characterCount() - 1`` so the
+    cursor never lands past the trailing terminator; region lookups guard
+    that boundary. A fresh, document-bound cursor is used because the
+    widget cursor can report stale formats while it carries a selection.
+
+    Args:
+        document: The document to read.
+        position: The document character offset to observe.
+
+    Returns:
+        The :class:`~PySide6.QtGui.QTextCharFormat` stored at the offset.
+    """
+    cursor = QTextCursor(document)
+    cursor.setPosition(position + 1)
+    return cursor.charFormat()
+
+
+def _regionKindAt(
+    document: QTextDocument,
+    palette: dict[RegionType, QColor],
+    position: int,
+) -> RegionType:
+    """Return the region kind stored at a document character offset.
+
+    The single owner of the position-reading rule: the stored character
+    format at the offset (:func:`_charFormatAt`) observed through the
+    identity rule (:func:`_regionKindFor`).
+
+    Args:
+        document: The document to read.
+        palette: The palette whose colors carry the region identities.
+        position: The document character offset to observe.
+
+    Returns:
+        The :class:`~pyraya.regions.RegionType` stored at the offset.
+    """
+    return _regionKindFor(_charFormatAt(document, position).background().color(), palette)
 
 
 # ******************************************************************************
@@ -270,19 +335,16 @@ class PyRayaHighlighter(QSyntaxHighlighter):
         for it in cast("Iterable[QTextBlock.iterator]", current):
             fragment = it.fragment()
             start = fragment.position() - base
-            if self._hasRegionBackground(fragment.charFormat()):
+            if (
+                _regionColorMatch(fragment.charFormat().background().color(), self._regionColors)
+                is not None
+            ):
                 continue
             end = min(start + fragment.length(), limit)
             background = self._regionColors[DefaultRegionKind]
             for runStart, runLength, runFormat in self._uniformRuns(max(start, 0), end):
                 runFormat.setBackground(QBrush(background))
                 self.setFormat(runStart, runLength, runFormat)
-
-    # ==========================================================================
-    def _hasRegionBackground(self, charFormat: QTextCharFormat) -> bool:
-        """Return True if the format carries a recognized region background."""
-        color = charFormat.background().color()
-        return any(color == regionColor for regionColor in self._regionColors.values())
 
     # ==========================================================================
     def setSpellCheckEnabled(self, enabled: bool) -> None:
@@ -392,18 +454,6 @@ class PyRayaHighlighter(QSyntaxHighlighter):
             if start <= position < end:
                 return kind
         return DefaultRegionKind
-
-    # ==========================================================================
-    def _regionKindAt(self, position: int) -> RegionType:
-        """Return the region kind stored at a document character offset.
-
-        The identity rule itself lives in :func:`_regionKindFor` — the
-        single owner of "what kind is this background color".
-        """
-        cursor = QTextCursor(self.document())
-        cursor.setPosition(position + 1)
-        color = cursor.charFormat().background().color()
-        return _regionKindFor(color, self._regionColors)
 
     # ==========================================================================
     def _installDefaultRules(self) -> None:
@@ -1992,22 +2042,13 @@ class PyRaya(QPlainTextEdit):
         """
         spans: list[TextRegion] = []
         for start, end, color in self._backgroundRuns():
-            kind = self._kindForColor(color)
+            kind = _regionKindFor(color, self._regionColors)
             previous = spans[-1] if spans else None
             if previous is not None and previous.kind == kind and previous.end == start:
                 spans[-1] = TextRegion(previous.start, end, kind)
             else:
                 spans.append(TextRegion(start, end, kind))
         return spans
-
-    # ==========================================================================
-    def _kindForColor(self, color: QColor) -> RegionType:
-        """Map an observed background color to its region kind.
-
-        The identity rule lives in :func:`_regionKindFor` — the single
-        owner of "what kind is this background color".
-        """
-        return _regionKindFor(color, self._regionColors)
 
     # ==========================================================================
     def _backgroundRuns(self) -> list[tuple[int, int, QColor]]:
@@ -2062,10 +2103,12 @@ class PyRaya(QPlainTextEdit):
 
         A character whose background matches no region color belongs to
         :data:`~pyraya.regions.DefaultRegionKind`, keeping the invariant
-        that every character belongs to exactly one kind.
+        that every character belongs to exactly one kind. The position
+        reading and the identity comparison are owned once at module
+        level (:func:`_regionKindAt`); the method only resolves the
+        widget's document and palette there.
         """
-        color = self._charFormatAt(position).background().color()
-        return _regionKindFor(color, self._regionColors)
+        return _regionKindAt(self.document(), self._regionColors, position)
 
     # ==========================================================================
     def _regionAt(self, position: int) -> TextRegion | None:
@@ -2134,17 +2177,12 @@ class PyRaya(QPlainTextEdit):
     def _charFormatAt(self, position: int) -> QTextCharFormat:
         """Return the character format stored at a document offset.
 
-        ``QTextCursor.charFormat()`` reports the format of the character
-        before the cursor, so the cursor is placed one offset past the
-        target. The offset must therefore stay below
-        ``characterCount() - 1`` so the cursor never lands past the trailing
-        terminator; region lookups guard that boundary. A fresh,
-        document-bound cursor is used because the widget cursor can report
-        stale formats while it carries a selection.
+        The position-reading rule (cursor one offset past the target, a
+        fresh document-bound cursor) is owned once at module level
+        (:func:`_charFormatAt`); the method only resolves the widget's
+        document there.
         """
-        cursor = QTextCursor(self.document())
-        cursor.setPosition(position + 1)
-        return cursor.charFormat()
+        return _charFormatAt(self.document(), position)
 
     # ==========================================================================
     def _resolveDefaultFont(self) -> str:

@@ -78,7 +78,10 @@ def _paintReferencePerCharacter(highlighter: PyRayaHighlighter, block: str) -> N
     cursor = QTextCursor(highlighter.document())
     for position in range(len(block)):
         cursor.setPosition(base + position + 1)
-        if highlighter._hasRegionBackground(cursor.charFormat()):
+        color = cursor.charFormat().background().color()
+        # Pre-B1 membership rule: a background equal to any palette entry's
+        # color marks the character as already carrying a region identity.
+        if any(color == rc for rc in highlighter._regionColors.values()):
             continue
         merged = highlighter.format(position)
         merged.setBackground(QBrush(highlighter._regionColors[DefaultRegionKind]))
