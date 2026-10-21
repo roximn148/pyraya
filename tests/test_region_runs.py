@@ -1,32 +1,35 @@
 # ******************************************************************************
 # Copyright (c) 2026, RoXimn. All rights reserved.
 # ******************************************************************************
-"""Differential guard: run-based span reconstruction == per-character scan.
+"""Differential guard: run-based observation reproduces the per-character scan.
 
 Phase A1 replaced the per-character ``_regionSpans`` walk (one char-format
-read per character) with a format-run walk. This suite replays randomized
-documents through both — the run-based reconstruction under test and an
-inline per-character reference implementing the pre-A1 rule — and asserts
-identical region maps, including after recolours, clears, and raw edits.
-Kept for one round per plan §7, then to be retired.
+read per character) with a format-run walk, and Phase A2 derived the
+highlighter's default-region wash from the same run map. This suite replayed
+documents through both — the run-based implementation under test and an
+inline per-character reference implementing the pre-A1/pre-A2 rules — and
+asserts identical results: region maps, and the wash's merged layout
+formats. Kept for one round per plan §7, then to be retired.
 
-The reference walk reads kinds exactly as the old code did:
-``_charFormatAt(position)``'s background, mapped through the widget's
-palette with :data:`~pyraya.regions.DefaultRegionKind` as the fallback.
+The reference walks read kinds exactly as the old code did:
+``charFormat()``'s background, mapped through the palette with
+:data:`~pyraya.regions.DefaultRegionKind` as the fallback.
 """
 
 import os
 import random
 from collections.abc import Generator
+from typing import cast
 
 import pytest
 from PySide6.QtCore import QCoreApplication
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QBrush, QColor, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import QApplication
 
 from pyraya import (
     DefaultRegionKind,
     PyRaya,
+    PyRayaHighlighter,
     RegionType,
     TextRegion,
 )
@@ -64,6 +67,43 @@ def _referenceSpans(widget: PyRaya) -> list[TextRegion]:
             position += 1
         spans.append(TextRegion(start, position, kind))
     return spans
+
+
+# ******************************************************************************
+def _paintReferencePerCharacter(highlighter: PyRayaHighlighter, block: str) -> None:
+    """The pre-A2 per-character wash idiom, re-attached as the reference."""
+    current = highlighter.currentBlock()
+    base = current.position()
+    cursor = QTextCursor(highlighter.document())
+    for position in range(len(block)):
+        cursor.setPosition(base + position + 1)
+        if highlighter._hasRegionBackground(cursor.charFormat()):
+            continue
+        merged = highlighter.format(position)
+        merged.setBackground(QBrush(highlighter._regionColors[DefaultRegionKind]))
+        highlighter.setFormat(position, 1, merged)
+
+
+def _washSignatures(widget: PyRaya) -> list[list[tuple[int, int, str, str, object]]]:
+    """Every block's merged layout formats as comparable plain values."""
+    signatures: list[list[tuple[int, int, str, str, object]]] = []
+    block = widget.document().begin()
+    while block.isValid():
+        blockSignatures: list[tuple[int, int, str, str, object]] = []
+        for r in block.layout().formats():
+            charFormat = cast(QTextCharFormat, r.format)
+            blockSignatures.append(
+                (
+                    cast(int, r.start),
+                    cast(int, r.length),
+                    charFormat.background().color().name(QColor.NameFormat.HexArgb),
+                    charFormat.foreground().color().name(QColor.NameFormat.HexArgb),
+                    cast("QTextCharFormat.UnderlineStyle", charFormat.underlineStyle()),
+                )
+            )
+        signatures.append(blockSignatures)
+        block = block.next()
+    return signatures
 
 
 # ******************************************************************************
@@ -126,3 +166,37 @@ def testRunBasedEdgeDocuments(app, text: str) -> None:  # noqa: ARG001
     _assertSameMap(widget)
     widget.setRegionType(RegionType.RomanUrdu, 0, widget.document().characterCount() - 1)
     _assertSameMap(widget)
+
+
+# ******************************************************************************
+def testWashLayoutFormatsMatchPerCharacterPaint(app) -> None:  # noqa: ARG001
+    """The run-derived wash equals the per-character idiom's layout output."""
+    rng = random.Random(20261021)
+    for _ in range(8):
+        text = "".join(rng.choice(_Pools) for _ in range(rng.randint(1, 25)))
+        tagRanges = [
+            (
+                rng.choice([RegionType.Latin, RegionType.RomanUrdu]),
+                rng.randint(0, max(0, len(text))),
+                rng.randint(0, len(text)),
+            )
+            for _ in range(rng.randint(0, 5))
+        ]
+        widgets: list[PyRaya] = []
+        for reference in (False, True):
+            widget = PyRaya()
+            widget.setPlainText(text)
+            widget.highlighter.setSpellCheckEnabled(False)
+            for kind, start, end in tagRanges:
+                if start < end:
+                    widget.setRegionType(kind, start, end)
+            if reference:
+                highlighter = widget.highlighter
+
+                def _paintReference(block: str, h: PyRayaHighlighter = highlighter) -> None:
+                    _paintReferencePerCharacter(h, block)
+
+                highlighter._paintDefaultRegions = _paintReference
+            widget.highlighter.rehighlight()
+            widgets.append(widget)
+        assert _washSignatures(widgets[0]) == _washSignatures(widgets[1])

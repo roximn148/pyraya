@@ -192,14 +192,19 @@ class PyRayaHighlighter(QSyntaxHighlighter):
         Runs are painted with the
         :data:`~pyraya.regions.DefaultRegionKind` background in the text
         layout; the document's character formats are not modified. The
-        background is merged into each untagged character's current
-        layout format (read back with :meth:`format`) rather than painted
-        as a background-only format: ``QSyntaxHighlighter.setFormat``
-        replaces the whole per-character format, so a background-only
-        write would wipe the rules' foregrounds — untagged text would
-        fall back to the default ink instead of the rule colors, and with
-        visible whitespace the space's designed light-gray dot would
-        render as a heavy black mark.
+        pass derives *which* runs need the paint — from the identity
+        rule — out of the block's format runs, one document-format read
+        per run, tagged runs skipped whole; the per-character position
+        loop that preceded it read the document once per character.
+        Inside an untagged run the background is merged into each
+        character's current layout format (read back with
+        :meth:`format`) rather than painted as a background-only
+        write: ``QSyntaxHighlighter.setFormat`` replaces the whole
+        per-character format, so a background-only write would wipe the
+        rules' foregrounds — untagged text would fall back to the
+        default ink instead of the rule colors, and with visible
+        whitespace the space's designed light-gray dot would render as a
+        heavy black mark.
 
         Args:
             block: The text of the block being highlighted.
@@ -207,14 +212,16 @@ class PyRayaHighlighter(QSyntaxHighlighter):
         current = self.currentBlock()
         base = current.position()
         limit = len(block)
-        cursor = QTextCursor(self.document())
-        for position in range(limit):
-            cursor.setPosition(base + position + 1)
-            if self._hasRegionBackground(cursor.charFormat()):
+        for it in cast("Iterable[QTextBlock.iterator]", current):
+            fragment = it.fragment()
+            start = fragment.position() - base
+            if self._hasRegionBackground(fragment.charFormat()):
                 continue
-            merged = self.format(position)
-            merged.setBackground(QBrush(self._regionColors[DefaultRegionKind]))
-            self.setFormat(position, 1, merged)
+            end = min(start + fragment.length(), limit)
+            for position in range(max(start, 0), end):
+                merged = self.format(position)
+                merged.setBackground(QBrush(self._regionColors[DefaultRegionKind]))
+                self.setFormat(position, 1, merged)
 
     # ==========================================================================
     def _hasRegionBackground(self, charFormat: QTextCharFormat) -> bool:
