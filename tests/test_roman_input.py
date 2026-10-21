@@ -327,6 +327,31 @@ def testOverlayUpDownWrapsSelection(app: QApplication, engine: RomanInputEngine)
 
 
 # ******************************************************************************
+def testInTextCursorKeysKeepTheSelection(app: QApplication) -> None:
+    """In-text cursor keys keep the highlighted row and the typed text.
+
+    A cursor-only key (an in-text Left / Right / Home) must not rebuild
+    the suggestion rows: every rebuild re-runs the fuzzy search and
+    resets the highlighted suggestion to the top row.
+    """
+    overlay, _ = _makeOverlay(app, _StubEngine(12))
+    overlay.setText("kalam")
+    suggestionList = overlay.suggestionList()
+    suggestionList.select(2)
+    lineEdit = overlay.lineEdit()
+
+    _sendKey(lineEdit, Qt.Key.Key_Left, "")
+    assert suggestionList.selectedIndex() == 2
+    assert lineEdit.text() == "kalam"
+
+    _sendKey(lineEdit, Qt.Key.Key_Home, "")
+    assert suggestionList.selectedIndex() == 2
+
+    _sendKey(lineEdit, Qt.Key.Key_End, "")
+    assert suggestionList.selectedIndex() == 2
+
+
+# ******************************************************************************
 def testSuggestionListCappedSizeHint(app: QApplication) -> None:
     """The list's size hint caps at the visible-row limit, not the row count."""
     overlay, _ = _makeOverlay(app, _StubEngine(12))

@@ -611,8 +611,13 @@ class RomanLineEdit(QLineEdit):
             overlay.commit(key, text, modifiers)
             event.accept()
             return
+        # Only a text change may rebuild the rows: a cursor-only key (an
+        # in-text Left / Right / Home) would re-run the fuzzy search and
+        # reset the highlighted suggestion to the top row.
+        typedText = self.text()
         super().keyPressEvent(event)
-        overlay.refreshSuggestions()
+        if self.text() != typedText:
+            overlay.refreshSuggestions()
 
 
 # ******************************************************************************
