@@ -182,14 +182,21 @@ def _measureRegionsAndMenu(name: str) -> None:
     """Measure span reconstruction and the context-menu scan on one fixture."""
     widget = _prepareWidget(_fixture(name))
     target = _TargetChars[name]
-    spanCount = 0
+    spanCounts: list[int] = []
 
     def _runRegions() -> None:
-        nonlocal spanCount
-        spanCount = len(widget.regions())
+        spanCounts.append(len(widget.regions()))
 
-    _report(f"regions() — {target:,} chars ({name})", _milliseconds(_runRegions))
-    assert spanCount >= 1, "spans must reconstruct"
+    first = _milliseconds(_runRegions)
+    warm = _milliseconds(_runRegions)
+    _report(
+        f"regions() first call — {target:,} chars ({name}, cold: lazy layout)",
+        first,
+    )
+    _report(f"regions() second call — {target:,} chars ({name}, warm scan)", warm)
+    assert len(spanCounts) == 2 and spanCounts[0] >= 1 and spanCounts[1] >= 1, (
+        "spans must reconstruct"
+    )
     _report(
         f"createPopupMenu() — {target:,} chars ({name})",
         _milliseconds(widget.createPopupMenu),
