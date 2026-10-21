@@ -78,6 +78,43 @@ def _isArabicChar(char: str) -> bool:
     return "\u0600" <= char <= "\u06ff" and char not in ArabicScriptSeparators
 
 
+def _wordRunAround(text: str, local: int) -> tuple[int, int] | None:
+    """The maximal block-local Arabic-script run containing or ending at ``local``.
+
+    The one executable owner of the word-run scan (B2): a run is a
+    maximal substring whose characters all pass :func:`_isArabicChar`,
+    which also encodes the Arabic-separator boundary rule (؟ ، ؛ ۔ ٫ ٬ ؜
+    terminate a word like the Latin marks do). A word run cannot cross a
+    block — the block separator is not Arabic — so ``text`` is a
+    block's text and the scan stops at its edges.
+
+    ``local`` may sit at the run's start, inside it, or at its end
+    (``start <= local <= end``): the end is a position past the last
+    Arabic character, so a cursor parked on the whitespace or the
+    separator after a word still belongs to that previous run (the
+    caller may fall back to a scan one position below such a cursor).
+
+    Args:
+        text: The block text to scan (never includes a block separator).
+        local: The block-local position, ``0 <= local <= len(text)``.
+
+    Returns:
+        ``(start, end)`` block-local bounds of the containing or
+        ending run, or ``None`` when no run meets the position.
+    """
+    if local < 0 or local > len(text):
+        return None
+    start = local
+    while start > 0 and _isArabicChar(text[start - 1]):
+        start -= 1
+    end = local
+    while end < len(text) and _isArabicChar(text[end]):
+        end += 1
+    if start >= end:
+        return None
+    return (start, end)
+
+
 def _regionColorMatch(color: QColor, palette: dict[RegionType, QColor]) -> RegionType | None:
     """Return the palette entry kind an observed background color matches.
 
@@ -399,13 +436,15 @@ class PyRayaHighlighter(QSyntaxHighlighter):
         position = 0
         kindRuns: list[tuple[int, int, RegionType]] = []
         while position < limit:
-            if not _isArabicChar(block[position]):
+            run = _wordRunAround(block, position)
+            if run is None or run[1] <= position:
+                # No run starts at this position (a non-Arabic character,
+                # or a run that only ended here): the next candidate
+                # begins with the following character.
                 position += 1
                 continue
-            start = position
-            while position < limit and _isArabicChar(block[position]):
-                position += 1
-            end = position
+            start, end = run
+            position = end
             if not kindRuns:
                 kindRuns = self._blockRegionRuns(limit)
             if (
@@ -1079,14 +1118,15 @@ class PyRaya(QPlainTextEdit):
         local = position - base
         if local < 0 or local > len(text):
             return None
-        start = local
-        while start > 0 and _isArabicChar(text[start - 1]):
-            start -= 1
-        end = local
-        while end < len(text) and _isArabicChar(text[end]):
-            end += 1
-        if not (start < end and start <= local <= end):
+        word = _wordRunAround(text, local)
+        if word is None and local > 0 and _isArabicChar(text[local - 1]):
+            # A cursor just past the run's end — on the whitespace or the
+            # separator after the word — still sits on that run: the run's
+            # end position is over the word.
+            word = _wordRunAround(text, local - 1)
+        if word is None:
             return None
+        start, end = word
         if (
             self._regionKindAt(base + start) is not RegionType.RomanUrdu
             or self._regionKindAt(base + end - 1) is not RegionType.RomanUrdu
@@ -1728,7 +1768,9 @@ class PyRaya(QPlainTextEdit):
         When ``backwards`` is true the run is searched at lower index values of ``reference``
         (the previous word); otherwise greater index values (the next word). Non-Arabic
         characters — whitespace, digits, Latin letters — are skipped, so the walk
-        crosses block separators the same way the whole-text walk did.
+        crosses block separators the same way the whole-text walk did. The run found
+        is returned whole (the containing run of the found character; B2) — whatever
+        part of it the walk entered.
 
         A word run cannot cross a block (the block separator is not
         Arabic), so the walk runs block-local and moves to the neighbour
@@ -1754,10 +1796,14 @@ class PyRaya(QPlainTextEdit):
                     while local >= 0 and not _isArabicChar(text[local]):
                         local -= 1
                     if local >= 0:
-                        start = local
-                        while start > 0 and _isArabicChar(text[start - 1]):
-                            start -= 1
-                        return (block.position() + start, block.position() + local + 1)
+                        # The run at the found character, whole (B2): the
+                        # previous word, whatever part of it the walk
+                        # entered.
+                        word = _wordRunAround(text, local)
+                        if word is None:
+                            position = block.position() - 1
+                            continue
+                        return (block.position() + word[0], block.position() + word[1])
                 position = block.position() - 1
             return None
         position = min(reference, limit)
@@ -1770,10 +1816,13 @@ class PyRaya(QPlainTextEdit):
                     while local < len(text) and not _isArabicChar(text[local]):
                         local += 1
                     if local < len(text):
-                        end = local
-                        while end < len(text) and _isArabicChar(text[end]):
-                            end += 1
-                        return (block.position() + local, block.position() + end)
+                        # The run at the found character, whole (B2): the
+                        # next word, whatever part of it the walk entered.
+                        word = _wordRunAround(text, local)
+                        if word is None:
+                            position = block.position() + block.length()
+                            continue
+                        return (block.position() + word[0], block.position() + word[1])
                 # The separator slot or the block exhausted: skip past the
                 # block's separator into the next block.
             position = block.position() + block.length()

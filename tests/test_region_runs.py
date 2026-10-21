@@ -232,27 +232,40 @@ def _referenceWordUnderCursor(widget: PyRaya, position: int) -> tuple[int, int] 
 def _referenceAdjacentWord(
     widget: PyRaya, reference: int, backwards: bool
 ) -> tuple[int, int] | None:
-    """The pre-A3 whole-document adjacent-word walk, reimplemented from its rule."""
+    """The whole-document adjacent-word walk, reimplemented from its rule.
+
+    B2 ruled the walk to return the containing run of the found
+    character whole; the directional skip (first Arabic character at or
+    below / above the reference) is the rule the widget's callers see.
+    """  # noqa: D205
     text = widget.document().toPlainText()
     if backwards:
         index = min(reference - 1, len(text) - 1)
         while index >= 0 and not _isArabicChar(text[index]):
             index -= 1
-        if index < 0:
+    else:
+        index = reference
+        while index < len(text) and not _isArabicChar(text[index]):
+            index += 1
+        if index >= len(text):
             return None
-        start = index
-        while start > 0 and _isArabicChar(text[start - 1]):
-            start -= 1
-        return (start, index + 1)
-    index = reference
-    while index < len(text) and not _isArabicChar(text[index]):
-        index += 1
-    if index >= len(text):
+    run = _referenceWordRunAround(text, index) if 0 <= index < len(text) else None
+    return run
+
+
+def _referenceWordRunAround(text: str, local: int) -> tuple[int, int] | None:
+    """The pre-B2 whole-document containing-run scan, from its rule."""
+    if local < 0 or local > len(text):
         return None
-    end = index
+    start = local
+    while start > 0 and _isArabicChar(text[start - 1]):
+        start -= 1
+    end = local
     while end < len(text) and _isArabicChar(text[end]):
         end += 1
-    return (index, end)
+    if start >= end:
+        return None
+    return (start, end)
 
 
 def testWordWalksMatchWholeTextReference(app) -> None:  # noqa: ARG001
@@ -291,3 +304,30 @@ def testWordWalksMatchWholeTextReference(app) -> None:  # noqa: ARG001
             assert widget._adjacentWord(reference, False) == _referenceAdjacentWord(
                 widget, reference, False
             ), label
+
+
+# ******************************************************************************
+def testAdjacentWordInsideARunReturnsTheContainingRun(app) -> None:  # noqa: ARG001
+    """The adjacent-word walk returns the containing run of the found character.
+
+    B2 unified the word-run scan into one helper; the walk's directional
+    skip (first Arabic character at or below / above the reference,
+    crossing neighbour blocks) is kept, and the run it lands on is
+    returned whole. A reference landing inside a run — which the
+    widget's own callers never produce (an edge commit passes the
+    active word's edge, a commit seed passes an anchor outside any
+    run) — previously returned only the walk-direction's half-run.
+    """
+    text = "کلام کتاب"  # کلام at 0..3, space at 4, کتاب at 5..8
+    widget = PyRaya()
+    widget.highlighter.setSpellCheckEnabled(False)
+    widget.setPlainText(text)
+    for reference in (6, 7):
+        label = f"reference={reference}"
+        assert widget._adjacentWord(reference, True) == (5, 9), label
+        assert widget._adjacentWord(reference, False) == (5, 9), label
+    # The directional skip stays: a reference on the space or outside the
+    # runs still walks to the nearest run's whole length.
+    assert widget._adjacentWord(4, True) == (0, 4)
+    assert widget._adjacentWord(4, False) == (5, 9)
+    assert widget._adjacentWord(0, True) is None
