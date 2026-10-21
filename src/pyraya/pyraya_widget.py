@@ -20,7 +20,15 @@ channel.
 from collections.abc import Callable, Generator, Iterable, Sequence
 from typing import cast
 
-from PySide6.QtCore import QPoint, QRect, QRegularExpression, Qt, Signal
+from PySide6.QtCore import (
+    QPoint,
+    QPointF,
+    QRect,
+    QRectF,
+    QRegularExpression,
+    Qt,
+    Signal,
+)
 from PySide6.QtGui import (
     QAction,
     QBrush,
@@ -37,6 +45,7 @@ from PySide6.QtGui import (
     QTextCharFormat,
     QTextCursor,
     QTextDocument,
+    QTextLine,
     QTextOption,
 )
 from PySide6.QtWidgets import QLayout, QMenu, QPlainTextEdit, QWidget
@@ -1135,6 +1144,40 @@ class PyRaya(QPlainTextEdit):
         return (base + start, base + end)
 
     # ==========================================================================
+    def _lineGeometry(
+        self, block: QTextBlock, localPosition: int
+    ) -> tuple[QTextLine | None, QRectF, QPointF]:
+        """The block's line at a block-local position, with its content translate.
+
+        The one executable owner of the block-local line resolution (B3):
+        ``lineForTextPosition`` resolves the position's line in the
+        block's own layout — the position is block-local, and an absolute
+        position overflows the block's own layout past block 0 into an
+        invalid line whose geometry calls segfault — and an invalid line
+        is reported as ``None`` (PySide6 wraps invalid lines as
+        non-``None`` objects). ``geometry`` and ``offset`` carry the
+        content-coordinate translate (``blockBoundingGeometry`` +
+        ``contentOffset``) that callers add to the line's layout-local
+        geometry; the callers keep their own invalid-line fallback
+        policy.
+
+        Args:
+            block: The block whose layout resolves the line.
+            localPosition: The block-local position, at most ``len(block.text())``.
+
+        Returns:
+            ``(line, geometry, offset)`` — the resolved valid line, or
+            ``None`` when Qt cannot resolve it, with the translate
+            populated either way.
+        """
+        geometry = self.blockBoundingGeometry(block)
+        offset = self.contentOffset()
+        line = block.layout().lineForTextPosition(localPosition)
+        if line is None or not line.isValid():
+            return None, geometry, offset
+        return line, geometry, offset
+
+    # ==========================================================================
     def _wordRect(self, start: int, end: int) -> QRect:
         """The word's rectangle in viewport coordinates.
 
@@ -1144,22 +1187,13 @@ class PyRaya(QPlainTextEdit):
         line.
         """
         document = self.document()
-        offset = self.contentOffset()
         cursor = QTextCursor(document)
         cursor.setPosition(start)
         block = cursor.block()
-        # ``lineForTextPosition`` and ``cursorToX`` take block-local
-        # positions: an absolute position overflows the block's own layout
-        # past block 0 (yielding a non-None invalid line whose calls
-        # segfault), so the block's document offset is subtracted, and the
-        # block's content-coordinates origin is added so the line geometry
-        # maps to the viewport.
-        geometry = self.blockBoundingGeometry(block)
-        layout = block.layout()
         local = start - block.position()
-        line = layout.lineForTextPosition(local)
-        if line is None or not line.isValid():
-            rect = layout.boundingRect()
+        line, geometry, offset = self._lineGeometry(block, local)
+        if line is None:
+            rect = block.layout().boundingRect()
             metrics = QFontMetrics(self.font())
             # A word cannot span blocks, so the advance reads the word's
             # own block text (A3) instead of copying the whole document.
@@ -1305,25 +1339,18 @@ class PyRaya(QPlainTextEdit):
 
         ``rightX`` is the exclusive right edge of the cursor position, so a
         right-aligned overlay anchored there grows leftward as the user
-        types the new word.
+        types the new word. The line resolution is the shared
+        :meth:`_lineGeometry`; this anchor's own fallback policy degrades
+        to the block layout's bounding rect edge.
         """
         document = self.document()
-        offset = self.contentOffset()
         cursor = QTextCursor(document)
         cursor.setPosition(position)
         block = cursor.block()
-        # ``lineForTextPosition`` and ``cursorToX`` take block-local
-        # positions: an absolute position overflows the block's own layout
-        # past block 0 (yielding a non-None invalid line whose calls
-        # segfault), so the block's document offset is subtracted, and the
-        # block's content-coordinates origin is added so the line geometry
-        # maps to the viewport.
-        geometry = self.blockBoundingGeometry(block)
-        layout = block.layout()
         local = position - block.position()
-        line = layout.lineForTextPosition(local)
-        if line is None or not line.isValid():
-            rect = layout.boundingRect()
+        line, geometry, offset = self._lineGeometry(block, local)
+        if line is None:
+            rect = block.layout().boundingRect()
             return (
                 round(rect.right() + geometry.x() + offset.x()),
                 round(rect.top() + geometry.y() + offset.y()),
