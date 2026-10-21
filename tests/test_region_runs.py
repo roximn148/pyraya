@@ -33,6 +33,7 @@ from pyraya import (
     RegionType,
     TextRegion,
 )
+from pyraya.pyraya_widget import _isArabicChar
 
 
 # ******************************************************************************
@@ -200,3 +201,90 @@ def testWashLayoutFormatsMatchPerCharacterPaint(app) -> None:  # noqa: ARG001
             widget.highlighter.rehighlight()
             widgets.append(widget)
         assert _washSignatures(widgets[0]) == _washSignatures(widgets[1])
+
+
+# ******************************************************************************
+def _referenceWordUnderCursor(widget: PyRaya, position: int) -> tuple[int, int] | None:
+    """The pre-A3 whole-document word walk, reimplemented from its rule."""
+    document = widget.document()
+    limit = document.characterCount() - 1
+    clamped = min(position, limit)
+    text = document.toPlainText()
+    start = clamped
+    while start > 0 and _isArabicChar(text[start - 1]):
+        start -= 1
+    end = clamped
+    while end < len(text) and _isArabicChar(text[end]):
+        end += 1
+    if not (start < end and start <= clamped <= end):
+        return None
+    if (
+        _referenceKindAt(widget, start) == RegionType.RomanUrdu
+        and _referenceKindAt(widget, end - 1) == RegionType.RomanUrdu
+    ):
+        return (start, end)
+    return None
+
+
+def _referenceAdjacentWord(
+    widget: PyRaya, reference: int, backwards: bool
+) -> tuple[int, int] | None:
+    """The pre-A3 whole-document adjacent-word walk, reimplemented from its rule."""
+    text = widget.document().toPlainText()
+    if backwards:
+        index = min(reference - 1, len(text) - 1)
+        while index >= 0 and not _isArabicChar(text[index]):
+            index -= 1
+        if index < 0:
+            return None
+        start = index
+        while start > 0 and _isArabicChar(text[start - 1]):
+            start -= 1
+        return (start, index + 1)
+    index = reference
+    while index < len(text) and not _isArabicChar(text[index]):
+        index += 1
+    if index >= len(text):
+        return None
+    end = index
+    while end < len(text) and _isArabicChar(text[end]):
+        end += 1
+    return (index, end)
+
+
+def testWordWalksMatchWholeTextReference(app) -> None:  # noqa: ARG001
+    """The block-local word walks equal the whole-document copy walks.
+
+    `_wordUnderCursor` and `_adjacentWord` cannot cross a block (the
+    block separator is not Arabic), so A3 reads the cursor's or the
+    reference's own block — and walks neighbour blocks for the
+    adjacent-word search — instead of copying the whole document. This
+    guard replays both walks over every position of randomized
+    multi-block documents (separators, Latin text, whitespace, empty
+    blocks) against the whole-document reference.
+    """
+    rng = random.Random(97531)
+    for _ in range(8):
+        text = "".join(rng.choice(_Pools) for _ in range(rng.randint(1, 30)))
+        widget = PyRaya()
+        widget.setPlainText(text)
+        widget.highlighter.setSpellCheckEnabled(False)
+        for _ in range(rng.randint(0, 4)):
+            kind = rng.choice([RegionType.Latin, RegionType.RomanUrdu])
+            start = rng.randint(0, max(0, len(text)))
+            end = rng.randint(0, len(text))
+            if start < end:
+                widget.setRegionType(kind, start, end)
+        limit = widget.document().characterCount() - 1
+        for reference in range(0, limit + 2):
+            cursor = widget.textCursor()
+            cursor.setPosition(min(reference, limit))
+            widget.setTextCursor(cursor)
+            label = f"text={text!r} reference={reference}"
+            assert widget._wordUnderCursor() == _referenceWordUnderCursor(widget, reference), label
+            assert widget._adjacentWord(reference, True) == _referenceAdjacentWord(
+                widget, reference, True
+            ), label
+            assert widget._adjacentWord(reference, False) == _referenceAdjacentWord(
+                widget, reference, False
+            ), label

@@ -1008,25 +1008,41 @@ class PyRaya(QPlainTextEdit):
         character. A cursor with no word run behind it belongs to no word.
         The run must be fully contained in a RomanUrdu region; otherwise no
         word is returned.
+
+        A word run cannot cross a block (the block separator is not
+        Arabic), so the scan reads the cursor's own block text instead of
+        copying the whole document (A3).
         """
         document = self.document()
         limit = document.characterCount() - 1
         position = min(self.textCursor().position(), limit)
-        text = document.toPlainText()
-        start = position
+        block = document.findBlock(position)
+        # The document-level ``contentsChanged`` fires while a document
+        # replacement (``setPlainText``) is mid-flight, when the cursor
+        # position can read -1 and no valid block exists yet; both the
+        # negative position and the empty text would otherwise slip into
+        # Python's negative indexing and crash the scan.
+        if position < 0 or not block.isValid():
+            return None
+        text = block.text()
+        base = block.position()
+        local = position - base
+        if local < 0 or local > len(text):
+            return None
+        start = local
         while start > 0 and _isArabicChar(text[start - 1]):
             start -= 1
-        end = position
+        end = local
         while end < len(text) and _isArabicChar(text[end]):
             end += 1
-        if not (start < end and start <= position <= end):
+        if not (start < end and start <= local <= end):
             return None
         if (
-            self._regionKindAt(start) is not RegionType.RomanUrdu
-            or self._regionKindAt(end - 1) is not RegionType.RomanUrdu
+            self._regionKindAt(base + start) is not RegionType.RomanUrdu
+            or self._regionKindAt(base + end - 1) is not RegionType.RomanUrdu
         ):
             return None
-        return (start, end)
+        return (base + start, base + end)
 
     # ==========================================================================
     def _wordRect(self, start: int, end: int) -> QRect:
@@ -1055,7 +1071,9 @@ class PyRaya(QPlainTextEdit):
         if line is None or not line.isValid():
             rect = layout.boundingRect()
             metrics = QFontMetrics(self.font())
-            width = metrics.horizontalAdvance(document.toPlainText()[start:end])
+            # A word cannot span blocks, so the advance reads the word's
+            # own block text (A3) instead of copying the whole document.
+            width = metrics.horizontalAdvance(block.text()[local : end - block.position()])
             return QRect(
                 round(rect.left() + geometry.x() + offset.x()),
                 round(rect.top() + geometry.y() + offset.y()),
@@ -1269,7 +1287,11 @@ class PyRaya(QPlainTextEdit):
         # pending view suspension.
         self._suspendedOverlay = None
         document = self.document()
-        roman = engine.romanizeArabic(document.toPlainText()[word[0] : word[1]])
+        wordBlock = document.findBlock(word[0])
+        base = wordBlock.position()
+        # A word cannot span blocks: the romanization reads the word's own
+        # block text (A3) instead of copying the whole document.
+        roman = engine.romanizeArabic(wordBlock.text()[word[0] - base : word[1] - base])
         overlay.setText(roman)
         # Place the line edit cursor at the position that proportionally
         # mirror-maps the document cursor across the word, so arrow keys
@@ -1655,28 +1677,57 @@ class PyRaya(QPlainTextEdit):
 
         When ``backwards`` is true the run is searched at lower index values of ``reference``
         (the previous word); otherwise greater index values (the next word). Non-Arabic
-        characters — whitespace, digits, Latin letters — are skipped.
+        characters — whitespace, digits, Latin letters — are skipped, so the walk
+        crosses block separators the same way the whole-text walk did.
+
+        A word run cannot cross a block (the block separator is not
+        Arabic), so the walk runs block-local and moves to the neighbour
+        block once a block's text is exhausted (A3: the whole-document
+        copy is gone). A ``reference`` at the document's inclusive terminator
+        end is clamped to the last real character.
         """
-        text = self.document().toPlainText()
+        document = self.document()
+        limit = document.characterCount() - 1
         if backwards:
-            index = reference - 1
-            while index >= 0 and not _isArabicChar(text[index]):
-                index -= 1
-            if index < 0:
-                return None
-            start = index
-            while start > 0 and _isArabicChar(text[start - 1]):
-                start -= 1
-            return (start, index + 1)
-        index = reference
-        while index < len(text) and not _isArabicChar(text[index]):
-            index += 1
-        if index >= len(text):
+            index = min(reference - 1, limit - 1)
+            position = index
+            while position >= 0:
+                block = document.findBlock(position)
+                text = block.text()
+                if text:
+                    local = position - block.position()
+                    if local >= len(text):
+                        # The block's separator slot: the separator itself
+                        # is non-Arabic, the walk resumes at the last real
+                        # character of this block.
+                        local = len(text) - 1
+                    while local >= 0 and not _isArabicChar(text[local]):
+                        local -= 1
+                    if local >= 0:
+                        start = local
+                        while start > 0 and _isArabicChar(text[start - 1]):
+                            start -= 1
+                        return (block.position() + start, block.position() + local + 1)
+                position = block.position() - 1
             return None
-        end = index
-        while end < len(text) and _isArabicChar(text[end]):
-            end += 1
-        return (index, end)
+        position = min(reference, limit)
+        while position < limit:
+            block = document.findBlock(position)
+            text = block.text()
+            if text:
+                local = position - block.position()
+                if local < len(text):
+                    while local < len(text) and not _isArabicChar(text[local]):
+                        local += 1
+                    if local < len(text):
+                        end = local
+                        while end < len(text) and _isArabicChar(text[end]):
+                            end += 1
+                        return (block.position() + local, block.position() + end)
+                # The separator slot or the block exhausted: skip past the
+                # block's separator into the next block.
+            position = block.position() + block.length()
+        return None
 
     # ==========================================================================
     def createPopupMenu(self) -> QMenu:
