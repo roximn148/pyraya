@@ -1544,13 +1544,8 @@ class PyRaya(QPlainTextEdit):
         """
         word = self._activeWord
         anchorPosition = self._anchorPosition
-        if word is not None:
-            anchorRect = self._wordRect(*word)
-        elif anchorPosition is not None:
-            cursor = QTextCursor(self.document())
-            cursor.setPosition(anchorPosition)
-            anchorRect = self.cursorRect(cursor)
-        else:
+        anchorRect = self._anchorRect(word, anchorPosition)
+        if anchorRect is None:
             return
         if not self.viewport().rect().intersects(anchorRect):
             # A view event (scroll, resize, reflow) hid the word — not a
@@ -1576,6 +1571,56 @@ class PyRaya(QPlainTextEdit):
         elif anchorPosition is not None:
             rightX, top = self._cursorAnchor(anchorPosition)
             self._placeOverlay(rightX, top)
+
+    # ==========================================================================
+    def _onViewChanged(self) -> None:
+        """One funnel for the view-event dispatch (B7): re-place or resume.
+
+        A scroll or resize must decide what the view event means for the
+        overlay: an active overlay is re-placed over its anchor
+        (:meth:`_repositionActiveOverlay` — the word-rect hit test decides
+        on/off-screen on the way), and with no active overlay a suspended
+        one's remembered anchor is re-tested for resumption
+        (:meth:`_restoreSuspendedOverlay`). The dispatch is owned once and
+        shared by :meth:`_onScrollChanged` and :meth:`resizeEvent`, so the
+        two view events cannot drift.
+        """
+        if self._committing:
+            return
+        if self._overlayActive():
+            self._repositionActiveOverlay()
+        else:
+            self._restoreSuspendedOverlay()
+
+    # ==========================================================================
+    def _anchorRect(self, word: tuple[int, int] | None, anchorPosition: int | None) -> QRect | None:
+        """The overlay's anchor rect in viewport coordinates.
+
+        The one owner of the anchor-rect resolution shared by the
+        re-place (:meth:`_repositionActiveOverlay`) and resume
+        (:meth:`_restoreSuspendedOverlay`) paths: the active word's rect
+        (scenario 2, never the overlay widget's own — a flipped
+        suggestion list hangs up into the viewport, so a box-based test
+        would keep the popup alive after its word has left), or the
+        seeded anchor position's cursor rect (`QPlainTextEdit.cursorRect`,
+        scenario 1).
+
+        Args:
+            word: The active word's document bounds, or ``None``.
+            anchorPosition: The seeded anchor's document position,
+                or ``None``.
+
+        Returns:
+            The anchor's viewport rect, or ``None`` when the activation
+            carries neither anchor.
+        """
+        if word is not None:
+            return self._wordRect(*word)
+        if anchorPosition is not None:
+            cursor = QTextCursor(self.document())
+            cursor.setPosition(anchorPosition)
+            return self.cursorRect(cursor)
+        return None
 
     # ==========================================================================
     def _restoreSuspendedOverlay(self) -> None:
@@ -1608,12 +1653,9 @@ class PyRaya(QPlainTextEdit):
         if self.document().revision() != revision:
             self._suspendedOverlay = None
             return
-        if word is not None:
-            anchorRect = self._wordRect(*word)
-        else:
-            cursor = QTextCursor(self.document())
-            cursor.setPosition(anchorPosition)
-            anchorRect = self.cursorRect(cursor)
+        anchorRect = self._anchorRect(word, anchorPosition)
+        if anchorRect is None:
+            return  # unreachable: a suspension always carries one anchor
         if not self.viewport().rect().intersects(anchorRect):
             return  # still off-screen: stay suspended
         self._suspendedOverlay = None
@@ -1637,14 +1679,12 @@ class PyRaya(QPlainTextEdit):
         suspends the overlay (the hit test is on the word rect, never the
         overlay widget, which reaches further than its word), and a
         suspended anchor scrolling back into the viewport resumes the
-        overlay without a manual trigger.
+        overlay without a manual trigger. The dispatch itself is
+        :meth:`_onViewChanged` (B7): the funnel shared with
+        :meth:`resizeEvent`, so the two view events make the same
+        decision.
         """
-        if self._committing:
-            return
-        if self._overlayActive():
-            self._repositionActiveOverlay()
-        else:
-            self._restoreSuspendedOverlay()
+        self._onViewChanged()
 
     # ==========================================================================
     def _onOverlayCommitted(
@@ -2082,18 +2122,16 @@ class PyRaya(QPlainTextEdit):
         The reflow's word-rect hit test applies in both directions as a
         view decision (never a user one): the reflow pushing the word
         fully out of the viewport suspends the overlay, and a resize
-        grant that reveals a suspended anchor resumes it.
+        grant that reveals a suspended anchor resumes it. The dispatch is
+        :meth:`_onViewChanged` (B7): the funnel shared with
+        :meth:`_onScrollChanged`, so the two view events make the same
+        decision.
 
         Args:
             event: The resize event.
         """
         super().resizeEvent(event)
-        if self._committing:
-            return
-        if self._overlayActive():
-            self._repositionActiveOverlay()
-        else:
-            self._restoreSuspendedOverlay()
+        self._onViewChanged()
 
     # ==========================================================================
     def _paintRange(self, start: int, end: int, kind: RegionType) -> None:
