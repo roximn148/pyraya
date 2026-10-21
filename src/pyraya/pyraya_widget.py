@@ -480,6 +480,14 @@ class PyRaya(QPlainTextEdit):
         self._selectionRange: tuple[int, int] | None = None
         self._committing = False
         self._mouseActive = False
+        # The ``(cursor position, document revision)`` pair the last sync
+        # ran for: both ``cursorPositionChanged`` and ``contentsChanged``
+        # funnel into :meth:`_syncOverlay` per keystroke, and the second
+        # signal with an unchanged pair coalesces to an early exit.
+        # :meth:`_deactivateOverlay` invalidates the pair, so a
+        # state-changing user decision forces the next signal to
+        # re-examine. ``bypassMouse`` always proceeds.
+        self._syncedOverlayInputs: tuple[int, int] | None = None
         self._minOverlayWidth: int = 0
         self._overlay: RomanOverlay | None = None
         # Per-widget region palette (Q-1 decision): the widget copies the
@@ -927,6 +935,15 @@ class PyRaya(QPlainTextEdit):
         be. The same-word resync goes through
         :meth:`_repositionActiveOverlay`, so the word-rect hit test and
         its view-driven suspension apply to cursor moves as well.
+
+        A keystroke that edits the document fires both
+        ``contentsChanged`` and the widget-level
+        ``cursorPositionChanged``; the second signal with an unchanged
+        ``(cursor position, document revision)`` pair coalesces to an
+        early exit (:attr:`_syncedOverlayInputs`), while a commit's
+        ``bypassMouse`` resync always proceeds and any
+        :meth:`_deactivateOverlay` invalidates the pair so the next
+        signal re-examines the state.
         """
         if (
             not self._romanInputEnabled
@@ -935,6 +952,10 @@ class PyRaya(QPlainTextEdit):
             or (self._mouseActive and not bypassMouse)
         ):
             return
+        inputs = (self.textCursor().position(), self.document().revision())
+        if not bypassMouse and inputs == self._syncedOverlayInputs:
+            return
+        self._syncedOverlayInputs = inputs
         word = self._wordUnderCursor()
         if word is None:
             self._deactivateOverlay()
@@ -1283,6 +1304,10 @@ class PyRaya(QPlainTextEdit):
         self._selectionRange = None
         self._minOverlayWidth = 0
         self._suspendedOverlay = None
+        # The funnel deactivation is a state change the last sync did not
+        # run for: invalidate the unchanged-inputs pair so the next
+        # signal re-examines instead of coalescing to an early exit.
+        self._syncedOverlayInputs = None
         self.setFocus()
 
     # ==========================================================================

@@ -1026,6 +1026,39 @@ def testCtrlSpaceAtWordEndActivatesOverlay(app: QApplication) -> None:
 
 
 # ******************************************************************************
+def testDocumentKeystrokeSyncsOverlayOnce(app: QApplication) -> None:
+    """One keystroke that edits the document runs the overlay sync once.
+
+    Typing into the document fires both ``contentsChanged`` and the
+    widget-level ``cursorPositionChanged``; both funnel into
+    ``_syncOverlay``, which coalesces them to one word lookup when the
+    cursor position and the document revision are unchanged between the
+    two signals — while a real cursor move still syncs.
+    """
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("سلام علیکم")
+    widget.romanEngine()  # warm the dictionary outside the measurement
+    cursor = widget.textCursor()
+    cursor.setPosition(2)  # inside "سلام"
+    widget.setTextCursor(cursor)
+    original = widget._wordUnderCursor
+    calls: list[int] = []
+
+    def counting() -> tuple[int, int] | None:
+        calls.append(1)
+        return original()
+
+    widget._wordUnderCursor = counting
+    baseline = len(calls)  # the setTextCursor sync
+    _sendKey(widget, Qt.Key.Key_S.value, "س")  # Arabic: types into the document
+    assert len(calls) == baseline + 1
+    cursor.setPosition(6)  # a real cursor move must still sync
+    widget.setTextCursor(cursor)
+    assert len(calls) == baseline + 2
+
+
+# ******************************************************************************
 def testGeometryBounds(app: QApplication) -> None:
     """The overlay is anchored to the word rect and stays inside the viewport."""
     widget = PyRaya()
