@@ -9,20 +9,32 @@ Drop-in component for Urdu/Nastaliq text in Qt applications — currently PySide
 import sys
 
 from PySide6.QtWidgets import QApplication
+from romanalfaz.engine import Suggestion
 
-from .pyraya_widget import PyRaya, PyRayaHighlighter, SpellCheckUnderlineColor
+from .pyraya_widget import (
+    DefaultFontSize,
+    PyRaya,
+    PyRayaFonts,
+    PyRayaHighlighter,
+    SpellCheckUnderlineColor,
+)
 from .regions import DefaultRegionKind, RegionColors, RegionType, TextRegion
 from .roman_input import (
     ArabicScriptSeparators,
+    MaxVisibleRows,
     OverlayLayoutSpacing,
     RomanInputEngine,
+    RomanLineEdit,
     RomanOverlay,
+    SuggestionList,
     SuggestionListMargin,
 )
 
 __all__ = [
     "PyRaya",
     "PyRayaHighlighter",
+    "PyRayaFonts",
+    "DefaultFontSize",
     "RegionColors",
     "RegionType",
     "TextRegion",
@@ -31,6 +43,10 @@ __all__ = [
     "RomanOverlay",
     "ArabicScriptSeparators",
     "SpellCheckUnderlineColor",
+    "Suggestion",
+    "SuggestionList",
+    "RomanLineEdit",
+    "MaxVisibleRows",
     "OverlayLayoutSpacing",
     "SuggestionListMargin",
     "main",

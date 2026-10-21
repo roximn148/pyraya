@@ -20,7 +20,7 @@ punctuation.
 PyRaya is at **version 0.1.0-alpha.7**. The widget is a drop-in `QPlainTextEdit`. The following are now **implemented**:
 
 - **Native RTL layout** — right-to-left alignment and paragraph handling.
-- **Noto typography** — a configurable font stack defaulting to Noto Naskh Arabic.
+- **Urdu typography** — a configurable font stack defaulting to Baloo Bhaijaan 2 (the first installed entry of `PyRayaFonts`; the Noto Naskh/Nastaliq fonts follow it, and nothing installed falls back to the stack's first entry).
 - **Visible whitespace** — tabs and spaces rendered as visible characters.
 - **Configurable formatting** — a dedicated rule-based syntax highlighter.
 - **Text regions** — spans tagged as *Latin* or *Roman Urdu* (`RegionType`), rendered with a subtle, type-specific background color; tag a selection from the right-click context menu, via the `Ctrl+1` / `Ctrl+2` keyboard shortcuts, or via `setRegionType`. Every character belongs to exactly one region kind at all times: untagged text belongs to `DefaultRegionKind` (Roman Urdu), each kind's identity is its unique background color (compared including the alpha channel), and clearing regions resets the text to `DefaultRegionKind`. The kind-to-color palette is per widget: each widget copies the module-level `RegionColors` default at construction, so `setRegionColor` recolours within that widget alone.
@@ -34,7 +34,7 @@ The **inbuilt spell-checker**'s **correction and suggestion** side (real-time Ur
 
 * **Plug-and-Play Qt Component** *(available)*: A drop-in `QPlainTextEdit` for any Qt user interface (currently PySide6 only).
 * **Native RTL Layout** *(available)*: Right-to-left alignment and paragraph handling.
-* **Streamlined Noto Typography** *(available)*: Configurable font stack defaulting to Noto Naskh Arabic, with Noto Nastaliq Urdu and other fallbacks.
+* **Streamlined Urdu Typography** *(available)*: Configurable font stack defaulting to Baloo Bhaijaan 2 (first installed entry of `PyRayaFonts`), with Noto Naskh Arabic, Noto Nastaliq Urdu, and other fallbacks.
 * **Visible Whitespace** *(available)*: Tabs and spaces rendered as visible characters.
 * **Configurable Formatting** *(available)*: A dedicated rule-based highlighter for Urdu and mixed-script text.
 * **Text Regions** *(available)*: Tag a selection (or any character range) as Latin or Roman Urdu from the context menu, the `Ctrl+1` / `Ctrl+2` shortcuts, or `setRegionType`; each type renders with a subtle background color that is its unique identity (including the alpha channel). Every character belongs to exactly one region kind — untagged text belongs to `DefaultRegionKind` (Roman Urdu) — clearing regions resets the text to that kind, and regions survive edits and undo/redo. The kind-to-color palette is per widget (each widget copies the `RegionColors` default; `setRegionColor` maps within that widget alone), and `regionsChanged` is emitted once when any region-touching widget operation (tagging, clearing, recolouring, a text replacement, a commit that writes) completes.

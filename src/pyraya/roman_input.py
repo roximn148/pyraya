@@ -12,11 +12,12 @@ words into the encoded roman form the lookup consumes, and exposes
 simply returns the typed word as-is, and the hook for the future learning
 feature.
 
-The engine (and its ~0.2 s cold dictionary load) is created on first
-overlay activation, never during widget construction. If the default
-wordlist is missing (:class:`romanalfaz.DictionaryNotFoundError`), the
-engine surfaces an unavailable state rather than raising: suggestions are
-empty and :meth:`RomanInputEngine.learnRomanWord` still works.
+The engine (and its ~0.2 s cold dictionary load) is created on the first
+overlay activation, or the first spell-check re-highlight whose block
+contains a candidate word — never during widget construction. If the
+default wordlist is missing (:class:`romanalfaz.DictionaryNotFoundError`),
+the engine surfaces an unavailable state rather than raising: suggestions
+are empty and :meth:`RomanInputEngine.learnRomanWord` still works.
 """
 
 import string
@@ -53,6 +54,9 @@ __all__ = [
     "ArabicScriptSeparators",
     "OverlayLayoutSpacing",
     "SuggestionListMargin",
+    "SuggestionList",
+    "RomanLineEdit",
+    "MaxVisibleRows",
 ]
 
 # ******************************************************************************
@@ -712,10 +716,8 @@ class RomanOverlay(QWidget):
         self.setFont(font)
         self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self._lineEdit = RomanLineEdit(self)
-        # self._lineEdit.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self._lineEdit.setAlignment(Qt.AlignmentFlag.AlignRight)
         self._list = SuggestionList(font, self)
-        # self._list.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         # The default orientation: the line edit on top, the suggestion list
         # below it. ``setListAbove`` swaps the two when the host needs the
         # list above the line edit (the flipped orientation over a low

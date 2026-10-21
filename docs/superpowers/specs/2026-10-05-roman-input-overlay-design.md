@@ -284,6 +284,13 @@ Notes:
 - A text-replacing commit leaves region boundaries and kind unchanged, so `regionsChanged` is
   **not** emitted for it; the normal document-change path still runs. An empty-text commit
   (word deletion) does change the span, so `regionsChanged` **is** emitted there.
+
+  > **Corrected 2026-10-22 (audit C-06, remediated as F-8):** the assumption above is wrong
+  > for the selection-replacement path — replacing a selected *Latin* (or untagged-default)
+  > span with a committed word **retags** the span to `RomanUrdu`, so a text-replacing commit
+  > can change region state. The shipped contract (Q-2): `regionsChanged` is emitted **once
+  > for every writing commit, unconditionally** — an edge commit (which writes nothing)
+  > emits neither signal. The empty-text special case no longer exists.
 - No overlay operation is recorded in the undo stack; a fresh widget with the feature enabled
   performs no document work at construction (no phantom undo command).
 - `characterCount() - 1` trailing-terminator guards from the existing region code are reused

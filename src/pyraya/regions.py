@@ -32,8 +32,10 @@ class RegionType(Enum):
         Latin: Latin-script text that is not Roman Urdu (e.g. English); no
             Urdu-specific processing.
         RomanUrdu: Roman-script Urdu — Urdu semantics written in the Latin
-            script. Future per-type processing (spell-check, Roman Urdu to
-            Nastaliq) will be hooked to these regions.
+            script. Per-type processing is keyed on these regions: the
+            spell-check underline applies to RomanUrdu words the
+            dictionary does not know (the Roman-Urdu-to-Nastaliq
+            conversion stays on the roadmap).
     """
 
     Latin = "latin"

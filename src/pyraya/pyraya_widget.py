@@ -59,7 +59,12 @@ from .roman_input import (
     RomanOverlay,
 )
 
-__all__ = ["PyRaya", "PyRayaHighlighter"]
+__all__ = [
+    "PyRaya",
+    "PyRayaHighlighter",
+    "PyRayaFonts",
+    "DefaultFontSize",
+]
 
 # ******************************************************************************
 #: Preferred font stack, in order of preference. The first entry is the default.
@@ -554,7 +559,9 @@ class PyRaya(QPlainTextEdit):
 
     A drop-in ``QPlainTextEdit`` for embedding Urdu text editing in a Qt UI.
     Configures right-to-left layout, right-aligned paragraphs, a configurable
-    Noto font stack (default ``Noto Naskh Arabic``), visible whitespace, a
+    font stack (default ``Baloo Bhaijaan 2``, the first installed entry of
+    :data:`PyRayaFonts` — the Naskh and Nastaliq Noto fonts follow it),
+    visible whitespace, a
     dedicated rule-based :class:`PyRayaHighlighter` for formatting, and text
     regions: spans tagged with a :class:`~pyraya.regions.RegionType` and
     rendered with a subtle, type-specific background color. All text belongs
@@ -1468,11 +1475,14 @@ class PyRaya(QPlainTextEdit):
     def _deactivateOverlay(self) -> None:
         """Hide the overlay, clear the overlay state, and refocus the document.
 
-        A view-caused suspension (:attr:`_suspendedOverlay`) is dropped
-        too: every caller of this method is a user decision (a mouse
-        press, Esc, a programmatic feature or assist switch, an edge
-        commit over a boundary word) or an explicit re-evaluation, and
-        the user's active/inactive state outranks the view's suspension.
+        A view-caused suspension (:attr:`_suspendedOverlay`) is dropped with
+        the rest of the state: the callers are user decisions (a mouse
+        press, Esc, a programmatic feature or assist switch, an edge commit
+        over a boundary word), explicit re-evaluations, or the word-rect
+        view suspension in :meth:`_repositionActiveOverlay` — which
+        immediately re-records the suspension, so the view's resumable
+        state survives; every other caller drops it for good, because the
+        user's active/inactive state outranks the view's suspension.
         """
         if self._overlay is not None:
             self._overlay.hide()
