@@ -313,10 +313,15 @@ def testAdjacentWordInsideARunReturnsTheContainingRun(app) -> None:  # noqa: ARG
     B2 unified the word-run scan into one helper; the walk's directional
     skip (first Arabic character at or below / above the reference,
     crossing neighbour blocks) is kept, and the run it lands on is
-    returned whole. A reference landing inside a run — which the
-    widget's own callers never produce (an edge commit passes the
-    active word's edge, a commit seed passes an anchor outside any
-    run) — previously returned only the walk-direction's half-run.
+    returned whole. Scenario 2 edge commits pass the active word's
+    edge, which a maximal run's bounds guarantee is outside any run, so
+    the whole-run return is byte-identical there (review-checked). A
+    reference landing inside a run is reachable through one path — a
+    scenario-1 seed anchored mid-run: the ASCII typing gate is
+    region-kind-only, so its edge commit now lands on the run's facing
+    edge instead of staying put (pinned end-to-end by
+    ``testEdgeCommitFromMidRunSeedLandsOnTheRunEdge``); previously only
+    the walk-direction's half-run was returned.
     """
     text = "کلام کتاب"  # کلام at 0..3, space at 4, کتاب at 5..8
     widget = PyRaya()

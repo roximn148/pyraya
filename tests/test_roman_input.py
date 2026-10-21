@@ -756,6 +756,69 @@ def testKeystrokeAtEndOfUntaggedDocumentSeedsOverlay(app: QApplication) -> None:
 
 
 # ******************************************************************************
+def testEdgeCommitFromMidRunSeedLandsOnTheRunEdge(app: QApplication) -> None:
+    """An edge commit from a seed anchored inside a run lands on its facing edge.
+
+    The ASCII typing gate is region-kind-only, so an untagged cursor
+    inside an Arabic word seeds a scenario-1 overlay with the anchor
+    mid-run (the review ruling on B2 — the walk returns the containing
+    run of the found character). The edge commit follows the
+    adjacent-word convention instead of the old stay-put half-run
+    landing: the cursor rests on the containing run's edge facing the
+    walk direction, and the resync re-activates the overlay over that
+    same word (a run's edge position is over the word).
+    """
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("سلام علیکم")  # سلام 0..4, علیکم 5..10
+    widget.setRomanInputEnabled(True)
+    _moveCursor(widget, 1)  # inside سلام — this activates the overlay over it
+    # Deactivate (a user-style decision that moves nothing) so the gate
+    # can seed: the cursor rests mid-run with no overlay.
+    widget._deactivateOverlay()
+    _assertNoOverlay(widget)
+    _sendKey(widget, Qt.Key.Key_K, "k")
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    assert overlay.lineEdit().text() == "k"
+    assert widget.textCursor().position() == 1  # the seed's anchor, mid-run
+    # Right at the text end edge-commits: backwards from the mid-run
+    # anchor the walk finds سلام's start character and lands on the run's
+    # facing edge (its end, 4); the resync re-activates over سلام.
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Right, "")
+    assert widget.toPlainText() == "سلام علیکم"  # nothing written
+    assert widget.textCursor().position() == 4
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    assert overlay.lineEdit().text() == "slam"
+    # Left from the same seed shapes the mirror landing: the walk finds
+    # the run's end character and lands on its facing edge (the run's
+    # start).
+    widget2 = PyRaya()
+    widget2.show()
+    widget2.setPlainText("سلام علیکم")
+    widget2.setRomanInputEnabled(True)
+    _moveCursor(widget2, 1)
+    widget2._deactivateOverlay()
+    _assertNoOverlay(widget2)
+    _sendKey(widget2, Qt.Key.Key_K, "k")
+    overlay2 = widget2._overlay
+    assert overlay2 is not None and overlay2.isVisible()
+    assert overlay2.lineEdit().text() == "k"
+    # Left walks to the text start, then the next Left edge-commits:
+    # forwards from the mid-run anchor the walk finds سلام's end
+    # character and lands on the run's facing edge (its start, 0); the
+    # resync re-activates overسلام.
+    _sendKey(overlay2.lineEdit(), Qt.Key.Key_Left, "")
+    assert overlay2.lineEdit().cursorPosition() == 0
+    _sendKey(overlay2.lineEdit(), Qt.Key.Key_Left, "")
+    assert widget2.textCursor().position() == 0
+    overlay2 = widget2._overlay
+    assert overlay2 is not None and overlay2.isVisible()
+    assert overlay2.lineEdit().text() == "slam"
+
+
+# ******************************************************************************
 def testKeystrokeAtEndAfterLatinRegionNotIntercepted(app: QApplication) -> None:
     """Typing at the end with the last character in a Latin region does not
     seed the overlay; the key types into the document."""

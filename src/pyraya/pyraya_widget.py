@@ -110,8 +110,8 @@ def _wordRunAround(text: str, local: int) -> tuple[int, int] | None:
     ``local`` may sit at the run's start, inside it, or at its end
     (``start <= local <= end``): the end is a position past the last
     Arabic character, so a cursor parked on the whitespace or the
-    separator after a word still belongs to that previous run (the
-    caller may fall back to a scan one position below such a cursor).
+    separator after a word — or at the run's end itself — still belongs
+    to that run: the run's end position is over the word.
 
     Args:
         text: The block text to scan (never includes a block separator).
@@ -1140,11 +1140,6 @@ class PyRaya(QPlainTextEdit):
         if local < 0 or local > len(text):
             return None
         word = _wordRunAround(text, local)
-        if word is None and local > 0 and _isArabicChar(text[local - 1]):
-            # A cursor just past the run's end — on the whitespace or the
-            # separator after the word — still sits on that run: the run's
-            # end position is over the word.
-            word = _wordRunAround(text, local - 1)
         if word is None:
             return None
         start, end = word
