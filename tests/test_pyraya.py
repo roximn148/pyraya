@@ -485,6 +485,33 @@ def testPopupMenuDisabledWithoutSelection(app: QApplication) -> None:
 
 
 # ******************************************************************************
+def testSetRegionColorRehighlightsTheDefaultWash(app: QApplication) -> None:
+    """Recolouring the default kind repaints the layout wash immediately.
+
+    The default-kind tint lives in the text layout, which only refreshes
+    at a re-highlight; without one the screen keeps the old color until an
+    unrelated event repaints the layout.
+    """
+    widget = PyRaya()
+    widget.setPlainText("عربي")
+    latom = RegionColors[DefaultRegionKind].name(QColor.NameFormat.HexArgb)
+    formats = widget.document().firstBlock().layout().formats()
+    assert latom in [
+        cast(QTextCharFormat, r.format).background().color().name(QColor.NameFormat.HexArgb)
+        for r in formats
+    ]
+
+    newColor = QColor(0xAB, 0xCD, 0xEF, 30)
+    assert widget.setRegionColor(DefaultRegionKind, newColor) is True
+    newAtom = newColor.name(QColor.NameFormat.HexArgb)
+    formats = widget.document().firstBlock().layout().formats()
+    assert newAtom in [
+        cast(QTextCharFormat, r.format).background().color().name(QColor.NameFormat.HexArgb)
+        for r in formats
+    ]
+
+
+# ******************************************************************************
 def testRegionsChangedSignal(app: QApplication) -> None:
     """regionsChanged emits when regions are added or cleared."""
     widget = PyRaya()

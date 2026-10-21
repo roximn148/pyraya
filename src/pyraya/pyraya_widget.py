@@ -665,7 +665,7 @@ class PyRaya(QPlainTextEdit):
         finally:
             document.blockSignals(False)
         RegionColors[kind] = color
-        self.viewport().update()
+        self._highlighter.rehighlight()
         self.regionsChanged.emit()
         return True
 
