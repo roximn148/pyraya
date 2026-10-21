@@ -78,6 +78,28 @@ def _isArabicChar(char: str) -> bool:
     return "\u0600" <= char <= "\u06ff" and char not in ArabicScriptSeparators
 
 
+def _regionKindFor(color: QColor, palette: dict[RegionType, QColor]) -> RegionType:
+    """Map an observed background color to its region kind.
+
+    The single owner of the region identity rule: a background matching
+    a palette color (compared including the alpha channel) identifies
+    that palette entry's kind; a background matching no palette color
+    belongs to :data:`~pyraya.regions.DefaultRegionKind`, keeping the
+    invariant that every character belongs to exactly one kind.
+
+    Args:
+        color: The observed background color of a character or run.
+        palette: The palette whose colors carry the region identities.
+
+    Returns:
+        The :class:`~pyraya.regions.RegionType` the color identifies.
+    """
+    for kind, regionColor in palette.items():
+        if color == regionColor:
+            return kind
+    return DefaultRegionKind
+
+
 # ******************************************************************************
 class PyRayaHighlighter(QSyntaxHighlighter):
     """Rule-based formatting highlighter for Urdu and mixed-script text.
@@ -260,25 +282,27 @@ class PyRayaHighlighter(QSyntaxHighlighter):
         regions are collected as candidate words first; with no candidates
         the pass returns without touching the engine provider, so the
         engine (and its dictionary cold load) is created only the first
-        time a block containing a candidate word is re-highlighted. Each
-        candidate is then consulted against the engine, and a word the
-        dictionary does not know is underlined with
-        :data:`SpellCheckUnderlineColor` in the text layout, merged over
-        the character's other layout formats. The document's character
-        formats are never modified. The pass is also a no-op while spell
-        check is disabled, or when the engine provider returns ``None`` or
-        an unavailable engine (a missing dictionary must never underline
-        every word).
+        time a block containing a candidate word is re-highlighted. The
+        ends' kinds are resolved from the block's format runs — one
+        document-format read per run, replacing the per-candidate two
+        ``QTextCursor`` queries the scan used to pay. Each candidate is
+        then consulted against the engine, and a word the dictionary does
+        not know is underlined with :data:`SpellCheckUnderlineColor` in
+        the text layout, merged over the character's other layout
+        formats. The document's character formats are never modified. The
+        pass is also a no-op while spell check is disabled, or when the
+        engine provider returns ``None`` or an unavailable engine (a
+        missing dictionary must never underline every word).
 
         Args:
             block: The text of the block being highlighted.
         """
         if not self._spellCheckEnabled:
             return
-        base = self.currentBlock().position()
         limit = len(block)
         candidates: list[tuple[int, int]] = []
         position = 0
+        kindRuns: list[tuple[int, int, RegionType]] = []
         while position < limit:
             if not _isArabicChar(block[position]):
                 position += 1
@@ -287,9 +311,11 @@ class PyRayaHighlighter(QSyntaxHighlighter):
             while position < limit and _isArabicChar(block[position]):
                 position += 1
             end = position
+            if not kindRuns:
+                kindRuns = self._blockRegionRuns(limit)
             if (
-                self._regionKindAt(base + start) is not RegionType.RomanUrdu
-                or self._regionKindAt(base + end - 1) is not RegionType.RomanUrdu
+                self._kindInRuns(kindRuns, start) is not RegionType.RomanUrdu
+                or self._kindInRuns(kindRuns, end - 1) is not RegionType.RomanUrdu
             ):
                 continue
             candidates.append((start, end))
@@ -309,20 +335,43 @@ class PyRayaHighlighter(QSyntaxHighlighter):
                 self.setFormat(pos, 1, merged)
 
     # ==========================================================================
+    def _blockRegionRuns(self, limit: int) -> list[tuple[int, int, RegionType]]:
+        """The current block's (start, end, kind) runs, block-local.
+
+        One document-format read per format run; runs cover the block's
+        text positions exactly (fragments partition the real text), so a
+        run-local kind lookup reproduces the per-character reads.
+        """
+        base = self.currentBlock().position()
+        runs: list[tuple[int, int, RegionType]] = []
+        for it in cast("Iterable[QTextBlock.iterator]", self.currentBlock()):
+            fragment = it.fragment()
+            start = fragment.position() - base
+            end = min(start + fragment.length(), limit)
+            if start < end:
+                color = fragment.charFormat().background().color()
+                runs.append((start, end, _regionKindFor(color, self._regionColors)))
+        return runs
+
+    # ==========================================================================
+    def _kindInRuns(self, runs: list[tuple[int, int, RegionType]], position: int) -> RegionType:
+        """The region kind covering a block-local position in the run list."""
+        for start, end, kind in runs:
+            if start <= position < end:
+                return kind
+        return DefaultRegionKind
+
+    # ==========================================================================
     def _regionKindAt(self, position: int) -> RegionType:
         """Return the region kind stored at a document character offset.
 
-        A character whose background matches no region color belongs to
-        :data:`~pyraya.regions.DefaultRegionKind`, keeping the invariant
-        that every character belongs to exactly one kind.
+        The identity rule itself lives in :func:`_regionKindFor` — the
+        single owner of "what kind is this background color".
         """
         cursor = QTextCursor(self.document())
         cursor.setPosition(position + 1)
         color = cursor.charFormat().background().color()
-        for kind, regionColor in self._regionColors.items():
-            if color == regionColor:
-                return kind
-        return DefaultRegionKind
+        return _regionKindFor(color, self._regionColors)
 
     # ==========================================================================
     def _installDefaultRules(self) -> None:
@@ -1847,14 +1896,10 @@ class PyRaya(QPlainTextEdit):
     def _kindForColor(self, color: QColor) -> RegionType:
         """Map an observed background color to its region kind.
 
-        A background matching no color of the widget's palette belongs to
-        :data:`~pyraya.regions.DefaultRegionKind`, keeping the invariant
-        that every character belongs to exactly one kind.
+        The identity rule lives in :func:`_regionKindFor` — the single
+        owner of "what kind is this background color".
         """
-        for kind, regionColor in self._regionColors.items():
-            if color == regionColor:
-                return kind
-        return DefaultRegionKind
+        return _regionKindFor(color, self._regionColors)
 
     # ==========================================================================
     def _backgroundRuns(self) -> list[tuple[int, int, QColor]]:
@@ -1912,10 +1957,7 @@ class PyRaya(QPlainTextEdit):
         that every character belongs to exactly one kind.
         """
         color = self._charFormatAt(position).background().color()
-        for kind, regionColor in self._regionColors.items():
-            if color == regionColor:
-                return kind
-        return DefaultRegionKind
+        return _regionKindFor(color, self._regionColors)
 
     # ==========================================================================
     def _regionAt(self, position: int) -> TextRegion | None:
