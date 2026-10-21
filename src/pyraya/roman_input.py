@@ -47,7 +47,29 @@ from romanalfaz import DictionaryNotFoundError, RomanAlfaz
 from romanalfaz.algorithm import tafseerUrduAr2Rm
 from romanalfaz.engine import Suggestion, Vocabulary
 
-__all__ = ["RomanInputEngine", "RomanOverlay", "ArabicScriptSeparators"]
+__all__ = [
+    "RomanInputEngine",
+    "RomanOverlay",
+    "ArabicScriptSeparators",
+    "OverlayLayoutSpacing",
+    "SuggestionListMargin",
+]
+
+# ******************************************************************************
+#: The vertical spacing between the overlay's line edit and its suggestion
+#: list, in pixels. One constant (B5): the overlay's layout, its size hint,
+#: and the host's flip/pinning arithmetic all budget this same gap — a
+#: spelled-out literal in either module would silently diverge from the
+#: other.
+OverlayLayoutSpacing = 4
+
+# ******************************************************************************
+#: The horizontal margin the suggestion list leaves around a row on both
+#: sides, in pixels. One constant (B5): the list's size hint and the line
+#: edit's size hint split the same row budget, so the two hints stay
+#: consistent under one number.
+SuggestionListMargin = 6
+
 
 #: The punctuation marks of the Arabic script itself (U+0600-U+06FF): the
 #: Arabic comma, semicolon, question mark, and the Urdu full stop, plus the
@@ -298,7 +320,7 @@ class SuggestionList(QWidget):
         font: QFont,
         parent: QWidget | None = None,
         maxVisibleRows: int = MaxVisibleRows,
-        margin: int = 6,
+        margin: int = SuggestionListMargin,
     ) -> None:
         """Create the suggestion list.
 
@@ -576,12 +598,12 @@ class RomanLineEdit(QLineEdit):
         """The preferred size: the typed text's advance plus margin per side.
 
         The width is the content width of the typed roman text plus the
-        suggestion list's margin (6 pixels) on both sides, not the generic
-        ``QLineEdit`` default, so the overlay covers only the word and the
-        typed text.
+        suggestion list's margin (:data:`SuggestionListMargin`) on both
+        sides, not the generic ``QLineEdit`` default, so the overlay covers
+        only the word and the typed text.
         """
         base = super().sizeHint()
-        width = self.fontMetrics().horizontalAdvance(self.text()) + 2 * 6
+        width = self.fontMetrics().horizontalAdvance(self.text()) + 2 * SuggestionListMargin
         return QSize(width, base.height())
 
     # ==========================================================================
@@ -702,7 +724,7 @@ class RomanOverlay(QWidget):
         layout = QVBoxLayout(self)
         self._layout = layout
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
+        layout.setSpacing(OverlayLayoutSpacing)
         layout.addWidget(self._lineEdit)
         layout.addWidget(self._list)
         # A trailing stretch absorbs any leftover vertical space when the
@@ -863,11 +885,11 @@ class RomanOverlay(QWidget):
         """Preferred size: the line edit plus the suggestion list.
 
         The height is the same in both orientations — the line edit, the
-        4 px spacing, and the list — so the host can flip the list without
-        re-deriving the overlay's footprint.
+        :data:`OverlayLayoutSpacing` gap, and the list — so the host can
+        flip the list without re-deriving the overlay's footprint.
         """
         line = self._lineEdit.sizeHint()
         listHint = self._list.sizeHint()
         width = max(line.width(), listHint.width())
-        height = line.height() + 4 + listHint.height()
+        height = line.height() + OverlayLayoutSpacing + listHint.height()
         return QSize(width, height)

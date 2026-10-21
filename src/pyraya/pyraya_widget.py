@@ -52,7 +52,12 @@ from PySide6.QtWidgets import QLayout, QMenu, QPlainTextEdit, QWidget
 from romanalfaz.engine import Suggestion, Vocabulary
 
 from .regions import DefaultRegionKind, RegionColors, RegionType, TextRegion
-from .roman_input import ArabicScriptSeparators, RomanInputEngine, RomanOverlay
+from .roman_input import (
+    ArabicScriptSeparators,
+    OverlayLayoutSpacing,
+    RomanInputEngine,
+    RomanOverlay,
+)
 
 __all__ = ["PyRaya", "PyRayaHighlighter"]
 
@@ -1261,10 +1266,11 @@ class PyRaya(QPlainTextEdit):
         # orientations; only the list's side is decided here. The space
         # budgets are the list's: below the line edit the list's bottom
         # edge is the overlay's bottom (``top + hint.height()``), and the
-        # flipped list is clamped to the gap over the anchor (``top - 4``).
+        # flipped list is clamped to the gap over the anchor
+        # (``top - OverlayLayoutSpacing``).
         listHint = overlay.suggestionList().sizeHint().height()
         belowRoom = viewport.height() - top - hint.height() + listHint
-        aboveRoom = top - 4
+        aboveRoom = top - OverlayLayoutSpacing
         # Flip above only when below cannot hold the list AND the space
         # above is strictly larger: ties favor the default orientation,
         # so a first-line word's overlay stays below (clamped) rather
@@ -1277,8 +1283,8 @@ class PyRaya(QPlainTextEdit):
             # space below the anchor would have left it. A hidden list
             # occupies no slot, so the line edit pins to ``top`` exactly.
             listSlot = min(listHint, max(0, aboveRoom))
-            height = overlay.lineEdit().sizeHint().height() + 4 + listSlot
-            y = top - 4 - listSlot
+            height = overlay.lineEdit().sizeHint().height() + OverlayLayoutSpacing + listSlot
+            y = top - OverlayLayoutSpacing - listSlot
         else:
             y = top
             height = hint.height()

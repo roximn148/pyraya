@@ -12,7 +12,13 @@ from PySide6.QtWidgets import QApplication
 
 from .pyraya_widget import PyRaya, PyRayaHighlighter, SpellCheckUnderlineColor
 from .regions import DefaultRegionKind, RegionColors, RegionType, TextRegion
-from .roman_input import ArabicScriptSeparators, RomanInputEngine, RomanOverlay
+from .roman_input import (
+    ArabicScriptSeparators,
+    OverlayLayoutSpacing,
+    RomanInputEngine,
+    RomanOverlay,
+    SuggestionListMargin,
+)
 
 __all__ = [
     "PyRaya",
@@ -25,6 +31,8 @@ __all__ = [
     "RomanOverlay",
     "ArabicScriptSeparators",
     "SpellCheckUnderlineColor",
+    "OverlayLayoutSpacing",
+    "SuggestionListMargin",
     "main",
 ]
 
