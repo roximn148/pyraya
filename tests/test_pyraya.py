@@ -109,6 +109,23 @@ def testSetAlignmentPreservesASelection(app: QApplication) -> None:
 
 
 # ******************************************************************************
+def testSetAlignmentReachesEveryParagraph(app: QApplication) -> None:
+    """setAlignment applies the alignment to all existing paragraphs.
+
+    The throwaway cursor selects the whole document before the block-format
+    merge: without the selection the merge only touches the block under the
+    cursor (block 0) and later paragraphs keep their old alignment.
+    """
+    widget = PyRaya()
+    widget.setPlainText("alpha\nbeta\ngamma")
+    widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    block = widget.document().begin()
+    while block.isValid():
+        assert block.blockFormat().alignment() == Qt.AlignmentFlag.AlignCenter
+        block = block.next()
+
+
+# ******************************************************************************
 def testPyrayaShowWhitespace(app: QApplication) -> None:
     """PyRaya enables the ShowTabsAndSpaces text option by default."""
     widget = PyRaya()
@@ -460,6 +477,19 @@ def testRegionColorPaletteIsPerWidget(app: QApplication) -> None:
 
     assert w2.regionColors()[RegionType.Latin].name() == "#60a5fa"
     assert w2.regionTypeAt(0) is RegionType.Latin
+
+
+# ******************************************************************************
+def testRegionColorsReturnsAnIndependentCopy(app: QApplication) -> None:
+    """A returned palette copy is deep: mutating a returned QColor cannot
+    leak into the module default palette or any widget (the cross-instance
+    corruption class the per-widget palette exists to close)."""
+    w1 = PyRaya()
+    palette = w1.regionColors()
+    palette[RegionType.Latin].setGreen(1)
+    assert RegionColors[RegionType.Latin].green() != 1
+    w2 = PyRaya()
+    assert w2.regionColors()[RegionType.Latin].green() == RegionColors[RegionType.Latin].green()
 
 
 # ******************************************************************************

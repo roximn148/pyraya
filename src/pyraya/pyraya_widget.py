@@ -117,7 +117,11 @@ class PyRayaHighlighter(QSyntaxHighlighter):
         super().__init__(document)
         self._engineProvider = engineProvider
         self._spellCheckEnabled = True
-        self._regionColors = dict(RegionColors) if colors is None else colors
+        self._regionColors: dict[RegionType, QColor] = (
+            {kind: QColor(color) for kind, color in RegionColors.items()}
+            if colors is None
+            else colors
+        )
         self._rules: list[tuple[QRegularExpression, QTextCharFormat]] = []
         self._installDefaultRules()
 
@@ -424,7 +428,9 @@ class PyRaya(QPlainTextEdit):
         # Per-widget region palette (Q-1 decision): the widget copies the
         # module-level default palette at construction and owns its colors;
         # the highlighter shares the same mapping so recolours repaint.
-        self._regionColors: dict[RegionType, QColor] = dict(RegionColors)
+        self._regionColors: dict[RegionType, QColor] = {
+            kind: QColor(color) for kind, color in RegionColors.items()
+        }
         self._highlighter = PyRayaHighlighter(
             self.document(), engineProvider=self._spellEngine, colors=self._regionColors
         )
@@ -769,9 +775,12 @@ class PyRaya(QPlainTextEdit):
         never the module default and never another widget's palette.
 
         Returns:
-            A copy of the per-widget ``kind -> color`` mapping.
+            A deep copy of the per-widget ``kind -> color`` mapping: the
+            returned colors are independent ``QColor`` values, so mutating
+            a returned color cannot reach the widget's palette, the
+            module default, or any other widget.
         """
-        return dict(self._regionColors)
+        return {kind: QColor(color) for kind, color in self._regionColors.items()}
 
     # ==========================================================================
     def romanEngine(self) -> RomanInputEngine | None:
@@ -1943,6 +1952,11 @@ class PyRaya(QPlainTextEdit):
         self.blockSignals(True)
         try:
             cursor = QTextCursor(self.document())
+            # The selection carries the merge to every existing block
+            # (:meth:`mergeBlockFormat` otherwise only reaches the block
+            # under the cursor). It lives on the throwaway cursor, so the
+            # widget's own cursor keeps its position and selection.
+            cursor.select(QTextCursor.SelectionType.Document)
 
             to = self.document().defaultTextOption()
 
