@@ -1652,44 +1652,19 @@ class PyRaya(QPlainTextEdit):
     ) -> None:
         """Handle the overlay's commit and write to the document.
 
-        Everything is derived from the signal arguments: the committed word
-        from the selected row's :class:`Suggestion` — ``""`` when no row is
-        selected, :meth:`RomanInputEngine.learnRomanWord` for the
-        undefined-word row's blank ``Suggestion`` (``isUndefined()`` true),
-        the row's ``arabic`` otherwise — and the separator from the
-        committing keystroke: the literal ``"\\n"`` for a plain ``Key_Return``
-        (whose ``keyText`` is platform-dependent), ``keyText`` for
-        ``Key_Space`` and typed punctuation, and the empty string for
-        ``Key_Return`` with ``ControlModifier`` (Ctrl+Enter commits the word
-        without a newline) and for an edge commit (``Key_Left`` /
-        ``Key_Right``).
-
-        A separator-key commit inserts the committed word plus the separator
-        as a single undoable edit: over an existing word (scenario 2) the
-        word's span is replaced, at a bare cursor (scenario 1) the text is
-        inserted at the anchor position — or, if the cursor had a selection,
-        that selection is replaced. The word and the separator both carry the
-        :class:`RomanUrdu` region background. An edge commit writes nothing
-        and moves the cursor to the adjacent Arabic word in visual order —
-        Left at the visually left edge (the start of the overlay text) to the
-        next word, Right at the visually right edge (the end) to the previous
-        one. When that word exists, the cursor lands at its edge facing the
-        active word — Left at its start, Right at its end — and the post-commit
-        resync re-activates the overlay over the landed word (a cursor at the
-        word's end is over the word). With no adjacent word — the commit
-        landed on a boundary word, whose far side is only whitespace — the
-        overlay is closed and the resync skipped, so the deactivation sticks
-        and the cursor rests at the boundary edge (Left at the word's end,
-        Right at its start) until the next trigger (a cursor move, a click,
-        or Ctrl+Space). A Ctrl+Enter
-        commit skips the resync, so the dismissed overlay is not re-triggered
-        and the cursor rests at the inserted word's end.
+        Everything is derived from the signal arguments (B6): the committed
+        word from the selected row (:meth:`_committedWord`), the separator
+        and resync decision from the committing keystroke
+        (:meth:`_commitSeparator`), and then one of the two commit
+        decisions — the edge commit (:meth:`_edgeCommit`, writes nothing and
+        moves in visual order) or the write (:meth:`_writeCommit`). One
+        post-commit resync runs unless the decision suppressed it.
 
         ``romanWordCommitted`` is emitted for a non-empty committed word,
-        and ``regionsChanged`` once for every writing commit (per the
-        Q-2 contract: :attr:`regionsChanged` means "a region-touching
-        operation invoked through the widget has completed"). An edge
-        commit writes nothing and emits neither.
+        and ``regionsChanged`` once for every writing commit (per the Q-2
+        contract: :attr:`regionsChanged` means "a region-touching operation
+        invoked through the widget has completed"). An edge commit writes
+        nothing and emits neither.
         """
         engine = self.romanEngine()
         overlay = self._overlay
@@ -1699,93 +1674,12 @@ class PyRaya(QPlainTextEdit):
         self._committing = True
         resync = True
         try:
-            word = ""
-            if isinstance(selected, Suggestion):
-                if selected.isUndefined():
-                    word = engine.learnRomanWord(typedRoman)
-                else:
-                    word = selected.arabic
-            edge = key in (Qt.Key.Key_Left, Qt.Key.Key_Right)
-            if edge:
-                separator = ""
-            elif key == Qt.Key.Key_Return:
-                # Enter's keyText is platform-dependent, so the newline is
-                # literal; Ctrl+Enter commits without one and skips the
-                # resync: the cursor rests at the committed word's end, which
-                # is over the word, so the resync would only re-trigger the
-                # overlay the user just dismissed.
-                if modifiers & Qt.KeyboardModifier.ControlModifier.value:
-                    separator = ""
-                    resync = False
-                else:
-                    separator = "\n"
+            word = self._committedWord(engine, typedRoman, selected)
+            if key in (Qt.Key.Key_Left, Qt.Key.Key_Right):
+                resync = self._edgeCommit(key == Qt.Key.Key_Left)
             else:
-                separator = keyText
-            if edge:
-                # Edge commit: nothing is written to the document. Left at the
-                # visually left edge (the start of the overlay text) moves to
-                # the next Arabic word; Right at the visually right edge (the
-                # end) to the previous one. When that word exists, the cursor
-                # lands at its edge facing the active word — Left at its
-                # start, Right at its end — and the resync re-activates the
-                # overlay over the landed word (a cursor at the word's end is
-                # over the word). With no adjacent word — the commit landed on
-                # a boundary word, whose far side is only whitespace — the
-                # overlay is closed and the resync skipped, so the
-                # deactivation sticks and the cursor rests at the boundary
-                # edge (Left at the word's end, Right at its start) until the
-                # next trigger.
-                moveLeft = key == Qt.Key.Key_Left
-                if self._activeWord is not None:
-                    reference = self._activeWord[1] if moveLeft else self._activeWord[0]
-                else:
-                    reference = self._anchorPosition or 0
-                adjacent = self._adjacentWord(reference, backwards=not moveLeft)
-                if adjacent is None:
-                    # No adjacent word: the commit landed on a boundary
-                    # word, whose far side is only whitespace (the cursor
-                    # has walked off the paragraph's word run). The
-                    # deactivation must stick, so the resync is skipped —
-                    # the landing edge is over the active word and the
-                    # resync would only re-trigger the overlay the user is
-                    # leaving, pinning the cursor on the boundary word.
-                    resync = False
-                    if self._activeWord is not None:
-                        cursor = self.textCursor()
-                        cursor.setPosition(self._activeWord[1 if moveLeft else 0])
-                        self.setTextCursor(cursor)
-                    self._deactivateOverlay()
-                else:
-                    cursor = self.textCursor()
-                    cursor.setPosition(adjacent[0 if moveLeft else 1])
-                    self.setTextCursor(cursor)
-            else:
-                cursor = self.textCursor()
-                fmt = QTextCharFormat()
-                fmt.setBackground(QBrush(self._regionColors[RegionType.RomanUrdu]))
-                if self._activeWord is not None:
-                    start, end = self._activeWord
-                    cursor.setPosition(start)
-                    cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
-                elif self._selectionRange is not None:
-                    # Scenario 1 over a selection: replace the selection,
-                    # plain QPlainTextEdit typing semantics.
-                    start, end = self._selectionRange
-                    cursor.setPosition(start)
-                    cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
-                else:
-                    cursor.setPosition(self._anchorPosition or 0)
-                cursor.insertText(word + separator, fmt)
-                # Every writing commit changes region state: the word and
-                # separator land tagged RomanUrdu, replacing whatever kinds
-                # the destination carried. The emission is unconditional
-                # (Q-2 contract) — no per-commit comparison, so the signal
-                # costs nothing per keystroke.
-                self.regionsChanged.emit()
-                if word:
-                    self.romanWordCommitted.emit(word, typedRoman)
-                self.setTextCursor(cursor)
-                self._deactivateOverlay()
+                separator, resync = self._commitSeparator(key, keyText, modifiers)
+                self._writeCommit(word, separator, typedRoman)
         finally:
             self._committing = False
             if resync:
@@ -1793,6 +1687,149 @@ class PyRaya(QPlainTextEdit):
                 # reconciliation still runs even if a button happens to be
                 # held down (see ``_syncOverlay``).
                 self._syncOverlay(bypassMouse=True)
+
+    # ==========================================================================
+    def _committedWord(self, engine: RomanInputEngine, typedRoman: str, selected: object) -> str:
+        """The committed word, derived from the selected row's suggestion.
+
+        ``""`` when no row is selected,
+        :meth:`RomanInputEngine.learnRomanWord` for the undefined-word
+        row's blank :class:`Suggestion` (``isUndefined()`` true), the row's
+        ``arabic`` otherwise.
+
+        Args:
+            engine: The roman-input engine (suggestions come from it).
+            typedRoman: The roman text typed into the overlay line edit.
+            selected: The committed row's suggestion, or ``None``.
+
+        Returns:
+            The committed Arabic word (empty for a blank commit).
+        """
+        if isinstance(selected, Suggestion):
+            if selected.isUndefined():
+                return engine.learnRomanWord(typedRoman)
+            return selected.arabic
+        return ""
+
+    # ==========================================================================
+    def _commitSeparator(self, key: int, keyText: str, modifiers: int) -> tuple[str, bool]:
+        """The separator a committing key delivers, and its resync decision.
+
+        One place for the separator/edge/write decisions (B6). A plain
+        ``Key_Return`` commits the literal ``"\\n"`` (its ``keyText`` is
+        platform-dependent); ``Key_Return`` with ``ControlModifier``
+        commits the empty separator — the cursor rests at the committed
+        word's end, which is over the word, so the resync would only
+        re-trigger the overlay the user just dismissed — and suppresses the
+        resync; every other committing key commits its ``keyText``
+        (``Key_Space``, typed punctuation — including the Arabic script's
+        own separator marks) and resyncs. The edge keys (``Key_Left`` /
+        ``Key_Right``) handle their own separator ("") and decision in
+        :meth:`_edgeCommit`.
+
+        Args:
+            key: The committing Qt key.
+            keyText: The key's text as Qt reports it.
+            modifiers: The keyboard modifiers held with the key.
+
+        Returns:
+            ``(separator, resync)`` — the separator character committed
+            with the word, and whether the caller may run the post-commit
+            resync.
+        """
+        if key == Qt.Key.Key_Return:
+            if modifiers & Qt.KeyboardModifier.ControlModifier.value:
+                return "", False
+            return "\n", True
+        return keyText, True
+
+    # ==========================================================================
+    def _edgeCommit(self, moveLeft: bool) -> bool:
+        """The edge decision: move in visual order, never write.
+
+        Nothing is written to the document. Left at the visually left edge
+        (the start of the overlay text) moves to the next Arabic word;
+        Right at the visually right edge (the end) to the previous one.
+        When that word exists, the cursor lands at its edge facing the
+        active word — Left at its start, Right at its end — and the
+        post-commit resync re-activates the overlay over the landed word
+        (a cursor at the word's end is over the word). With no adjacent
+        word — the commit landed on a boundary word, whose far side is
+        only whitespace — the overlay is closed and the resync skipped, so
+        the deactivation sticks and the cursor rests at the boundary edge
+        (Left at the word's end, Right at its start) until the next
+        trigger.
+
+        Args:
+            moveLeft: Whether the committing key was ``Key_Left``.
+
+        Returns:
+            Whether the caller may run the post-commit resync.
+        """
+        if self._activeWord is not None:
+            reference = self._activeWord[1] if moveLeft else self._activeWord[0]
+        else:
+            reference = self._anchorPosition or 0
+        adjacent = self._adjacentWord(reference, backwards=not moveLeft)
+        if adjacent is None:
+            # No adjacent word: the commit landed on a boundary word,
+            # whose far side is only whitespace (the cursor has walked
+            # off the paragraph's word run). The deactivation must stick,
+            # so the resync is skipped — the landing edge is over the
+            # active word and the resync would only re-trigger the
+            # overlay the user is leaving, pinning the cursor on the
+            # boundary word.
+            if self._activeWord is not None:
+                cursor = self.textCursor()
+                cursor.setPosition(self._activeWord[1 if moveLeft else 0])
+                self.setTextCursor(cursor)
+            self._deactivateOverlay()
+            return False
+        cursor = self.textCursor()
+        cursor.setPosition(adjacent[0 if moveLeft else 1])
+        self.setTextCursor(cursor)
+        return True
+
+    # ==========================================================================
+    def _writeCommit(self, word: str, separator: str, typedRoman: str) -> None:
+        """The write: insert or replace the committed word, tagged RomanUrdu.
+
+        A separator-key commit inserts the committed word plus the
+        separator as a single undoable edit: over an existing word
+        (scenario 2) the word's span is replaced, at a bare cursor
+        (scenario 1) the text is inserted at the anchor position — or, if
+        the cursor had a selection, that selection is replaced. The word
+        and the separator both carry the :class:`RomanUrdu` region
+        background. The writing commit signals :attr:`regionsChanged` once
+        — every writing commit changes region state (word and separator
+        land tagged RomanUrdu, replacing whatever kinds the destination
+        carried), and the emission is unconditional (Q-2 contract: no
+        per-commit comparison, so the signal costs nothing per keystroke)
+        — and a non-empty committed word also signals
+        ``romanWordCommitted``. The widget cursor follows the
+        document-cursor edit, and the overlay is deactivated.
+        """
+        cursor = self.textCursor()
+        fmt = QTextCharFormat()
+        fmt.setBackground(QBrush(self._regionColors[RegionType.RomanUrdu]))
+        if self._activeWord is not None:
+            start, end = self._activeWord
+            cursor.setPosition(start)
+            cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+        elif self._selectionRange is not None:
+            # Scenario 1 over a selection: replace the selection,
+            # plain QPlainTextEdit typing semantics.
+            start, end = self._selectionRange
+            cursor.setPosition(start)
+            cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+        else:
+            cursor.setPosition(self._anchorPosition or 0)
+        cursor.insertText(word + separator, fmt)
+        self.regionsChanged.emit()
+        if word:
+            self.romanWordCommitted.emit(word, typedRoman)
+        self.setTextCursor(cursor)
+        self._deactivateOverlay()
 
     # ==========================================================================
     def _adjacentWord(self, reference: int, backwards: bool) -> tuple[int, int] | None:
