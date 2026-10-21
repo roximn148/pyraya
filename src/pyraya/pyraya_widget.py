@@ -17,7 +17,7 @@ identified by a unique background color, compared including its alpha
 channel.
 """
 
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Generator, Iterable, Sequence
 from typing import cast
 
 from PySide6.QtCore import QPoint, QRect, QRegularExpression, Qt, Signal
@@ -208,25 +208,58 @@ class PyRayaHighlighter(QSyntaxHighlighter):
         self._underlineUnknownWords(block)
 
     # ==========================================================================
+    def _uniformRuns(self, start: int, end: int) -> Generator[tuple[int, int, QTextCharFormat]]:
+        """Yield maximal runs of equal current layout format within a range.
+
+        Consecutive characters whose current layout formats compare equal
+        by :class:`QTextCharFormat`'s property-orientated equality would
+        otherwise be rewritten identically, one write per character: the
+        caller can paint one merged write per yielded run instead. The
+        yielded templates are per-run copies — mutating one does not
+        affect the buffer.
+
+        Args:
+            start: The first block-local position of the range.
+            end: The position one past the range.
+
+        Yields:
+            ``(start, length, format)`` triples covering the range in
+            order.
+        """
+        if start >= end:
+            return
+        runStart = start
+        runFormat = self.format(start)
+        for position in range(start + 1, end):
+            charFormat = self.format(position)
+            if charFormat != runFormat:
+                yield runStart, position - runStart, runFormat
+                runStart = position
+                runFormat = charFormat
+        yield runStart, end - runStart, runFormat
+
+    # ==========================================================================
     def _paintDefaultRegions(self, block: str) -> None:
         """Paint runs without a recognized region background.
 
         Runs are painted with the
         :data:`~pyraya.regions.DefaultRegionKind` background in the text
         layout; the document's character formats are not modified. The
-        pass derives *which* runs need the paint — from the identity
-        rule — out of the block's format runs, one document-format read
-        per run, tagged runs skipped whole; the per-character position
-        loop that preceded it read the document once per character.
-        Inside an untagged run the background is merged into each
-        character's current layout format (read back with
-        :meth:`format`) rather than painted as a background-only
-        write: ``QSyntaxHighlighter.setFormat`` replaces the whole
-        per-character format, so a background-only write would wipe the
-        rules' foregrounds — untagged text would fall back to the
-        default ink instead of the rule colors, and with visible
+        pass derives *which* runs need the paint from the block's format
+        runs — one document-format read per run, tagged runs skipped
+        whole; the per-character position loop that preceded it read the
+        document once per character. Inside an untagged run the
+        background is merged into each character's current layout format
+        (read back with :meth:`format`) rather than painted as a
+        background-only write: ``QSyntaxHighlighter.setFormat`` replaces
+        the whole per-character format, so a background-only write would
+        wipe the rules' foregrounds — untagged text would fall back to
+        the default ink instead of the rule colors, and with visible
         whitespace the space's designed light-gray dot would render as a
-        heavy black mark.
+        heavy black mark. The merged writes collapse to per uniform run
+        (:meth:`_uniformRuns`): characters whose current layout formats
+        compare equal are rewritten once, which writes exactly the
+        per-character formats the per-character loop wrote.
 
         Args:
             block: The text of the block being highlighted.
@@ -240,10 +273,10 @@ class PyRayaHighlighter(QSyntaxHighlighter):
             if self._hasRegionBackground(fragment.charFormat()):
                 continue
             end = min(start + fragment.length(), limit)
-            for position in range(max(start, 0), end):
-                merged = self.format(position)
-                merged.setBackground(QBrush(self._regionColors[DefaultRegionKind]))
-                self.setFormat(position, 1, merged)
+            background = self._regionColors[DefaultRegionKind]
+            for runStart, runLength, runFormat in self._uniformRuns(max(start, 0), end):
+                runFormat.setBackground(QBrush(background))
+                self.setFormat(runStart, runLength, runFormat)
 
     # ==========================================================================
     def _hasRegionBackground(self, charFormat: QTextCharFormat) -> bool:
@@ -328,11 +361,10 @@ class PyRayaHighlighter(QSyntaxHighlighter):
         for start, end in candidates:
             if engine.hasWord(block[start:end]):
                 continue
-            for pos in range(start, end):
-                merged = self.format(pos)
-                merged.setUnderlineStyle(QTextCharFormat.UnderlineStyle.SpellCheckUnderline)
-                merged.setUnderlineColor(SpellCheckUnderlineColor)
-                self.setFormat(pos, 1, merged)
+            for runStart, runLength, runFormat in self._uniformRuns(start, end):
+                runFormat.setUnderlineStyle(QTextCharFormat.UnderlineStyle.SpellCheckUnderline)
+                runFormat.setUnderlineColor(SpellCheckUnderlineColor)
+                self.setFormat(runStart, runLength, runFormat)
 
     # ==========================================================================
     def _blockRegionRuns(self, limit: int) -> list[tuple[int, int, RegionType]]:

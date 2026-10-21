@@ -141,6 +141,23 @@ def _keypressIntoParagraph(attribution: bool) -> float:
     return ms
 
 
+def _keypressTypingIntoParagraph() -> float:
+    """One Arabic keypress into the 4 k fixture: it types and re-highlights.
+
+    An ASCII key with the cursor inside a RomanUrdu word seeds the
+    overlay and never edits the document; a keypress that *types* is the
+    path the per-keystroke highlighter work runs on (an edit re-highlights
+    the block). An Arabic key types straight into the document, so this
+    row measures typing, block re-highlight, layout, and the overlay sync
+    over an actually edited paragraph.
+    """
+    widget = _prepareWidget(_fixture("01-4k-para.txt", True))
+    before = widget.toPlainText()
+    ms = _milliseconds(lambda: _sendKey(widget, Qt.Key.Key_S.value, "س"))
+    assert len(widget.toPlainText()) == len(before) + 1, "the keypress must type"
+    return ms
+
+
 def _keypressWithSelection(chars: int) -> float:
     """One 'k' keypress into a whole-document selection in a big fixture."""
     name = "02-50k-doc.txt"
@@ -162,6 +179,10 @@ def testTypingKeystrokes(app) -> None:  # noqa: ARG001
     _report(
         "same keypress, highlighter detached (attribution)",
         _keypressIntoParagraph(attribution=True),
+    )
+    _report(
+        "one keypress typing into 4 000 chars (edit + re-highlight)",
+        _keypressTypingIntoParagraph(),
     )
     _report(
         "one keypress, 50 000-char document with selection",
