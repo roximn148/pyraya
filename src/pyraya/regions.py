@@ -69,10 +69,14 @@ DefaultRegionKind: RegionType = RegionType.RomanUrdu
 # ******************************************************************************
 #: Background colors identifying the region kinds.
 #:
-#: A color is a kind's identity and is compared including the alpha channel,
-#: so two kinds may share RGB values only if their alpha values differ.
-#: Every kind must have a unique color; ``PyRaya.setRegionColor`` rejects
-#: colors that collide with another kind's color.
+#: This module-level mapping is the **default palette**: every ``PyRaya``
+#: widget copies it at construction and each widget owns its own mapping,
+#: so one widget's ``PyRaya.setRegionColor`` never touches another's
+#: identities. A color is a kind's identity and is compared including the
+#: alpha channel, so two kinds may share RGB values only if their alpha
+#: values differ. Every kind of a widget's palette must have a unique
+#: color; ``PyRaya.setRegionColor`` rejects colors that collide with
+#: another kind of that widget's palette.
 RegionColors: dict[RegionType, QColor] = {
     RegionType.Latin: QColor(0x60, 0xA5, 0xFA, 30),
     RegionType.RomanUrdu: QColor(0xF5, 0x9E, 0x0B, 30),

@@ -101,6 +101,10 @@ class PyRayaHighlighter(QSyntaxHighlighter):
             dictionary membership; ``None`` disables the pass. When
             provided, the pass is gated by the highlighter's own
             :meth:`isSpellCheckEnabled` flag.
+        colors: The palette mapping each :class:`~pyraya.regions.RegionType`
+            to its identity background color. A highlighter created by
+            ``PyRaya`` shares the widget's own palette here; omitted, a
+            copy of the module-level default palette is used.
     """
 
     # ==========================================================================
@@ -108,10 +112,12 @@ class PyRayaHighlighter(QSyntaxHighlighter):
         self,
         document: QTextDocument,
         engineProvider: Callable[[], RomanInputEngine | None] | None = None,
+        colors: dict[RegionType, QColor] | None = None,
     ) -> None:
         super().__init__(document)
         self._engineProvider = engineProvider
         self._spellCheckEnabled = True
+        self._regionColors = dict(RegionColors) if colors is None else colors
         self._rules: list[tuple[QRegularExpression, QTextCharFormat]] = []
         self._installDefaultRules()
 
@@ -202,15 +208,14 @@ class PyRayaHighlighter(QSyntaxHighlighter):
             if self._hasRegionBackground(cursor.charFormat()):
                 continue
             merged = self.format(position)
-            merged.setBackground(QBrush(RegionColors[DefaultRegionKind]))
+            merged.setBackground(QBrush(self._regionColors[DefaultRegionKind]))
             self.setFormat(position, 1, merged)
 
     # ==========================================================================
-    @staticmethod
-    def _hasRegionBackground(charFormat: QTextCharFormat) -> bool:
+    def _hasRegionBackground(self, charFormat: QTextCharFormat) -> bool:
         """Return True if the format carries a recognized region background."""
         color = charFormat.background().color()
-        return any(color == regionColor for regionColor in RegionColors.values())
+        return any(color == regionColor for regionColor in self._regionColors.values())
 
     # ==========================================================================
     def setSpellCheckEnabled(self, enabled: bool) -> None:
@@ -302,7 +307,7 @@ class PyRayaHighlighter(QSyntaxHighlighter):
         cursor = QTextCursor(self.document())
         cursor.setPosition(position + 1)
         color = cursor.charFormat().background().color()
-        for kind, regionColor in RegionColors.items():
+        for kind, regionColor in self._regionColors.items():
             if color == regionColor:
                 return kind
         return DefaultRegionKind
@@ -409,7 +414,13 @@ class PyRaya(QPlainTextEdit):
         self._mouseActive = False
         self._minOverlayWidth: int = 0
         self._overlay: RomanOverlay | None = None
-        self._highlighter = PyRayaHighlighter(self.document(), engineProvider=self._spellEngine)
+        # Per-widget region palette (Q-1 decision): the widget copies the
+        # module-level default palette at construction and owns its colors;
+        # the highlighter shares the same mapping so recolours repaint.
+        self._regionColors: dict[RegionType, QColor] = dict(RegionColors)
+        self._highlighter = PyRayaHighlighter(
+            self.document(), engineProvider=self._spellEngine, colors=self._regionColors
+        )
         # Aligning the initial (empty) document records an undo command;
         # disable undo/redo around it so no phantom command is left behind.
         document = self.document()
@@ -624,11 +635,15 @@ class PyRaya(QPlainTextEdit):
 
     # ==========================================================================
     def setRegionColor(self, kind: RegionType, color: QColor) -> bool:
-        """Change the background color used for a region type.
+        """Change the widget's background color for a region type.
 
-        Existing regions of that type are recoloured immediately. Because a
-        color is a kind's identity, colors are compared — and must remain
-        unique — including the alpha channel; a color equal to another
+        The palette is per widget: the change recolours this widget's
+        regions of ``kind`` immediately and updates this widget's palette,
+        leaving the module-level
+        :data:`~pyraya.regions.RegionColors` default and other widgets'
+        palettes untouched. Because a color is a kind's identity, colors
+        are compared — and must remain unique across the widget's own
+        palette — including the alpha channel; a color equal to another
         kind's color is rejected.
 
         Args:
@@ -637,14 +652,15 @@ class PyRaya(QPlainTextEdit):
 
         Returns:
             True if the color was applied; False if it equals another
-            kind's color (including its alpha channel).
+            kind's color of this widget's palette (including its alpha
+            channel).
         """
         color = QColor(color)
-        for otherKind, otherColor in RegionColors.items():
+        for otherKind, otherColor in self._regionColors.items():
             if otherKind == kind or color != otherColor:
                 continue
             return False
-        oldColor = RegionColors[kind]
+        oldColor = self._regionColors[kind]
         if color == oldColor:
             return True
         # Block the document signals while the characters are recoloured: a
@@ -664,7 +680,7 @@ class PyRaya(QPlainTextEdit):
                     cursor.mergeCharFormat(fmt)
         finally:
             document.blockSignals(False)
-        RegionColors[kind] = color
+        self._regionColors[kind] = color
         self._highlighter.rehighlight()
         self.regionsChanged.emit()
         return True
@@ -734,6 +750,21 @@ class PyRaya(QPlainTextEdit):
             The same in-memory :class:`Vocabulary` instance, every time.
         """
         return self._localDictionary
+
+    # ==========================================================================
+    def regionColors(self) -> dict[RegionType, QColor]:
+        """Return the widget's region palette as a copy.
+
+        The palette maps every :class:`~pyraya.regions.RegionType` to the
+        background color that identifies it on this widget. It starts as a
+        copy of the module-level :data:`~pyraya.regions.RegionColors`
+        default; :meth:`setRegionColor` mutates the widget's own palette,
+        never the module default and never another widget's palette.
+
+        Returns:
+            A copy of the per-widget ``kind -> color`` mapping.
+        """
+        return dict(self._regionColors)
 
     # ==========================================================================
     def romanEngine(self) -> RomanInputEngine | None:
@@ -1451,7 +1482,7 @@ class PyRaya(QPlainTextEdit):
             else:
                 cursor = self.textCursor()
                 fmt = QTextCharFormat()
-                fmt.setBackground(QBrush(RegionColors[RegionType.RomanUrdu]))
+                fmt.setBackground(QBrush(self._regionColors[RegionType.RomanUrdu]))
                 if self._activeWord is not None:
                     start, end = self._activeWord
                     cursor.setPosition(start)
@@ -1716,7 +1747,7 @@ class PyRaya(QPlainTextEdit):
         cursor.setPosition(start)
         cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
         fmt = QTextCharFormat()
-        fmt.setBackground(QBrush(RegionColors[kind]))
+        fmt.setBackground(QBrush(self._regionColors[kind]))
         cursor.mergeCharFormat(fmt)
         self.viewport().update()
 
@@ -1736,7 +1767,7 @@ class PyRaya(QPlainTextEdit):
         cursor.setPosition(start)
         cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
         fmt = QTextCharFormat()
-        fmt.setBackground(QBrush(RegionColors[DefaultRegionKind]))
+        fmt.setBackground(QBrush(self._regionColors[DefaultRegionKind]))
         cursor.mergeCharFormat(fmt)
         self.viewport().update()
 
@@ -1781,7 +1812,7 @@ class PyRaya(QPlainTextEdit):
         that every character belongs to exactly one kind.
         """
         color = self._charFormatAt(position).background().color()
-        for kind, regionColor in RegionColors.items():
+        for kind, regionColor in self._regionColors.items():
             if color == regionColor:
                 return kind
         return DefaultRegionKind

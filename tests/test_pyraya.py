@@ -426,18 +426,40 @@ def testClearRegionsResetsToDefault(app: QApplication) -> None:
 
 # ******************************************************************************
 def testSetRegionColorRecolours(app: QApplication) -> None:
-    """setRegionColor recolors existing regions and updates the default."""
+    """setRegionColor recolors existing regions and the widget's palette.
+
+    The module-level default palette stays untouched: the recolour is a
+    widget-local change.
+    """
     widget = PyRaya()
     widget.setPlainText("abcd")
     widget.setRegionType(RegionType.Latin, 0, 4)
-    original = RegionColors[RegionType.Latin]
     newColor = QColor("#34D399")
-    try:
-        widget.setRegionColor(RegionType.Latin, newColor)
-        assert widget.regionTypeAt(1) is RegionType.Latin
-        assert RegionColors[RegionType.Latin].name() == newColor.name()
-    finally:
-        RegionColors[RegionType.Latin] = original
+    assert widget.setRegionColor(RegionType.Latin, newColor) is True
+    assert widget.regionTypeAt(1) is RegionType.Latin
+    assert widget.regionColors()[RegionType.Latin].name() == "#34d399"
+    assert RegionColors[RegionType.Latin].name() == "#60a5fa"
+
+
+# ******************************************************************************
+def testRegionColorPaletteIsPerWidget(app: QApplication) -> None:
+    """Each widget owns its palette: recolouring one leaves another alone.
+
+    The palette maps region kinds to their identity colors per widget, so
+    a recolour in one widget cannot break another widget's identity map
+    (which would retag its existing text by leaving the old colors
+    unrecognized).
+    """
+    w1 = PyRaya()
+    w1.setPlainText("abcd")
+    w2 = PyRaya()
+    w2.setPlainText("abcd")
+    w2.setRegionType(RegionType.Latin, 0, 4)
+
+    assert w1.setRegionColor(RegionType.Latin, QColor("#34D399")) is True
+
+    assert w2.regionColors()[RegionType.Latin].name() == "#60a5fa"
+    assert w2.regionTypeAt(0) is RegionType.Latin
 
 
 # ******************************************************************************
@@ -722,17 +744,15 @@ def testUndoOfFirstTypedCharacterDeletesIt(app: QApplication) -> None:
 
 # ******************************************************************************
 def testSetRegionColorRejectsDuplicateColor(app: QApplication) -> None:
-    """setRegionColor rejects a color equal to another kind's color,
-    including the alpha channel, and leaves the state unchanged."""
+    """setRegionColor rejects a color equal to another kind's color of the
+    widget's own palette, including the alpha channel, and leaves the
+    state unchanged."""
     widget = PyRaya()
     widget.setPlainText("abcd")
     widget.setRegionType(RegionType.RomanUrdu, 2, 4)
-    originalRoman = RegionColors[RegionType.RomanUrdu]
-    try:
-        assert widget.setRegionColor(RegionType.RomanUrdu, QColor(0x60, 0xA5, 0xFA, 30)) is False
-        assert widget.regions() == [TextRegion(0, 4, DefaultRegionKind)]
-    finally:
-        RegionColors[RegionType.RomanUrdu] = originalRoman
+    assert widget.setRegionColor(RegionType.RomanUrdu, QColor(0x60, 0xA5, 0xFA, 30)) is False
+    assert widget.regions() == [TextRegion(0, 4, DefaultRegionKind)]
+    assert widget.regionColors()[RegionType.RomanUrdu].name() == "#f59e0b"
 
 
 # ******************************************************************************
@@ -742,14 +762,10 @@ def testSetRegionColorAlphaIsIdentity(app: QApplication) -> None:
     widget = PyRaya()
     widget.setPlainText("abcd")
     widget.setRegionType(RegionType.RomanUrdu, 2, 4)
-    originalRoman = RegionColors[RegionType.RomanUrdu]
-    try:
-        assert widget.setRegionColor(RegionType.RomanUrdu, QColor(0x60, 0xA5, 0xFA, 100)) is True
-        assert widget.regions() == [TextRegion(0, 4, DefaultRegionKind)]
-        assert widget.regionTypeAt(3) is RegionType.RomanUrdu
-        assert widget.regionTypeAt(1) is DefaultRegionKind
-    finally:
-        RegionColors[RegionType.RomanUrdu] = originalRoman
+    assert widget.setRegionColor(RegionType.RomanUrdu, QColor(0x60, 0xA5, 0xFA, 100)) is True
+    assert widget.regions() == [TextRegion(0, 4, DefaultRegionKind)]
+    assert widget.regionTypeAt(3) is RegionType.RomanUrdu
+    assert widget.regionTypeAt(1) is DefaultRegionKind
 
 
 # ******************************************************************************
