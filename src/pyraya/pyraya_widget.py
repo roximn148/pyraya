@@ -17,7 +17,7 @@ identified by a unique background color, compared including its alpha
 channel.
 """
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from typing import cast
 
 from PySide6.QtCore import QPoint, QRect, QRegularExpression, Qt, Signal
@@ -32,6 +32,7 @@ from PySide6.QtGui import (
     QMouseEvent,
     QResizeEvent,
     QSyntaxHighlighter,
+    QTextBlock,
     QTextBlockFormat,
     QTextCharFormat,
     QTextCursor,
@@ -679,18 +680,21 @@ class PyRaya(QPlainTextEdit):
         # Block the document signals while the characters are recoloured: a
         # re-highlight mid-loop would treat the new color as unrecognized (it
         # is not in RegionColors yet) and repaint the recoloured characters
-        # back to the default kind.
+        # back to the default kind. The recolour walks format runs — one
+        # merge per maximal same-color run — instead of one read and one
+        # merge per character.
         document = self.document()
         document.blockSignals(True)
         try:
-            for position in range(document.characterCount() - 1):
-                if self._charFormatAt(position).background().color() == oldColor:
-                    cursor = self.textCursor()
-                    cursor.setPosition(position)
-                    cursor.setPosition(position + 1, QTextCursor.MoveMode.KeepAnchor)
-                    fmt = QTextCharFormat()
-                    fmt.setBackground(QBrush(color))
-                    cursor.mergeCharFormat(fmt)
+            fmt = QTextCharFormat()
+            fmt.setBackground(QBrush(color))
+            for start, end, runColor in self._backgroundRuns():
+                if runColor != oldColor:
+                    continue
+                cursor = self.textCursor()
+                cursor.setPosition(start)
+                cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+                cursor.mergeCharFormat(fmt)
         finally:
             document.blockSignals(False)
         self._regionColors[kind] = color
@@ -1805,24 +1809,92 @@ class PyRaya(QPlainTextEdit):
 
     # ==========================================================================
     def _regionSpans(self) -> list[TextRegion]:
-        """Reconstruct region spans from the document's character formats.
+        """Reconstruct region spans from the document's format runs.
 
         Every character belongs to exactly one region kind — text without a
         recognized region background counts as
         :data:`~pyraya.regions.DefaultRegionKind` — so the spans partition
-        the whole text. The trailing terminator character of the last block
-        is never part of a region, so the scan stops before it.
+        the whole text. The walk reads whole format runs (one fragment
+        carries one char format, hence one kind) instead of one char-format
+        read per character, which keeps large-document scans orders of
+        magnitude cheaper; block separators are not fragments, so each
+        separator's kind is read through :meth:`_charFormatAt` — the same
+        observable a per-character scan sees. Adjacent runs of one kind are
+        merged into one span even when their observed backgrounds differ
+        (untagged NoBrush text beside tagged text of the default kind is
+        one region), exactly as a per-character kind scan merges. The
+        trailing terminator character of the last block is never part of a
+        region, so the walk stops before it.
         """
         spans: list[TextRegion] = []
-        limit = self.document().characterCount() - 1
-        position = 0
-        while position < limit:
-            kind = self._regionKindAt(position)
-            start = position
-            while position < limit and self._regionKindAt(position) == kind:
-                position += 1
-            spans.append(TextRegion(start, position, kind))
+        for start, end, color in self._backgroundRuns():
+            kind = self._kindForColor(color)
+            previous = spans[-1] if spans else None
+            if previous is not None and previous.kind == kind and previous.end == start:
+                spans[-1] = TextRegion(previous.start, end, kind)
+            else:
+                spans.append(TextRegion(start, end, kind))
         return spans
+
+    # ==========================================================================
+    def _kindForColor(self, color: QColor) -> RegionType:
+        """Map an observed background color to its region kind.
+
+        A background matching no color of the widget's palette belongs to
+        :data:`~pyraya.regions.DefaultRegionKind`, keeping the invariant
+        that every character belongs to exactly one kind.
+        """
+        for kind, regionColor in self._regionColors.items():
+            if color == regionColor:
+                return kind
+        return DefaultRegionKind
+
+    # ==========================================================================
+    def _backgroundRuns(self) -> list[tuple[int, int, QColor]]:
+        """Maximal character runs sharing one observed background color.
+
+        Returns ``(start, end, color)`` triples covering the real text
+        (``[0, characterCount() - 1)``) in document order, adjacent runs
+        merged when their observed colors are equal. Real characters are
+        read as format runs — one fragment carries one char format, hence
+        one color — while block separators are not fragments: each
+        separator's color is read through :meth:`_charFormatAt`, the same
+        observable a per-character scan sees. The trailing terminator is
+        excluded.
+        """
+        runs: list[tuple[int, int, QColor]] = []
+        document = self.document()
+        limit = document.characterCount() - 1
+        if limit <= 0:
+            return runs
+
+        def appendRun(start: int, end: int, color: QColor) -> None:
+            previous = runs[-1] if runs else None
+            if previous is not None and previous[1] == start and previous[2] == color:
+                runs[-1] = (previous[0], end, color)
+            else:
+                runs.append((start, end, color))
+
+        block = document.firstBlock()
+        while block.isValid():
+            # PySide6 has no iterator-increment API; forward iteration is the
+            # only way to walk a block's fragments, but the bundled stubs do
+            # not declare QTextBlock.__iter__ — hence the cast.
+            for it in cast("Iterable[QTextBlock.iterator]", block):
+                fragment = it.fragment()
+                start = fragment.position()
+                end = min(start + fragment.length(), limit)
+                if start < end:
+                    appendRun(start, end, fragment.charFormat().background().color())
+            separator = block.position() + block.length() - 1
+            if separator < limit:
+                appendRun(
+                    separator,
+                    separator + 1,
+                    self._charFormatAt(separator).background().color(),
+                )
+            block = block.next()
+        return runs
 
     # ==========================================================================
     def _regionKindAt(self, position: int) -> RegionType:
