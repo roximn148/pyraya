@@ -2365,7 +2365,7 @@ def testScenario1CommitReplacesSelection(app: QApplication) -> None:
     _sendKey(overlay.lineEdit(), Qt.Key.Key_Space, " ")
     assert widget.toPlainText() == "hello " + word + " "
     assert committed == [(word, "k")]
-    assert changed == []
+    assert changed == [1]  # a writing commit signals the region change
     assert not widget.textCursor().hasSelection()
     assert widget.textCursor().position() == 6 + len(word) + 1
     assert widget._regionKindAt(6) == RegionType.RomanUrdu
@@ -3022,7 +3022,8 @@ def testEmptyTextCommitDeletesSpan(app: QApplication) -> None:
     assert widget.textCursor().position() == 7  # cursor after the separator
     _assertNoOverlay(widget)
 
-    # a normal (non-empty) text-replacing commit does not emit regionsChanged
+    # every writing commit signals the region change; this one replaces
+    # the tagged word with the committed word tagged the same way
     widget2 = PyRaya()
     widget2.show()
     widget2.setPlainText("hello خوش world")
@@ -3035,7 +3036,35 @@ def testEmptyTextCommitDeletesSpan(app: QApplication) -> None:
     assert overlay2 is not None and overlay2.isVisible()
     _sendKey(overlay2.lineEdit(), Qt.Key.Key_Space, " ")
     assert widget2.toPlainText() == "hello خوش  world"
-    assert changed2 == []
+    assert changed2 == [1]
+
+
+# ******************************************************************************
+def testRetaggingCommitEmitsRegionsChanged(app: QApplication) -> None:
+    """A write commit that destroyed a region signals the region change.
+
+    The commit replaces the user's selection (a Latin island inside the
+    RomanUrdu run) with the committed word: the region map changes, so
+    ``regionsChanged`` fires for the writing commit.
+    """
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello خوش world")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.Latin, 2, 4)  # "ll" is a Latin island
+    cursor = widget.textCursor()
+    cursor.setPosition(0)
+    cursor.setPosition(6, QTextCursor.MoveMode.KeepAnchor)
+    widget.setTextCursor(cursor)
+    _sendKey(widget, Qt.Key.Key_K, "k")  # seeds the overlay over the selection
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+
+    changed = []
+    widget.regionsChanged.connect(lambda: changed.append(1))
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Space, " ")
+    assert changed == [1]
+    assert RegionType.Latin not in [span.kind for span in widget.regions()]
 
 
 # ******************************************************************************
@@ -3059,7 +3088,7 @@ def testEmptyDocumentScenario1Commit(app: QApplication) -> None:
     _sendKey(overlay.lineEdit(), Qt.Key.Key_Space, " ")
     assert widget.toPlainText() == word + " "
     assert committed == [(word, "k")]
-    assert changed == []
+    assert changed == [1]  # a writing commit signals the region change
     assert not widget.textCursor().hasSelection()
     assert widget.textCursor().position() == len(word) + 1
     assert widget._regionKindAt(0) == RegionType.RomanUrdu

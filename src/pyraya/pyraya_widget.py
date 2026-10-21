@@ -367,6 +367,13 @@ class PyRaya(QPlainTextEdit):
     resets the text to that kind.
     """
 
+    #: Emitted once when a region-touching operation invoked through the
+    #: widget has completed: :meth:`setRegionType`, :meth:`clearRegions`,
+    #: a successful :meth:`setRegionColor`, a non-empty
+    #: :meth:`setPlainText`, and every roman-input commit that writes text
+    #: (edge commits write nothing and do not emit). Document edits made
+    #: outside these operations are never inspected for region changes
+    #: and do not emit — this keeps the signal cost-free during typing.
     regionsChanged = Signal()
 
     #: Emitted when a roman-input commit writes a word to the document:
@@ -1407,9 +1414,11 @@ class PyRaya(QPlainTextEdit):
         commit skips the resync, so the dismissed overlay is not re-triggered
         and the cursor rests at the inserted word's end.
 
-        ``romanWordCommitted`` is emitted for a non-empty committed word, and
-        ``regionsChanged`` only for an empty-text scenario-2 commit, which
-        deletes the word's span.
+        ``romanWordCommitted`` is emitted for a non-empty committed word,
+        and ``regionsChanged`` once for every writing commit (per the
+        Q-2 contract: :attr:`regionsChanged` means "a region-touching
+        operation invoked through the widget has completed"). An edge
+        commit writes nothing and emits neither.
         """
         engine = self.romanEngine()
         overlay = self._overlay
@@ -1487,9 +1496,6 @@ class PyRaya(QPlainTextEdit):
                     start, end = self._activeWord
                     cursor.setPosition(start)
                     cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
-                    if word == "":
-                        # The span is deleted; the region changed.
-                        self.regionsChanged.emit()
                 elif self._selectionRange is not None:
                     # Scenario 1 over a selection: replace the selection,
                     # plain QPlainTextEdit typing semantics.
@@ -1499,6 +1505,12 @@ class PyRaya(QPlainTextEdit):
                 else:
                     cursor.setPosition(self._anchorPosition or 0)
                 cursor.insertText(word + separator, fmt)
+                # Every writing commit changes region state: the word and
+                # separator land tagged RomanUrdu, replacing whatever kinds
+                # the destination carried. The emission is unconditional
+                # (Q-2 contract) — no per-commit comparison, so the signal
+                # costs nothing per keystroke.
+                self.regionsChanged.emit()
                 if word:
                     self.romanWordCommitted.emit(word, typedRoman)
                 self.setTextCursor(cursor)
