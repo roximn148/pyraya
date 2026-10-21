@@ -1892,24 +1892,23 @@ class PyRaya(QPlainTextEdit):
         """Apply the default alignment to the entire document.
 
         Uses the default block format alignment and ensures it is applied across
-        the entire document, without triggering new signals.
+        the entire document, without triggering new signals. The merge runs on a
+        throwaway document cursor: applying it through the widget's own cursor
+        would leave the whole document selected and make the next typed
+        character replace the text.
         """
         self.blockSignals(True)
+        try:
+            cursor = QTextCursor(self.document())
 
-        cursor = self.textCursor()
-        cursor.select(QTextCursor.SelectionType.Document)
+            to = self.document().defaultTextOption()
 
-        doc = self.document()
-        to = doc.defaultTextOption()
+            blockFormat = QTextBlockFormat()
+            blockFormat.setAlignment(to.alignment())
 
-        blockFormat = QTextBlockFormat()
-        blockFormat.setAlignment(to.alignment())
-
-        cursor.mergeBlockFormat(blockFormat)
-
-        self.setTextCursor(cursor)
-
-        self.blockSignals(False)
+            cursor.mergeBlockFormat(blockFormat)
+        finally:
+            self.blockSignals(False)
 
 
 # ******************************************************************************

@@ -73,6 +73,42 @@ def testPyrayaRightAlignment(app: QApplication) -> None:
 
 
 # ******************************************************************************
+def testSetAlignmentLeavesTheCursorAlone(app: QApplication) -> None:
+    """setAlignment applies alignment without touching the cursor or text.
+
+    A populated document plus ``setAlignment`` must not leave a
+    document-wide selection behind: the next typed character would
+    replace the whole document.
+    """
+    widget = PyRaya()
+    widget.setPlainText("سلام دنیا")
+    cursor = widget.textCursor()
+    cursor.setPosition(int(len("سلام دنیا")))
+    widget.setTextCursor(cursor)
+    widget.setAlignment(Qt.AlignmentFlag.AlignRight)
+    after = widget.textCursor()
+    assert not after.hasSelection()
+    assert after.position() == cursor.position()
+    after.insertText("x")
+    assert widget.toPlainText() == "سلام دنیاx"
+
+
+# ******************************************************************************
+def testSetAlignmentPreservesASelection(app: QApplication) -> None:
+    """setAlignment keeps the user's own selection intact."""
+    widget = PyRaya()
+    widget.setPlainText("سلام دنیا")
+    cursor = widget.textCursor()
+    cursor.setPosition(0)
+    cursor.setPosition(4, QTextCursor.MoveMode.KeepAnchor)
+    widget.setTextCursor(cursor)
+    widget.setAlignment(Qt.AlignmentFlag.AlignRight)
+    after = widget.textCursor()
+    assert after.hasSelection()
+    assert (after.selectionStart(), after.selectionEnd()) == (0, 4)
+
+
+# ******************************************************************************
 def testPyrayaShowWhitespace(app: QApplication) -> None:
     """PyRaya enables the ShowTabsAndSpaces text option by default."""
     widget = PyRaya()
