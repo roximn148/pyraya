@@ -524,9 +524,10 @@ class PyRaya(QPlainTextEdit):
     #: widget has completed: :meth:`setRegionType`, :meth:`clearRegions`,
     #: a non-empty :meth:`setPlainText`, and every roman-input commit that
     #: writes text (edge commits write nothing and do not emit; a
-    #: regionsChanged is view-only and emits nothing). Document edits made
-    #: outside these operations are never inspected for region changes
-    #: and do not emit — this keeps the signal cost-free during typing.
+    #: recolouring :meth:`setRegionColor` is view-only and emits nothing).
+    #: Document edits made outside these operations are never inspected
+    #: for region changes and do not emit — this keeps the signal
+    #: cost-free during typing.
     regionsChanged = Signal()
 
     #: Emitted when a roman-input commit writes a word to the document:
@@ -734,12 +735,15 @@ class PyRaya(QPlainTextEdit):
     def undo(self) -> None:
         """Undo the last command, repainting a tag write's layout tint.
 
-        Format-only tag writes (and their undo) do not trigger a
-        re-highlight — Qt sees no text change — so a region write raises
-        :attr:`_pendingTagRepaint` on its way into the history; when this
-        undo made its layout stale, one re-highlight repairs it boundedly
-        (at most one whole-document re-highlight per undo chain after a
-        tag write).
+        A region write raises :attr:`_pendingTagRepaint` on its way into
+        the history; when this undo made its layout stale, one
+        re-highlight repairs it boundedly (at most one whole-document
+        re-highlight per undo chain after a tag write). Measured: Qt
+        also auto-re-highlights an undo on its own ``contentsChange``
+        reactions, so this override is belt-and-braces — and it covers
+        the *programmatic* path only (``widget.undo()``); the keyboard
+        Ctrl+Z path goes through the widget control and Qt's own
+        re-highlight, not through this override.
         """
         super().undo()
         if self._pendingTagRepaint:
@@ -750,9 +754,10 @@ class PyRaya(QPlainTextEdit):
     def redo(self) -> None:
         """Redo the last undone command, repainting a tag write's tint.
 
-        Same bounded repair as :meth:`undo`: redoing a format-only tag
-        write re-highlights here instead of waiting for an unrelated
-        event.
+        Same bounded repair as :meth:`undo`: redoing a tag write
+        re-highlights here instead of waiting for an unrelated event —
+        programmatic redo only (the keyboard path is Qt's own
+        re-highlight).
         """
         super().redo()
         if self._pendingTagRepaint:
@@ -2217,17 +2222,21 @@ class PyRaya(QPlainTextEdit):
         (:meth:`_clampRange` — the trailing terminator never participates,
         merges across it are silently dropped) and the kind is written as
         the :data:`~pyraya.regions.RegionKindProperty` custom property
-        merged over the selection on a throwaway document cursor: format
-        changes are undoable (one step) and survive edits, and nothing
-        else stores region data. A format-only write does not trigger a
-        re-highlight, so the affected blocks are re-highlighted here
-        (:meth:`_rehighlightTags`) and :attr:`_pendingTagRepaint` is
-        raised for the undo/redo repair.
+        merged over the selection on a throwaway document cursor (a
+        widget-cursor copy would also work — its position writes do not
+        move the widget cursor — but the fresh cursor is the one
+        convention the module owns). Format changes are undoable (one
+        step) and survive edits, and nothing else stores region data.
+        The tint is driven explicitly: the affected blocks are
+        re-highlighted here (:meth:`_rehighlightTags`) and
+        :attr:`_pendingTagRepaint` is raised for the undo/redo repair —
+        Qt also auto-re-highlights the write and its undo/redo with its
+        own pass, making the explicit one belt-and-braces on top.
         """
         start, end = self._clampRange(start, end)
         if start >= end:
             return
-        cursor = self.textCursor()
+        cursor = QTextCursor(self.document())
         cursor.setPosition(start)
         cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
         fmt = QTextCharFormat()
@@ -2241,10 +2250,13 @@ class PyRaya(QPlainTextEdit):
     def _rehighlightTags(self, start: int, end: int) -> None:
         """Re-highlight the blocks a stored-tag write touched.
 
-        Qt does not re-highlight a format-only ``mergeCharFormat`` write
-        (nor its undo), so the tint must be driven explicitly: one
-        ``rehighlightBlock`` per block overlapping ``[start, end)``,
+        One ``rehighlightBlock`` per block overlapping ``[start, end)``,
         bouncing over the same block span the property walk covers.
+        Measured (probes): Qt auto-re-highlights a property-only
+        ``mergeCharFormat`` write and its undo/redo on its own
+        ``contentsChange`` reactions, so this explicit pass is
+        belt-and-braces — kept because the widget's repair guarantee
+        must not rest on an undocumented Qt reaction.
         """
         block = self.document().findBlock(start)
         while block.isValid() and block.position() < end:

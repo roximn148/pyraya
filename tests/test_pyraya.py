@@ -896,6 +896,13 @@ def testUndoOfRegionWriteRepaintsTheLayout(app: QApplication) -> None:
     assert set(backgrounds) == {0, 1, 2, 3}
     assert all(bg == wash for bg in backgrounds.values())
 
+    # The redo restores both the property and the tint in the same call.
+    widget.redo()
+    assert readBackgrounds() == {0: wash, 1: None, 2: None, 3: wash}
+    for position in (1, 2):
+        assert widget._charFormatAt(position).hasProperty(RegionKindProperty)
+        assert widget.regionTypeAt(position) is RegionType.Native
+
 
 # ******************************************************************************
 def testSeedIsReadOnlyAfterConstruction(app: QApplication) -> None:
