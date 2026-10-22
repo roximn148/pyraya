@@ -496,7 +496,10 @@ def testRegionColorsReturnsAnIndependentCopy(app: QApplication) -> None:
     palette[RegionType.RomanUrdu].setGreen(1)
     assert RegionColors[RegionType.RomanUrdu].green() != 1
     w2 = PyRaya()
-    assert w2.regionColors()[RegionType.RomanUrdu].green() == RegionColors[RegionType.RomanUrdu].green()
+    assert (
+        w2.regionColors()[RegionType.RomanUrdu].green()
+        == RegionColors[RegionType.RomanUrdu].green()
+    )
 
 
 # ******************************************************************************

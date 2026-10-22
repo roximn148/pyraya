@@ -18,7 +18,14 @@ from .pyraya_widget import (
     PyRayaHighlighter,
     SpellCheckUnderlineColor,
 )
-from .regions import DefaultRegionKind, RegionColors, RegionType, TextRegion
+from .regions import (
+    RegionColors,
+    RegionKindProperty,
+    RegionType,
+    SeedRegionKind,
+    TextRegion,
+    resolveRegionKind,
+)
 from .roman_input import (
     ArabicScriptSeparators,
     MaxVisibleRows,
@@ -38,7 +45,9 @@ __all__ = [
     "RegionColors",
     "RegionType",
     "TextRegion",
-    "DefaultRegionKind",
+    "SeedRegionKind",
+    "RegionKindProperty",
+    "resolveRegionKind",
     "RomanInputEngine",
     "RomanOverlay",
     "ArabicScriptSeparators",

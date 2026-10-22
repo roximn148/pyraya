@@ -8,13 +8,13 @@ right-to-left (Nastaliq) Urdu text in Qt applications — currently PySide6 only
 
 PyRaya ships with a configurable, dedicated :class:`PyRayaHighlighter` that
 provides rule-based formatting for Urdu and mixed-script text, and supports
-text regions: spans tagged with a :class:`~pyraya.regions.RegionType` and
-rendered with a subtle, type-specific background color. Every character of
-the document belongs to exactly one region kind at all times — text without
-an explicit tag carries the background color of
-:data:`~pyraya.regions.DefaultRegionKind` — and each region kind is
-identified by a unique background color, compared including its alpha
-channel.
+text regions: spans tagged with a :class:`~pyraya.regions.RegionType` stored
+as a custom integer property on the document's character formats. Resolution
+is two steps — a stored tag wins, and untagged characters take the widget's
+seed kind (:meth:`PyRaya.seedRegionKind`) — so every character of the
+document reports exactly one region kind at any time. The palette is
+view-only: it tints the resolved kinds in the text layout and never feeds
+back into identity.
 """
 
 from collections.abc import Callable, Generator, Iterable, Sequence
@@ -45,13 +45,21 @@ from PySide6.QtGui import (
     QTextCharFormat,
     QTextCursor,
     QTextDocument,
+    QTextLayout,
     QTextLine,
     QTextOption,
 )
 from PySide6.QtWidgets import QLayout, QMenu, QPlainTextEdit, QWidget
 from romanalfaz.engine import Suggestion, Vocabulary
 
-from .regions import DefaultRegionKind, RegionColors, RegionType, TextRegion
+from .regions import (
+    RegionColors,
+    RegionKindProperty,
+    RegionType,
+    SeedRegionKind,
+    TextRegion,
+    resolveRegionKind,
+)
 from .roman_input import (
     ArabicScriptSeparators,
     OverlayLayoutSpacing,
@@ -134,49 +142,6 @@ def _wordRunAround(text: str, local: int) -> tuple[int, int] | None:
     return (start, end)
 
 
-def _regionColorMatch(color: QColor, palette: dict[RegionType, QColor]) -> RegionType | None:
-    """Return the palette entry kind an observed background color matches.
-
-    The single executor of the palette comparison: a color equal (including
-    the alpha channel) to a palette entry's color matches that entry's
-    kind; a color equal to no entry's color matches none and is reported
-    as ``None`` — the identity rule (:func:`_regionKindFor`) turns that
-    into the default kind.
-
-    Args:
-        color: The observed background color of a character or run.
-        palette: The palette whose colors carry the region identities.
-
-    Returns:
-        The :class:`~pyraya.regions.RegionType` the color matches, or
-        ``None`` when it matches no palette entry.
-    """
-    for kind, regionColor in palette.items():
-        if color == regionColor:
-            return kind
-    return None
-
-
-def _regionKindFor(color: QColor, palette: dict[RegionType, QColor]) -> RegionType:
-    """Map an observed background color to its region kind.
-
-    The single owner of the region identity rule: a background matching
-    a palette color identifies that palette entry's kind (through
-    :func:`_regionColorMatch`); a background matching no palette color
-    belongs to :data:`~pyraya.regions.DefaultRegionKind`, keeping the
-    invariant that every character belongs to exactly one kind.
-
-    Args:
-        color: The observed background color of a character or run.
-        palette: The palette whose colors carry the region identities.
-
-    Returns:
-        The :class:`~pyraya.regions.RegionType` the color identifies.
-    """
-    match = _regionColorMatch(color, palette)
-    return DefaultRegionKind if match is None else match
-
-
 def _charFormatAt(document: QTextDocument, position: int) -> QTextCharFormat:
     """Return the character format stored at a document offset.
 
@@ -199,28 +164,6 @@ def _charFormatAt(document: QTextDocument, position: int) -> QTextCharFormat:
     return cursor.charFormat()
 
 
-def _regionKindAt(
-    document: QTextDocument,
-    palette: dict[RegionType, QColor],
-    position: int,
-) -> RegionType:
-    """Return the region kind stored at a document character offset.
-
-    The single owner of the position-reading rule: the stored character
-    format at the offset (:func:`_charFormatAt`) observed through the
-    identity rule (:func:`_regionKindFor`).
-
-    Args:
-        document: The document to read.
-        palette: The palette whose colors carry the region identities.
-        position: The document character offset to observe.
-
-    Returns:
-        The :class:`~pyraya.regions.RegionType` stored at the offset.
-    """
-    return _regionKindFor(_charFormatAt(document, position).background().color(), palette)
-
-
 # ******************************************************************************
 class PyRayaHighlighter(QSyntaxHighlighter):
     """Rule-based formatting highlighter for Urdu and mixed-script text.
@@ -230,12 +173,14 @@ class PyRayaHighlighter(QSyntaxHighlighter):
     override earlier ones for overlapping matches, so broad rules should
     precede specific ones.
 
-    The highlighter also keeps the region invariant: on every re-highlight,
-    runs whose background matches no region color are painted with the
-    :data:`~pyraya.regions.DefaultRegionKind` background in the text
-    layout, which Qt merges with the document's character formats at
-    display time. That maintenance paints the layout rather than editing
-    the document, so it is not recorded in the document's undo stack and
+    The highlighter also paints the resolved region kinds into the text
+    layout: each character's kind — stored tag first, else the seed — is
+    merged with its kind's tint, while tint-less (Native) stretches get
+    their background explicitly removed. The pass derives *which* runs to
+    paint from the block's format runs, so it is one document-format read
+    per run; the writes are merged over the current per-character layout
+    formats so the rule foregrounds survive. The paint touches the layout
+    rather than the document, so it is not recorded in the undo stack and
     cannot bury user edits behind it.
 
     Args:
@@ -245,10 +190,14 @@ class PyRayaHighlighter(QSyntaxHighlighter):
             dictionary membership; ``None`` disables the pass. When
             provided, the pass is gated by the highlighter's own
             :meth:`isSpellCheckEnabled` flag.
-        colors: The palette mapping each :class:`~pyraya.regions.RegionType`
-            to its identity background color. A highlighter created by
-            ``PyRaya`` shares the widget's own palette here; omitted, a
-            copy of the module-level default palette is used.
+        colors: The palette mapping each tintable
+            :class:`~pyraya.regions.RegionType` to its view tint. A
+            highlighter created by ``PyRaya`` shares the widget's own
+            palette here; omitted, a copy of the module-level default
+            palette is used.
+        seed: The kind untagged characters resolve to. A highlighter
+            created by ``PyRaya`` shares the widget's seed; omitted, the
+            module-level :data:`~pyraya.regions.SeedRegionKind` is used.
     """
 
     # ==========================================================================
@@ -257,6 +206,7 @@ class PyRayaHighlighter(QSyntaxHighlighter):
         document: QTextDocument,
         engineProvider: Callable[[], RomanInputEngine | None] | None = None,
         colors: dict[RegionType, QColor] | None = None,
+        seed: RegionType | None = None,
     ) -> None:
         super().__init__(document)
         self._engineProvider = engineProvider
@@ -266,6 +216,7 @@ class PyRayaHighlighter(QSyntaxHighlighter):
             if colors is None
             else colors
         )
+        self._seed = SeedRegionKind if seed is None else seed
         self._rules: list[tuple[QRegularExpression, QTextCharFormat]] = []
         self._installDefaultRules()
 
@@ -306,10 +257,8 @@ class PyRayaHighlighter(QSyntaxHighlighter):
     def highlightBlock(self, block: str) -> None:
         """Apply the formatting rules to a single text block.
 
-        After the rules, characters without a recognized region
-        background get the
-        :data:`~pyraya.regions.DefaultRegionKind` background merged into
-        the text layout (:meth:`_paintDefaultRegions`). When spell
+        After the rules, every character's resolved kind is painted into
+        the text layout (:meth:`_paintResolvedKinds`). When spell
         check is enabled, RomanUrdu words the
         dictionary does not know additionally get the wavy spell-check
         underline, painted into the text layout only (see
@@ -325,7 +274,7 @@ class PyRayaHighlighter(QSyntaxHighlighter):
                 start = match.capturedStart(0)
                 length = match.capturedLength(0)
                 self.setFormat(start, length, charFormat)
-        self._paintDefaultRegions(block)
+        self._paintResolvedKinds(block)
         self._underlineUnknownWords(block)
 
     # ==========================================================================
@@ -360,27 +309,28 @@ class PyRayaHighlighter(QSyntaxHighlighter):
         yield runStart, end - runStart, runFormat
 
     # ==========================================================================
-    def _paintDefaultRegions(self, block: str) -> None:
-        """Paint runs without a recognized region background.
+    def _paintResolvedKinds(self, block: str) -> None:
+        """Merge every character's resolved kind's tint into the layout.
 
-        Runs are painted with the
-        :data:`~pyraya.regions.DefaultRegionKind` background in the text
-        layout; the document's character formats are not modified. The
-        pass derives *which* runs need the paint from the block's format
-        runs — one document-format read per run, tagged runs skipped
-        whole; the per-character position loop that preceded it read the
-        document once per character. Inside an untagged run the
-        background is merged into each character's current layout format
-        (read back with :meth:`format`) rather than painted as a
-        background-only write: ``QSyntaxHighlighter.setFormat`` replaces
-        the whole per-character format, so a background-only write would
-        wipe the rules' foregrounds — untagged text would fall back to
+        Each format run's kind is resolved in two steps (stored tag, else
+        the seed — :func:`~pyraya.regions.resolveRegionKind`) and its
+        kind's tint is merged into the text layout; the document's
+        character formats are not modified. Kinds the palette does not
+        colour (Native is colourless) are skipped — but explicitly: their
+        stretch's background is **removed**, because leaving it alone
+        would let the tint of a previous paint survive the re-tagging
+        (the layout format of a long-lived document is the last paint's
+        result, not a clean request). Only the background property is
+        decided here: the merged writes read the current per-character
+        layout format back (:meth:`format`) instead of painting as a
+        background-only write, because ``QSyntaxHighlighter.setFormat``
+        replaces the whole per-character format — a background-only
+        write would wipe the rules' foregrounds: text would fall back to
         the default ink instead of the rule colors, and with visible
         whitespace the space's designed light-gray dot would render as a
         heavy black mark. The merged writes collapse to per uniform run
         (:meth:`_uniformRuns`): characters whose current layout formats
-        compare equal are rewritten once, which writes exactly the
-        per-character formats the per-character loop wrote.
+        compare equal are rewritten once.
 
         Args:
             block: The text of the block being highlighted.
@@ -391,15 +341,13 @@ class PyRayaHighlighter(QSyntaxHighlighter):
         for it in cast("Iterable[QTextBlock.iterator]", current):
             fragment = it.fragment()
             start = fragment.position() - base
-            if (
-                _regionColorMatch(fragment.charFormat().background().color(), self._regionColors)
-                is not None
-            ):
-                continue
             end = min(start + fragment.length(), limit)
-            background = self._regionColors[DefaultRegionKind]
+            tint = self._regionColors.get(resolveRegionKind(fragment.charFormat(), self._seed))
             for runStart, runLength, runFormat in self._uniformRuns(max(start, 0), end):
-                runFormat.setBackground(QBrush(background))
+                if tint is None:
+                    runFormat.clearProperty(QTextCharFormat.Property.BackgroundBrush)
+                else:
+                    runFormat.setBackground(QBrush(tint))
                 self.setFormat(runStart, runLength, runFormat)
 
     # ==========================================================================
@@ -430,8 +378,9 @@ class PyRayaHighlighter(QSyntaxHighlighter):
         """Paint the wavy spell-check underline under unknown RomanUrdu words.
 
         The maximal Arabic-script runs whose ends both belong to RomanUrdu
-        regions are collected as candidate words first; with no candidates
-        the pass returns without touching the engine provider, so the
+        (by the two-step resolution) are collected as candidate words
+        first; with no candidates the pass returns without touching the
+        engine provider, so the
         engine (and its dictionary cold load) is created only the first
         time a block containing a candidate word is re-highlighted. The
         ends' kinds are resolved from the block's format runs — one
@@ -490,9 +439,11 @@ class PyRayaHighlighter(QSyntaxHighlighter):
     def _blockRegionRuns(self, limit: int) -> list[tuple[int, int, RegionType]]:
         """The current block's (start, end, kind) runs, block-local.
 
-        One document-format read per format run; runs cover the block's
-        text positions exactly (fragments partition the real text), so a
-        run-local kind lookup reproduces the per-character reads.
+        One document-format read per format run through
+        :func:`~pyraya.regions.resolveRegionKind` (stored tag first, then
+        the seed); runs cover the block's text positions exactly
+        (fragments partition the real text), so a run-local kind lookup
+        reproduces the per-character reads.
         """
         base = self.currentBlock().position()
         runs: list[tuple[int, int, RegionType]] = []
@@ -501,8 +452,7 @@ class PyRayaHighlighter(QSyntaxHighlighter):
             start = fragment.position() - base
             end = min(start + fragment.length(), limit)
             if start < end:
-                color = fragment.charFormat().background().color()
-                runs.append((start, end, _regionKindFor(color, self._regionColors)))
+                runs.append((start, end, resolveRegionKind(fragment.charFormat(), self._seed)))
         return runs
 
     # ==========================================================================
@@ -511,7 +461,7 @@ class PyRayaHighlighter(QSyntaxHighlighter):
         for start, end, kind in runs:
             if start <= position < end:
                 return kind
-        return DefaultRegionKind
+        return self._seed
 
     # ==========================================================================
     def _installDefaultRules(self) -> None:
@@ -561,20 +511,20 @@ class PyRaya(QPlainTextEdit):
     Configures right-to-left layout, right-aligned paragraphs, a configurable
     font stack (default ``Baloo Bhaijaan 2``, the first installed entry of
     :data:`PyRayaFonts` — the Naskh and Nastaliq Noto fonts follow it),
-    visible whitespace, a
-    dedicated rule-based :class:`PyRayaHighlighter` for formatting, and text
-    regions: spans tagged with a :class:`~pyraya.regions.RegionType` and
-    rendered with a subtle, type-specific background color. All text belongs
-    to exactly one region kind at any time — untagged text is the
-    :data:`~pyraya.regions.DefaultRegionKind` kind — and clearing regions
-    resets the text to that kind.
+    visible whitespace, a dedicated rule-based :class:`PyRayaHighlighter`
+    for formatting, and text regions: spans tagged with a
+    :class:`~pyraya.regions.RegionType` stored as a custom character-format
+    property. Every character resolves to exactly one kind — a stored tag
+    wins, and untagged text takes this widget's
+    :meth:`seedRegionKind` seed — and clearing regions removes the stored
+    tag intent.
     """
 
     #: Emitted once when a region-touching operation invoked through the
     #: widget has completed: :meth:`setRegionType`, :meth:`clearRegions`,
-    #: a successful :meth:`setRegionColor`, a non-empty
-    #: :meth:`setPlainText`, and every roman-input commit that writes text
-    #: (edge commits write nothing and do not emit). Document edits made
+    #: a non-empty :meth:`setPlainText`, and every roman-input commit that
+    #: writes text (edge commits write nothing and do not emit; a
+    #: regionsChanged is view-only and emits nothing). Document edits made
     #: outside these operations are never inspected for region changes
     #: and do not emit — this keeps the signal cost-free during typing.
     regionsChanged = Signal()
@@ -621,6 +571,12 @@ class PyRaya(QPlainTextEdit):
         self._suspendedOverlay: tuple[tuple[int, int] | None, int, str, int] | None = None
         self._selectionRange: tuple[int, int] | None = None
         self._committing = False
+        # Guarding :meth:`_syncOverlay` during :meth:`setPlainText`: the
+        # replacement signals with the cursor already over the new text, and a
+        # word under a RomanUrdu seed would seed the overlay over text that a
+        # subsequent region write may tag differently — the replacement itself
+        # is not a typing or cursor decision.
+        self._replacingText = False
         self._mouseActive = False
         # The ``(cursor position, document revision)`` pair the last sync
         # ran for: both ``cursorPositionChanged`` and ``contentsChanged``
@@ -632,14 +588,26 @@ class PyRaya(QPlainTextEdit):
         self._syncedOverlayInputs: tuple[int, int] | None = None
         self._minOverlayWidth: int = 0
         self._overlay: RomanOverlay | None = None
-        # Per-widget region palette (Q-1 decision): the widget copies the
-        # module-level default palette at construction and owns its colors;
-        # the highlighter shares the same mapping so recolours repaint.
+        # Per-widget region palette: the widget copies the module-level
+        # default palette at construction and owns its colors (the palette
+        # is view-only; the highlighter shares the same mapping so
+        # recolours repaint). The seed — copied from the module initial
+        # value — resolves untagged text; it is fixed at construction and
+        # readable, never settable.
         self._regionColors: dict[RegionType, QColor] = {
             kind: QColor(color) for kind, color in RegionColors.items()
         }
+        self._seedRegionKind: RegionType = SeedRegionKind
+        # Set by every format-only region write (and by a batch tag
+        # removal): format-only writes and their undo do not trigger a
+        # re-highlight, so the undo()/redo() overrides consume this flag
+        # to repaint the layout tint once.
+        self._pendingTagRepaint: bool = False
         self._highlighter = PyRayaHighlighter(
-            self.document(), engineProvider=self._spellEngine, colors=self._regionColors
+            self.document(),
+            engineProvider=self._spellEngine,
+            colors=self._regionColors,
+            seed=self._seedRegionKind,
         )
         # Aligning the initial (empty) document records an undo command;
         # disable undo/redo around it so no phantom command is left behind.
@@ -744,18 +712,52 @@ class PyRaya(QPlainTextEdit):
     def setPlainText(self, text: str) -> None:
         """Replace the entire document text.
 
-        The replacement text carries no region tags: all of it belongs to
-        the :data:`~pyraya.regions.DefaultRegionKind` kind (the
-        highlighter paints untagged runs with the default background at
-        display time), and ``regionsChanged`` is emitted for a non-empty
-        replacement.
+        The replacement text carries no region tags: all of it resolves to
+        the widget's :meth:`seedRegionKind` seed (no stored property, so
+        the resolved kinds are re-derived from the seed alone), and
+        ``regionsChanged`` is emitted for a non-empty replacement.
 
         Args:
             text: The new document text.
         """
+        # The replacement's signals fire with the cursor already over the new
+        # text; the funnel stays inert for the whole write so a word under a
+        # RomanUrdu seed is never seeded as an overlay over provisional text
+        # (the same contract as the roman-input ``_committing`` guard).
+        self._replacingText = True
         super().setPlainText(text)
+        self._replacingText = False
         if self.document().characterCount() > 1:
             self.regionsChanged.emit()
+
+    # ==========================================================================
+    def undo(self) -> None:
+        """Undo the last command, repainting a tag write's layout tint.
+
+        Format-only tag writes (and their undo) do not trigger a
+        re-highlight — Qt sees no text change — so a region write raises
+        :attr:`_pendingTagRepaint` on its way into the history; when this
+        undo made its layout stale, one re-highlight repairs it boundedly
+        (at most one whole-document re-highlight per undo chain after a
+        tag write).
+        """
+        super().undo()
+        if self._pendingTagRepaint:
+            self._pendingTagRepaint = False
+            self._highlighter.rehighlight()
+
+    # ==========================================================================
+    def redo(self) -> None:
+        """Redo the last undone command, repainting a tag write's tint.
+
+        Same bounded repair as :meth:`undo`: redoing a format-only tag
+        write re-highlights here instead of waiting for an unrelated
+        event.
+        """
+        super().redo()
+        if self._pendingTagRepaint:
+            self._pendingTagRepaint = False
+            self._highlighter.rehighlight()
 
     # ==========================================================================
     def addFormatRule(self, pattern: QRegularExpression, charFormat: QTextCharFormat) -> None:
@@ -785,10 +787,11 @@ class PyRaya(QPlainTextEdit):
     def regions(self) -> list[TextRegion]:
         """Return the document's text regions as sorted, non-overlapping spans.
 
-        The spans always partition the whole text: text without a
-        non-default tag carries the background color of
-        :data:`~pyraya.regions.DefaultRegionKind` and is reported as a span
-        of that kind.
+        Every character reports exactly one **resolved** kind — a stored
+        tag wins, and untagged text takes the widget's
+        :meth:`seedRegionKind` seed — so the spans cover the real text
+        (``[0, characterCount() - 1)``), adjacent same-kind stretches
+        merged into one span.
 
         Returns:
             A list of :class:`~pyraya.regions.TextRegion` spans ordered by
@@ -797,16 +800,36 @@ class PyRaya(QPlainTextEdit):
         return self._regionSpans()
 
     # ==========================================================================
+    def seedRegionKind(self) -> RegionType:
+        """The kind this widget's untagged text resolves to.
+
+        Copied from the module-level
+        :data:`~pyraya.regions.SeedRegionKind` initial value at
+        construction and read-only afterwards — there is no setter and no
+        constructor parameter.
+
+        Returns:
+            The fixed seed :class:`~pyraya.regions.RegionType`.
+        """
+        return self._seedRegionKind
+
+    # ==========================================================================
     def setRegionType(
         self, kind: RegionType, start: int | None = None, end: int | None = None
     ) -> None:
-        """Tag a character range (or the current selection) with a region type.
+        """Tag a character range (or the current selection) with a region kind.
 
-        Existing regions overlapping the range are split and the range is
-        retagged; adjacent same-type regions merge.
+        The kind is stored as the
+        :data:`~pyraya.regions.RegionKindProperty` custom property on the
+        character formats — a stored tag always wins over the seed, even
+        when it equals it, because tags record intent. Existing regions
+        overlapping the range are split and the range is retagged;
+        adjacent same-kind spans merge in the resolved view. The write is
+        one undo step, and the touched blocks are re-highlighted so the
+        tint follows immediately.
 
         Args:
-            kind: The region type to apply.
+            kind: The region kind to apply.
             start: Start offset; defaults to the selection start.
             end: End offset (exclusive); defaults to the selection end.
         """
@@ -819,22 +842,21 @@ class PyRaya(QPlainTextEdit):
         end = min(end, self.document().characterCount())
         if start >= end:
             return
-        self._applyRegionFormat(start, end, kind)
+        self._applyRegionTags(start, end, kind)
         self.regionsChanged.emit()
 
     # ==========================================================================
     def regionTypeAt(self, position: int) -> RegionType | None:
-        """Return the region kind covering a character offset.
+        """Return the resolved region kind at a character offset.
 
         Args:
             position: The character offset to query.
 
         Returns:
-            The :class:`~pyraya.regions.RegionType` of the region containing
-            the offset. Every text offset belongs to exactly one kind (text
-            without a non-default tag belongs to
-            :data:`~pyraya.regions.DefaultRegionKind`), so None is returned
-            only for offsets at or past the document's trailing terminator.
+            The :class:`~pyraya.regions.RegionType` covering the offset as
+            resolved from the stored tag or the seed. Every text offset
+            resolves to exactly one kind, so None is returned only for
+            offsets at or past the document's trailing terminator.
         """
         if not 0 <= position < self.document().characterCount() - 1:
             return None
@@ -842,71 +864,114 @@ class PyRaya(QPlainTextEdit):
 
     # ==========================================================================
     def clearRegions(self) -> None:
-        """Reset all text to :data:`~pyraya.regions.DefaultRegionKind`.
+        """Remove every stored region tag from the document.
 
-        Every region tag is removed and the text is repainted with the
-        default kind's background color, so the whole document becomes a
-        single default-kind region.
+        The removal is one batch apply inside a single edit block — one
+        undo step that replays every stored span, so one ``undo()``
+        restores all of them. Where a tag equals the seed the removal is
+        behaviourally invisible (the text still resolves to the seed);
+        with no stored tags the call does nothing and ``regionsChanged``
+        is not emitted.
         """
-        if not self._regionSpans():
+        matches = self._storedTagRuns()
+        if not matches:
             return
-        self._clearRange(0, self.document().characterCount())
+        self._batchRemoveTags(matches)
         self.regionsChanged.emit()
 
     # ==========================================================================
     def setRegionColor(self, kind: RegionType, color: QColor) -> bool:
-        """Change the widget's background color for a region type.
+        """Change the widget's view tint for a region kind.
 
-        The palette is per widget: the change recolours this widget's
-        regions of ``kind`` immediately and updates this widget's palette,
+        The palette is per widget and view-only: the change recolours this
+        widget's tint immediately (the highlighter repaints the layout),
         leaving the module-level
         :data:`~pyraya.regions.RegionColors` default and other widgets'
-        palettes untouched. Because a color is a kind's identity, colors
-        are compared — and must remain unique across the widget's own
-        palette — including the alpha channel; a color equal to another
-        kind's color is rejected.
+        palettes untouched. No document state is touched and
+        ``regionsChanged`` is **not** emitted — the palette never feeds
+        back into the region identity. Kinds the palette does not colour
+        (Native is colourless) are rejected.
 
         Args:
-            kind: The region type to recolour.
-            color: The new background color; its alpha controls subtlety.
+            kind: The region kind to recolour.
+            color: The new tint color; its alpha controls subtlety.
 
         Returns:
-            True if the color was applied; False if it equals another
-            kind's color of this widget's palette (including its alpha
-            channel).
+            True if the tint was applied; False when the kind carries no
+            tint to recolour.
         """
-        color = QColor(color)
-        for otherKind, otherColor in self._regionColors.items():
-            if otherKind == kind or color != otherColor:
-                continue
+        if kind not in self._regionColors:
             return False
-        oldColor = self._regionColors[kind]
-        if color == oldColor:
+        color = QColor(color)
+        if self._regionColors[kind] == color:
             return True
-        # Block the document signals while the characters are recoloured: a
-        # re-highlight mid-loop would treat the new color as unrecognized (it
-        # is not in RegionColors yet) and repaint the recoloured characters
-        # back to the default kind. The recolour walks format runs — one
-        # merge per maximal same-color run — instead of one read and one
-        # merge per character.
-        document = self.document()
-        document.blockSignals(True)
-        try:
-            fmt = QTextCharFormat()
-            fmt.setBackground(QBrush(color))
-            for start, end, runColor in self._backgroundRuns():
-                if runColor != oldColor:
-                    continue
-                cursor = self.textCursor()
-                cursor.setPosition(start)
-                cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
-                cursor.mergeCharFormat(fmt)
-        finally:
-            document.blockSignals(False)
+        previous = self._regionColors[kind]
         self._regionColors[kind] = color
-        self._highlighter.rehighlight()
-        self.regionsChanged.emit()
+        # The tint repaint cannot go through the highlighter: even a no-op
+        # ``rehighlightBlock`` bumps the document revision (probed
+        # unconditional), and the palette is view-only — the document must
+        # not move. The repaint is a direct layout re-write instead: a
+        # recolour changes nothing but the background brush values.
+        self._repaintLayoutTint(previous, color)
+        self.viewport().update()
         return True
+
+    # ==========================================================================
+    def _repaintLayoutTint(self, previous: QColor, color: QColor) -> None:
+        """Recolour the kind tint in the text layouts, revision-free.
+
+        The layout is the only place a recolour shows, and it is
+        revision-neutral when written directly
+        (:meth:`QTextLayout.setFormats` with identical formats probes no
+        revision bump, while ``QSyntaxHighlighter.rehighlightBlock`` bumps
+        one unconditionally). Every block's current format ranges are
+        read once, and the whole range list written back with the
+        background brushes equal to ``previous`` replaced by ``color`` —
+        the wash merged the kinds' brush values verbatim, so a
+        value-swap reproduces exactly what a re-highlight would paint.
+        A layout write is a display write: no undo command, no
+        ``contentsChanged``, no ``regionsChanged``.
+        """
+        document = self.document()
+        block = document.firstBlock()
+        while block.isValid():
+            layout = block.layout()
+            rebuilt: list[QTextLayout.FormatRange] = []
+            changed = False
+            for r in layout.formats():
+                rformat = cast(QTextCharFormat, r.format)
+                brush = (
+                    rformat.background()
+                    if rformat.hasProperty(QTextCharFormat.Property.BackgroundBrush)
+                    else None
+                )
+                if brush is not None and brush.color() == previous:
+                    replacement = QTextCharFormat(rformat)
+                    replacement.setBackground(QBrush(color))
+                    rebuilt.append(self._copyFormatRange(r, replacement))
+                    changed = True
+                else:
+                    rebuilt.append(self._copyFormatRange(r, rformat))
+            if changed:
+                layout.setFormats(rebuilt)
+            block = block.next()
+
+    @staticmethod
+    def _copyFormatRange(
+        r: QTextLayout.FormatRange, fmt: QTextCharFormat
+    ) -> QTextLayout.FormatRange:  # noqa: E501
+        """Copy a format range with one format replaced.
+
+        The range wrapper borrows its C++ object, so every attribute is
+        read back to plain values while the wrapper lives and written to
+        a fresh range. The bundled stubs declare the attributes as
+        ``...``, so the assignments carry a local suppression.
+        """
+        copy = QTextLayout.FormatRange()
+        copy.start = cast(int, r.start)  # pyrefly: ignore [bad-assignment]
+        copy.length = cast(int, r.length)  # pyrefly: ignore [bad-assignment]
+        copy.format = fmt  # pyrefly: ignore [bad-assignment]
+        return copy
 
     # ==========================================================================
     def setRomanInputEnabled(self, enabled: bool) -> None:
@@ -978,11 +1043,13 @@ class PyRaya(QPlainTextEdit):
     def regionColors(self) -> dict[RegionType, QColor]:
         """Return the widget's region palette as a copy.
 
-        The palette maps every :class:`~pyraya.regions.RegionType` to the
-        background color that identifies it on this widget. It starts as a
-        copy of the module-level :data:`~pyraya.regions.RegionColors`
-        default; :meth:`setRegionColor` mutates the widget's own palette,
-        never the module default and never another widget's palette.
+        The palette maps every colourable
+        :class:`~pyraya.regions.RegionType` to the view tint the layout
+        paints its stretches with on this widget. It starts as a copy of
+        the module-level :data:`~pyraya.regions.RegionColors` default;
+        :meth:`setRegionColor` mutates the widget's own palette — never
+        the module default, never another widget's palette, and never any
+        document state (the palette is view-only).
 
         Returns:
             A deep copy of the per-widget ``kind -> color`` mapping: the
@@ -1091,6 +1158,7 @@ class PyRaya(QPlainTextEdit):
             not self._romanInputEnabled
             or not self._assistMode
             or self._committing
+            or self._replacingText
             or (self._mouseActive and not bypassMouse)
         ):
             return
@@ -1116,8 +1184,8 @@ class PyRaya(QPlainTextEdit):
         (``s <= p <= e`` with a non-empty run) — including the document's
         trailing terminator position, which clamps to the last real
         character. A cursor with no word run behind it belongs to no word.
-        The run must be fully contained in a RomanUrdu region; otherwise no
-        word is returned.
+        The run must entirely resolve to RomanUrdu — stored tag or the
+        seed — otherwise no word is returned.
 
         A word run cannot cross a block (the block separator is not
         Arabic), so the scan reads the cursor's own block text instead of
@@ -1844,19 +1912,21 @@ class PyRaya(QPlainTextEdit):
         (scenario 2) the word's span is replaced, at a bare cursor
         (scenario 1) the text is inserted at the anchor position — or, if
         the cursor had a selection, that selection is replaced. The word
-        and the separator both carry the :class:`RomanUrdu` region
-        background. The writing commit signals :attr:`regionsChanged` once
-        — every writing commit changes region state (word and separator
-        land tagged RomanUrdu, replacing whatever kinds the destination
-        carried), and the emission is unconditional (Q-2 contract: no
-        per-commit comparison, so the signal costs nothing per keystroke)
+        and the separator both carry the stored
+        :attr:`RegionType.RomanUrdu <pyraya.regions.RegionType>` tag (the
+        text edit re-highlights the blocks for the tint). The writing
+        commit signals :attr:`regionsChanged` once — every writing commit
+        changes region state (word and separator land tagged RomanUrdu,
+        replacing whatever tags the destination carried), and the emission
+        is unconditional (no per-commit comparison, so the signal costs
+        nothing per keystroke)
         — and a non-empty committed word also signals
         ``romanWordCommitted``. The widget cursor follows the
         document-cursor edit, and the overlay is deactivated.
         """
         cursor = self.textCursor()
         fmt = QTextCharFormat()
-        fmt.setBackground(QBrush(self._regionColors[RegionType.RomanUrdu]))
+        fmt.setProperty(RegionKindProperty, int(RegionType.RomanUrdu))
         if self._activeWord is not None:
             start, end = self._activeWord
             cursor.setPosition(start)
@@ -1961,7 +2031,7 @@ class PyRaya(QPlainTextEdit):
         hasSelection = cursor.hasSelection()
 
         for kind, label in (
-            (RegionType.Latin, "Region: Latin"),
+            (RegionType.Native, "Region: Native"),
             (RegionType.RomanUrdu, "Region: Roman Urdu"),
         ):
             action = QAction(label, self)
@@ -1974,7 +2044,7 @@ class PyRaya(QPlainTextEdit):
         clearOne.setEnabled(region is not None)
         if region is not None:
             clearOne.triggered.connect(
-                lambda _checked, s=region.start, e=region.end: self._clearRange(s, e)
+                lambda _checked, s=region.start, e=region.end: self._clearTagsOver(s, e)
             )
         menu.addAction(clearOne)
 
@@ -2002,8 +2072,9 @@ class PyRaya(QPlainTextEdit):
     def keyPressEvent(self, event: QKeyEvent) -> None:
         """Handle region shortcuts and intercept roman-input keystrokes.
 
-        ``Ctrl+1`` tags the current selection as Latin and ``Ctrl+2`` tags
-        it as Roman Urdu. ``Ctrl+Space`` turns assist mode back on and
+        ``Ctrl+1`` tags the current selection Native and ``Ctrl+2`` tags
+        it as Roman Urdu (the seed kind). ``Ctrl+Space`` turns assist mode
+        back on and
         activates the overlay — over the RomanUrdu word under the cursor
         with its romanized text, or, with no such word, an empty overlay
         at the cursor — and never reaches the document. While the
@@ -2041,7 +2112,7 @@ class PyRaya(QPlainTextEdit):
                     self._activateOverlayAt("", self.textCursor().position())
                 return
             if event.key() == Qt.Key.Key_1 and self.textCursor().hasSelection():
-                self.setRegionType(RegionType.Latin)
+                self.setRegionType(RegionType.Native)
                 return
             if event.key() == Qt.Key.Key_2 and self.textCursor().hasSelection():
                 self.setRegionType(RegionType.RomanUrdu)
@@ -2139,13 +2210,19 @@ class PyRaya(QPlainTextEdit):
         self._onViewChanged()
 
     # ==========================================================================
-    def _paintRange(self, start: int, end: int, kind: RegionType) -> None:
-        """Merge a region kind's background format over a character range.
+    def _applyRegionTags(self, start: int, end: int, kind: RegionType) -> None:
+        """Store the region-kind property over a character range.
 
-        The one owner of the range paint (B4): the range is clamped to the
-        document's real text offsets (:meth:`_clampRange`) and the kind's
-        identity color (:meth:`_regionColors`) is merged over the selection
-        on a throwaway document cursor.
+        The range is clamped to the document's real text offsets
+        (:meth:`_clampRange` — the trailing terminator never participates,
+        merges across it are silently dropped) and the kind is written as
+        the :data:`~pyraya.regions.RegionKindProperty` custom property
+        merged over the selection on a throwaway document cursor: format
+        changes are undoable (one step) and survive edits, and nothing
+        else stores region data. A format-only write does not trigger a
+        re-highlight, so the affected blocks are re-highlighted here
+        (:meth:`_rehighlightTags`) and :attr:`_pendingTagRepaint` is
+        raised for the undo/redo repair.
         """
         start, end = self._clampRange(start, end)
         if start >= end:
@@ -2154,25 +2231,120 @@ class PyRaya(QPlainTextEdit):
         cursor.setPosition(start)
         cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
         fmt = QTextCharFormat()
-        fmt.setBackground(QBrush(self._regionColors[kind]))
+        fmt.setProperty(RegionKindProperty, int(kind))
         cursor.mergeCharFormat(fmt)
+        self._rehighlightTags(start, end)
+        self._pendingTagRepaint = True
         self.viewport().update()
 
     # ==========================================================================
-    def _applyRegionFormat(self, start: int, end: int, kind: RegionType) -> None:
-        """Merge the region's background format over a character range."""
-        self._paintRange(start, end, kind)
+    def _rehighlightTags(self, start: int, end: int) -> None:
+        """Re-highlight the blocks a stored-tag write touched.
+
+        Qt does not re-highlight a format-only ``mergeCharFormat`` write
+        (nor its undo), so the tint must be driven explicitly: one
+        ``rehighlightBlock`` per block overlapping ``[start, end)``,
+        bouncing over the same block span the property walk covers.
+        """
+        block = self.document().findBlock(start)
+        while block.isValid() and block.position() < end:
+            self._highlighter.rehighlightBlock(block)
+            block = block.next()
 
     # ==========================================================================
-    def _clearRange(self, start: int, end: int) -> None:
-        """Reset a character range to :data:`~pyraya.regions.DefaultRegionKind`.
+    def _storedTagRuns(self) -> list[tuple[int, int, QTextCharFormat]]:
+        """The document's stored-tag spans, one entry per format run.
 
-        Cleared characters are repainted with the default kind's background
-        color, because a format merge cannot restore a ``NoBrush`` background
-        once one has been set and the document must never contain untagged
-        text.
+        One read per format run — fragments partition the real text, and
+        the block separators in between are read through
+        :meth:`_charFormatAt` (a tag write carried over a selection
+        reaches the separator too) — the same observable the resolved-kind
+        walk (:meth:`_kindRuns`) uses. Only formats carrying the
+        :data:`~pyraya.regions.RegionKindProperty` are reported; the
+        trailing terminator never participates.
+
+        Returns:
+            ``(start, end, format)`` triples over the real text; the
+            formats are value copies, free to mutate.
         """
-        self._paintRange(start, end, DefaultRegionKind)
+        runs: list[tuple[int, int, QTextCharFormat]] = []
+        document = self.document()
+        limit = document.characterCount() - 1
+        if limit <= 0:
+            return runs
+        block = document.firstBlock()
+        while block.isValid():
+            for it in cast("Iterable[QTextBlock.iterator]", block):
+                fragment = it.fragment()
+                start = fragment.position()
+                end = min(start + fragment.length(), limit)
+                if start < end:
+                    fmt = fragment.charFormat()
+                    if fmt.hasProperty(RegionKindProperty):
+                        runs.append((start, end, fmt))
+            separator = block.position() + block.length() - 1
+            if separator < limit:
+                fmt = self._charFormatAt(separator)
+                if fmt.hasProperty(RegionKindProperty):
+                    runs.append((separator, separator + 1, fmt))
+            block = block.next()
+        return runs
+
+    # ==========================================================================
+    def _batchRemoveTags(self, matches: list[tuple[int, int, QTextCharFormat]]) -> None:
+        """Remove the property from the given stored-tag spans in one batch.
+
+        Every span is replayed inside ONE edit block — the whole removal
+        is one undo step. ``setCharFormat`` (not a merge) applies a copy
+        of the span's own format minus the property, because a merge
+        cannot remove a property. A format-only write does not re-highlight,
+        so the whole document is re-highlighted and
+        :attr:`_pendingTagRepaint` raised for the undo/redo repair.
+        """
+        document = self.document()
+        # ``beginEditBlock`` lives on the cursor (PySide6 does not map it on
+        # the document): one throwaway cursor owns the whole edit block, and
+        # every span's ``setCharFormat`` runs through its own cursor inside
+        # this block.
+        blocker = QTextCursor(document)
+        blocker.beginEditBlock()
+        try:
+            for start, end, fmt in matches:
+                fmt.clearProperty(RegionKindProperty)
+                cursor = QTextCursor(document)
+                cursor.setPosition(start)
+                cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+                cursor.setCharFormat(fmt)
+        finally:
+            blocker.endEditBlock()
+        self._highlighter.rehighlight()
+        self._pendingTagRepaint = True
+        self.viewport().update()
+
+    # ==========================================================================
+    def _clearTagsOver(self, start: int, end: int) -> bool:
+        """Remove the stored tags overlapping a character range.
+
+        Args:
+            start: The first character offset to clear.
+            end: One past the last character offset to clear.
+
+        Returns:
+            True when any stored tag was removed; False when the range
+            holds no stored tags (the removal then writes nothing).
+        """
+        start, end = self._clampRange(start, end)
+        if start >= end:
+            return False
+        matches = [
+            (runStart, runEnd, fmt)
+            for runStart, runEnd, fmt in self._storedTagRuns()
+            if runStart < end and start < runEnd
+        ]
+        if not matches:
+            return False
+        self._batchRemoveTags(matches)
+        return True
 
     # ==========================================================================
     def _clampRange(self, start: int, end: int) -> tuple[int, int]:
@@ -2187,26 +2359,23 @@ class PyRaya(QPlainTextEdit):
 
     # ==========================================================================
     def _regionSpans(self) -> list[TextRegion]:
-        """Reconstruct region spans from the document's format runs.
+        """Reconstruct region spans from the document's resolved kinds.
 
-        Every character belongs to exactly one region kind — text without a
-        recognized region background counts as
-        :data:`~pyraya.regions.DefaultRegionKind` — so the spans partition
-        the whole text. The walk reads whole format runs (one fragment
-        carries one char format, hence one kind) instead of one char-format
-        read per character, which keeps large-document scans orders of
-        magnitude cheaper; block separators are not fragments, so each
-        separator's kind is read through :meth:`_charFormatAt` — the same
-        observable a per-character scan sees. Adjacent runs of one kind are
-        merged into one span even when their observed backgrounds differ
-        (untagged NoBrush text beside tagged text of the default kind is
-        one region), exactly as a per-character kind scan merges. The
-        trailing terminator character of the last block is never part of a
+        Every character resolves to exactly one kind — a stored tag wins,
+        untagged text takes the widget's seed — so the spans cover the
+        real text. The walk reads whole format runs (one fragment
+        carries one char format, hence one resolved kind) instead of one
+        char-format read per character, which keeps large-document scans
+        orders of magnitude cheaper; block separators are not fragments,
+        so each separator's format is read through :meth:`_charFormatAt`
+        over the same two-step resolution — the same observable a
+        per-character scan sees. Adjacent runs of one kind merge into one
+        span exactly as a per-character kind scan merges. The trailing
+        terminator character of the last block is never part of a
         region, so the walk stops before it.
         """
         spans: list[TextRegion] = []
-        for start, end, color in self._backgroundRuns():
-            kind = _regionKindFor(color, self._regionColors)
+        for start, end, kind in self._kindRuns():
             previous = spans[-1] if spans else None
             if previous is not None and previous.kind == kind and previous.end == start:
                 spans[-1] = TextRegion(previous.start, end, kind)
@@ -2215,30 +2384,33 @@ class PyRaya(QPlainTextEdit):
         return spans
 
     # ==========================================================================
-    def _backgroundRuns(self) -> list[tuple[int, int, QColor]]:
-        """Maximal character runs sharing one observed background color.
+    def _kindRuns(self) -> list[tuple[int, int, RegionType]]:
+        """Maximal character runs sharing one resolved kind.
 
-        Returns ``(start, end, color)`` triples covering the real text
+        Returns ``(start, end, kind)`` triples covering the real text
         (``[0, characterCount() - 1)``) in document order, adjacent runs
-        merged when their observed colors are equal. Real characters are
-        read as format runs — one fragment carries one char format, hence
-        one color — while block separators are not fragments: each
-        separator's color is read through :meth:`_charFormatAt`, the same
-        observable a per-character scan sees. The trailing terminator is
-        excluded.
+        merged when their resolved kinds are equal. Real characters are
+        read as format runs — one fragment carries one char format,
+        hence one kind, resolved through
+        :func:`~pyraya.regions.resolveRegionKind` (stored tag first,
+        then the widget's seed) — while block separators are not
+        fragments: each separator's format is read through
+        :meth:`_charFormatAt` over the same resolution, the observable a
+        per-character scan sees. The trailing terminator is excluded.
         """
-        runs: list[tuple[int, int, QColor]] = []
+        runs: list[tuple[int, int, RegionType]] = []
         document = self.document()
         limit = document.characterCount() - 1
         if limit <= 0:
             return runs
+        seed = self._seedRegionKind
 
-        def appendRun(start: int, end: int, color: QColor) -> None:
+        def appendRun(start: int, end: int, kind: RegionType) -> None:
             previous = runs[-1] if runs else None
-            if previous is not None and previous[1] == start and previous[2] == color:
-                runs[-1] = (previous[0], end, color)
+            if previous is not None and previous[1] == start and previous[2] == kind:
+                runs[-1] = (previous[0], end, kind)
             else:
-                runs.append((start, end, color))
+                runs.append((start, end, kind))
 
         block = document.firstBlock()
         while block.isValid():
@@ -2250,29 +2422,27 @@ class PyRaya(QPlainTextEdit):
                 start = fragment.position()
                 end = min(start + fragment.length(), limit)
                 if start < end:
-                    appendRun(start, end, fragment.charFormat().background().color())
+                    appendRun(start, end, resolveRegionKind(fragment.charFormat(), seed))
             separator = block.position() + block.length() - 1
             if separator < limit:
                 appendRun(
                     separator,
                     separator + 1,
-                    self._charFormatAt(separator).background().color(),
+                    resolveRegionKind(self._charFormatAt(separator), seed),
                 )
             block = block.next()
         return runs
 
     # ==========================================================================
     def _regionKindAt(self, position: int) -> RegionType:
-        """Return the region kind stored at a character offset.
+        """Return the region kind resolved at a character offset.
 
-        A character whose background matches no region color belongs to
-        :data:`~pyraya.regions.DefaultRegionKind`, keeping the invariant
-        that every character belongs to exactly one kind. The position
-        reading and the identity comparison are owned once at module
-        level (:func:`_regionKindAt`); the method only resolves the
-        widget's document and palette there.
+        The stored character format's kind property, else the widget's
+        seed — resolution is owned once in
+        :func:`~pyraya.regions.resolveRegionKind`; the method only
+        resolves the widget's document and seed there.
         """
-        return _regionKindAt(self.document(), self._regionColors, position)
+        return resolveRegionKind(self._charFormatAt(position), self._seedRegionKind)
 
     # ==========================================================================
     def _regionAt(self, position: int) -> TextRegion | None:
@@ -2307,35 +2477,69 @@ class PyRaya(QPlainTextEdit):
         return self._regionAt(cursor.position())
 
     # ==========================================================================
+    def _typingKindAt(self, position: int) -> RegionType:
+        """The kind a character typed at ``position`` carries.
+
+        The character format at or before the cursor governs the typed
+        character. At a block start the block's own char format governs
+        for blocks Qt seeded (``insertBlock`` inherits the creating
+        cursor's char format, so an empty block types with it — the Enter
+        continuation rides stored properties with no hook), but Qt never
+        updates an existing block's char format when a later merge
+        retags its characters, so a NON-empty block start answers the
+        region-semantic kind of its first real character instead — the
+        stretch the typing lands in. Past a block's real text (through
+        the terminator slot) the last real character governs — block
+        separators and the trailing terminator never belong to a region.
+
+        Args:
+            position: The document character offset to type at.
+
+        Returns:
+            The resolved :class:`~pyraya.regions.RegionType`.
+        """
+        document = self.document()
+        block = document.findBlock(position)
+        # The document-level ``contentsChanged`` fires while a document
+        # replacement (``setPlainText``) is mid-flight, as in
+        # ``_wordUnderCursor``: the invalid block resolves to the seed.
+        if not block.isValid():
+            return self._seedRegionKind
+        local = position - block.position()
+        if local <= 0:
+            if block.text():
+                # A non-empty block: its own char format is stale for the
+                # kinds (never updated after creation), so the region the
+                # typing lands in is its first real character's kind.
+                return self._regionKindAt(position)
+            return resolveRegionKind(block.charFormat(), self._seedRegionKind)
+        # Inside or right after the block's real text: the character in
+        # front of the cursor governs.
+        return self._regionKindAt(min(position, block.position() + len(block.text())) - 1)
+
+    # ==========================================================================
     def _regionKindForTyping(self) -> RegionType | None:
         """The region kind for the scenario-1 typing gate at the cursor.
 
-        A cursor with a selection resolves the region overlapping the
-        selection. A bare cursor at the document end (``position ==
-        characterCount() - 1``) resolves to the kind of the last real
-        character before the cursor — the trailing terminator itself never
-        belongs to a region — and an empty document to
-        :data:`~pyraya.regions.DefaultRegionKind`; any other position
-        resolves the region containing it. Positions past the document end
-        return None.
+        A cursor with a selection resolves at the selection start. A bare
+        cursor resolves at its position: the stored tag, else the seed.
+        Positions past the document end return None; an empty document
+        resolves to the seed.
+
+        Returns:
+            The gate kind, or ``None`` past the document end.
         """
         cursor = self.textCursor()
-        if cursor.hasSelection():
-            start = cursor.selectionStart()
-            end = cursor.selectionEnd()
-            for span in self._regionSpans():
-                if span.start < end and start < span.end:
-                    return span.kind
         document = self.document()
-        position = cursor.position()
         limit = document.characterCount() - 1
+        if limit <= 0:
+            return self._seedRegionKind
+        if cursor.hasSelection():
+            return self._typingKindAt(cursor.selectionStart())
+        position = cursor.position()
         if not 0 <= position <= limit:
             return None
-        if position == limit:
-            if document.characterCount() == 1:
-                return DefaultRegionKind
-            return self._regionKindAt(position - 1)
-        return self._regionKindAt(position)
+        return self._typingKindAt(position)
 
     # ==========================================================================
     def _charFormatAt(self, position: int) -> QTextCharFormat:

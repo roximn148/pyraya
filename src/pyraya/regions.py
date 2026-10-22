@@ -3,54 +3,84 @@
 # ******************************************************************************
 """Text region model for PyRaya.
 
-A *text region* is a span of the document tagged with a semantic
-:class:`RegionType` and rendered with a subtle, type-specific background
-color. Region state is stored as character formats on the document itself,
-so spans survive edits and undo/redo without manual bookkeeping.
+A region kind is a semantic tag stored as a custom integer property on the
+document's **character formats** — nothing else stores region data, so spans
+survive edits and undo/redo without manual bookkeeping.
 
-Every character of the document belongs to exactly one region kind at any
-time: text without an explicit tag carries the background color of
-:data:`DefaultRegionKind`, so the document's regions always partition the
-whole text. Each region kind is identified by its background color —
-including the alpha channel — and every kind must have a unique color
-(``PyRaya.setRegionColor`` enforces that).
+Resolution is two steps: a character whose format carries the
+:data:`RegionKindProperty` resolves to that stored kind (a stored tag always
+wins, even when it equals the seed — tags record intent), and untagged
+characters resolve to the widget's :data:`SeedRegionKind` copy. Kinds are a
+closed enum; the palette is view-only: it colours the kinds that have a tint
+and never feeds back into identity.
 """
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import IntEnum
 
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QTextCharFormat, QTextFormat
 
-__all__ = ["RegionColors", "RegionType", "TextRegion", "DefaultRegionKind"]
+__all__ = [
+    "RegionColors",
+    "RegionKindProperty",
+    "RegionType",
+    "SeedRegionKind",
+    "TextRegion",
+    "resolveRegionKind",
+]
 
 
 # ******************************************************************************
-class RegionType(Enum):
-    """Semantic region types for tagged text spans.
+class RegionType(IntEnum):
+    """Semantic region kinds for tagged text spans.
+
+    The enum is closed — these two members never grow — and its values are
+    one-based because int ``0`` is the **unset sentinel**
+    :meth:`QTextFormat.intProperty` reports when the property is missing, so
+    a stored kind can never be ``0``.
 
     Members:
-        Latin: Latin-script text that is not Roman Urdu (e.g. English); no
-            Urdu-specific processing.
+        Native: Text the user explicitly took out of the Roman-Urdu
+            world (e.g. ordinary Latin words). Native has no behaviour and
+            no colour: it only exempts its stretch from Roman-Urdu
+            processing (the roman-input gate types through it and the
+            spell-check underline skips it).
         RomanUrdu: Roman-script Urdu — Urdu semantics written in the Latin
-            script. Per-type processing is keyed on these regions: the
-            spell-check underline applies to RomanUrdu words the
-            dictionary does not know (the Roman-Urdu-to-Nastaliq
-            conversion stays on the roadmap).
+            script, the seed kind every widget starts with. It is the only
+            kind that arms processing: the roman-input overlay and the
+            spell-check underline apply to RomanUrdu words.
     """
 
-    Latin = "latin"
-    RomanUrdu = "roman_urdu"
+    Native = 1
+    RomanUrdu = 2
+
+
+# ******************************************************************************
+#: The character-format property a region kind is stored under.
+#:
+#: The first custom property slot past Qt's own ``UserProperty`` range, so
+#: the property can never collide with a Qt-defined format key.
+RegionKindProperty: int = int(QTextFormat.Property.UserProperty) + 1
+
+
+# ******************************************************************************
+#: The region kind untagged text resolves to.
+#:
+#: This module-level value is the **initial seed**: every ``PyRaya`` widget
+#: copies it at construction and keeps its copy read-only afterwards —
+#: there is no setter and no constructor parameter.
+SeedRegionKind: RegionType = RegionType.RomanUrdu
 
 
 # ******************************************************************************
 @dataclass(frozen=True, slots=True)
 class TextRegion:
-    """A half-open character range ``[start, end)`` tagged with a region kind.
+    """A half-open character range ``[start, end)`` of one resolved kind.
 
     Args:
         start: The first character offset of the region.
         end: One past the last character offset of the region.
-        kind: The semantic region type of the span.
+        kind: The resolved region kind of the span.
     """
 
     start: int
@@ -59,30 +89,37 @@ class TextRegion:
 
 
 # ******************************************************************************
-#: The region kind that untagged text belongs to.
-#:
-#: The widget paints every character of the document with the background
-#: color of this kind, so all text at any time belongs to exactly one region
-#: kind; clearing regions resets the text to this kind rather than leaving
-#: it untagged.
-DefaultRegionKind: RegionType = RegionType.RomanUrdu
-
-
-# ******************************************************************************
-#: Background colors identifying the region kinds.
+#: View tint colors for the colourable region kinds.
 #:
 #: This module-level mapping is the **default palette**: every ``PyRaya``
 #: widget copies it at construction and each widget owns its own mapping,
-#: so one widget's ``PyRaya.setRegionColor`` never touches another's
-#: identities. A color is a kind's identity and is compared including the
-#: alpha channel, so two kinds may share RGB values only if their alpha
-#: values differ. Every kind of a widget's palette must have a unique
-#: color; ``PyRaya.setRegionColor`` rejects colors that collide with
-#: another kind of that widget's palette.
+#: so one widget's ``PyRaya.setRegionColor`` never touches another's. The
+#: palette is view-only — colours never identify kinds — and contains only
+#: the kinds that carry a tint; :attr:`RegionType.Native` is colourless and
+#: stays out of the map.
 RegionColors: dict[RegionType, QColor] = {
-    RegionType.Latin: QColor(0x60, 0xA5, 0xFA, 30),
     RegionType.RomanUrdu: QColor(0xF5, 0x9E, 0x0B, 30),
 }
 
 
 # ******************************************************************************
+def resolveRegionKind(charFormat: QTextCharFormat, seed: RegionType) -> RegionType:
+    """Resolve a character format's region kind in two steps.
+
+    A stored tag wins — even when it equals ``seed`` — because tags record
+    intent; untagged characters take ``seed``. The unset sentinel ``0``,
+    which :meth:`QTextFormat.intProperty` reports for a missing property,
+    and any value outside the closed enum fall back to ``seed``.
+
+    Args:
+        charFormat: The document's character format to read.
+        seed: The kind untagged text resolves to.
+
+    Returns:
+        The stored kind, or ``seed`` when nothing valid is stored.
+    """
+    stored = charFormat.intProperty(RegionKindProperty)
+    try:
+        return RegionType(stored)
+    except ValueError:
+        return seed
