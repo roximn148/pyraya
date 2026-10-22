@@ -3,29 +3,25 @@
 # ******************************************************************************
 """Run-based edge-document guard and the ruled adjacent-word contract.
 
-Phase A1 replaced the per-character ``_regionSpans`` walk (one char-format
-read per character) with a format-run walk, and Phase A2 derived the
-highlighter's default-region wash from the same run map. The one-round
-differential sweeps that replayed documents through both implementations —
-region maps, the wash's merged layout formats, the whole-document word
-walks — were retired after their round (2026-10-22) per the audit plan; the
-catches they made are recorded in the audit ledger and their code is
-retrievable from git history (the commit preceding this note).
+The region kinds live as a custom integer property on the document's
+character formats; the one-round differential sweeps that replayed
+documents through both implementations — region maps, the tint's merged
+layout formats, the whole-document word walks — were retired after their
+round (2026-10-22) per the audit plan; the catches they made are recorded
+in the audit ledger and their code is retrievable from git history (the
+commit preceding this note).
 
 What remains:
 
 - ``testRunBasedEdgeDocuments`` pins terminator-adjacent and
-  separator-boundary documents against a per-character reference walk —
-  including the kind-merge rule: adjacent format runs of one kind merge
-  into one span even when their observed backgrounds differ (untagged
-  NoBrush text beside tagged text of the default kind is one region).
+  separator-boundary documents against a per-character reference walk.
 - ``testAdjacentWordInsideARunReturnsTheContainingRun`` pins B2's ruled
   whole-run return for the adjacent-word walk, including the reachable
   mid-run seed path.
 
-The reference reads kinds exactly as the old code did: ``charFormat()``'s
-background, mapped through the palette with
-:data:`~pyraya.regions.DefaultRegionKind` as the fallback.
+The reference reads kinds through the same two-step resolution the widget
+uses — the character format's stored property, else the widget's seed —
+at one format read per character.
 """
 
 import os
@@ -36,10 +32,10 @@ from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QApplication
 
 from pyraya import (
-    DefaultRegionKind,
     PyRaya,
     RegionType,
     TextRegion,
+    resolveRegionKind,
 )
 
 
@@ -56,11 +52,7 @@ def app() -> Generator[QCoreApplication | QApplication]:
 # ******************************************************************************
 def _referenceKindAt(widget: PyRaya, position: int) -> RegionType:
     """The per-character kind read: one format read per position."""
-    color = widget._charFormatAt(position).background().color()
-    for kind, regionColor in widget._regionColors.items():
-        if color == regionColor:
-            return kind
-    return DefaultRegionKind
+    return resolveRegionKind(widget._charFormatAt(position), widget.seedRegionKind())
 
 
 def _referenceSpans(widget: PyRaya) -> list[TextRegion]:
@@ -92,7 +84,7 @@ def testRunBasedEdgeDocuments(app, text: str) -> None:  # noqa: ARG001
     widget = PyRaya()
     widget.setPlainText(text)
     _assertSameMap(widget)
-    widget.setRegionType(RegionType.Latin, 0, widget.document().characterCount())
+    widget.setRegionType(RegionType.Native, 0, widget.document().characterCount())
     _assertSameMap(widget)
     widget.setRegionType(RegionType.RomanUrdu, 0, widget.document().characterCount() - 1)
     _assertSameMap(widget)

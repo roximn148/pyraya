@@ -28,7 +28,7 @@ from romanalfaz import DictionaryNotFoundError
 from romanalfaz.engine import Suggestion, Vocabulary
 
 from pyraya import PyRaya
-from pyraya.regions import RegionType
+from pyraya.regions import RegionType, TextRegion
 from pyraya.roman_input import (
     RomanInputEngine,
     RomanOverlay,
@@ -826,7 +826,7 @@ def testKeystrokeAtEndAfterLatinRegionNotIntercepted(app: QApplication) -> None:
     widget.show()
     widget.setPlainText("hello world")
     widget.setRomanInputEnabled(True)
-    widget.setRegionType(RegionType.Latin, 6, 11)
+    widget.setRegionType(RegionType.Native, 6, 11)
     _moveCursor(widget, 11)  # the document end, after the Latin region
     _sendKey(widget, Qt.Key.Key_K, "k")
     assert widget.toPlainText() == "hello worldk"
@@ -972,7 +972,7 @@ def testNoOverlayOnWhitespaceDigitsLatin(app: QApplication) -> None:
     assert overlay is not None and overlay.isVisible()
 
     widget.setPlainText("hello خوش world")
-    widget.setRegionType(RegionType.Latin, 6, 9)
+    widget.setRegionType(RegionType.Native, 6, 9)
     _moveCursor(widget, 7)  # Arabic word inside a Latin region
     _assertNoOverlay(widget)
 
@@ -989,7 +989,7 @@ def testNoOverlayOnPartialContainment(app: QApplication) -> None:
     widget.show()
     widget.setPlainText("hello خوش world")
     widget.setRomanInputEnabled(True)
-    widget.setRegionType(RegionType.Latin, 6, 8)  # only part of the word
+    widget.setRegionType(RegionType.Native, 6, 8)  # only part of the word
     _moveCursor(widget, 7)
     _assertNoOverlay(widget)
 
@@ -2347,7 +2347,7 @@ def testLatinKeystrokeNotIntercepted(app: QApplication) -> None:
     widget = PyRaya()
     widget.show()
     widget.setPlainText("hello world")
-    widget.setRegionType(RegionType.Latin, 0, 11)
+    widget.setRegionType(RegionType.Native, 0, 11)
     widget.setRomanInputEnabled(True)
     _moveCursor(widget, 0)
     _sendKey(widget, Qt.Key.Key_K, "k")
@@ -3139,7 +3139,7 @@ def testEmptyTextCommitDeletesSpan(app: QApplication) -> None:
 def testRetaggingCommitEmitsRegionsChanged(app: QApplication) -> None:
     """A write commit that destroyed a region signals the region change.
 
-    The commit replaces the user's selection (a Latin island inside the
+    The commit replaces the user's selection (a Native island inside the
     RomanUrdu run) with the committed word: the region map changes, so
     ``regionsChanged`` fires for the writing commit.
     """
@@ -3147,7 +3147,15 @@ def testRetaggingCommitEmitsRegionsChanged(app: QApplication) -> None:
     widget.show()
     widget.setPlainText("hello خوش world")
     widget.setRomanInputEnabled(True)
-    widget.setRegionType(RegionType.Latin, 2, 4)  # "ll" is a Latin island
+    widget.setRegionType(RegionType.Native, 2, 4)  # "ll" is a Native island
+    # The island exists as its own span in the resolved map: the untagged
+    # surroundings resolve to the seed, and only the stored Native tag
+    # breaks out of it.
+    assert widget.regions() == [
+        TextRegion(0, 2, RegionType.RomanUrdu),
+        TextRegion(2, 4, RegionType.Native),
+        TextRegion(4, 15, RegionType.RomanUrdu),
+    ]
     cursor = widget.textCursor()
     cursor.setPosition(0)
     cursor.setPosition(6, QTextCursor.MoveMode.KeepAnchor)
@@ -3160,7 +3168,7 @@ def testRetaggingCommitEmitsRegionsChanged(app: QApplication) -> None:
     widget.regionsChanged.connect(lambda: changed.append(1))
     _sendKey(overlay.lineEdit(), Qt.Key.Key_Space, " ")
     assert changed == [1]
-    assert RegionType.Latin not in [span.kind for span in widget.regions()]
+    assert RegionType.Native not in [span.kind for span in widget.regions()]
 
 
 # ******************************************************************************

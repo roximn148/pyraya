@@ -118,11 +118,12 @@ def testUnknownRomanUrduWordUnderlined(app: QApplication) -> None:
 
 
 # ******************************************************************************
-def testLatinRegionNotUnderlined(app: QApplication) -> None:
-    """An Arabic run tagged Latin is never checked; Latin text never is."""
+def testNativeRegionNotUnderlined(app: QApplication) -> None:
+    """An Arabic run tagged Native is never checked: RomanUrdu is the only
+    kind the spell pass arms, and a Native tag wins over the seed."""
     widget = PyRaya()
     widget.setPlainText("hello خلمق")
-    widget.setRegionType(RegionType.Latin, 6, 10)
+    widget.setRegionType(RegionType.Native, 6, 10)
     assert _underlinedRanges(widget) == []
 
 
@@ -134,7 +135,7 @@ def testTaggedRomanUrduRegionChecked(app: QApplication) -> None:
     assert engine is not None
     assert engine.hasWord("خلمق") is False
     widget.setPlainText("دوست خلمق")
-    widget.setRegionType(RegionType.Latin, 0, 4)
+    widget.setRegionType(RegionType.Native, 0, 4)
     widget.setRegionType(RegionType.RomanUrdu, 5, 9)
     ranges = _underlinedRanges(widget)
     assert [(start, end) for start, end, _, _ in ranges] == [(5, 9)]
