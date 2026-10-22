@@ -6,7 +6,7 @@ A PySide6 text editor for Urdu. Drop the widget into your app and it handles
 right-to-left paragraphs, a Nastaliq font stack, and typing Urdu from a roman
 keyboard.
 
-⚠️ **Alpha** · `0.1.0-alpha.7` · Python 3.14+ · PySide6
+⚠️ **Alpha** · `0.1.0-alpha.8` · Python 3.14+ · PySide6
 
 ---
 
@@ -49,8 +49,8 @@ selected Urdu word lands in the document, in Urdu script.
 - Right-to-left paragraphs, right-aligned from the first keystroke.
 - Nastaliq and Latin on one line, from one font stack.
 - Spaces and tabs drawn as visible marks.
-- Latin and Roman-Urdu spans tagged with faint blue and orange tints. See
-  [Regions](#regions).
+- Spans tagged Native or Roman Urdu; Roman-Urdu text gets a faint orange
+  tint, Native text carries no tint. See [Regions](#regions).
 - Roman input: type `salam`, pick سلام, keep writing. See
   [Roman input](#roman-input).
 - A wavy underline under words the dictionary does not know. See
@@ -58,27 +58,31 @@ selected Urdu word lands in the document, in Urdu script.
 
 ## Regions
 
-A region is a character span with a tag, and there are two tags:
-`RegionType.Latin` for English and other Latin text, `RegionType.RomanUrdu`
-for Urdu written in roman letters. Every character belongs to one kind,
-untagged text counts as Roman Urdu, and each kind paints its own background: a
-faint blue for Latin, a faint orange for Roman Urdu.
+A region kind marks a character span with intent, and there are two kinds:
+`RegionType.Native` for English and other Latin text, `RegionType.RomanUrdu`
+for Urdu written in roman letters. Kinds are stored as a tag on the document's
+characters — a stored tag wins, and untagged text *acts as* Roman Urdu (it
+gets the Roman-Urdu tint and takes roman input). Native text carries no tint;
+nothing else changes for it.
 
 Tag a span three ways. Select text and use the right-click menu ("Region:
-Latin", "Region: Roman Urdu"), or with a selection press `Ctrl+1` for Latin or
-`Ctrl+2` for Roman Urdu, or call the API:
+Native", "Region: Roman Urdu"), or with a selection press `Ctrl+1` for Native
+or `Ctrl+2` for Roman Urdu, or call the API:
 
 ```python
 from pyraya import RegionType
 
-editor.setRegionType(RegionType.Latin, 0, 12)  # tag characters 0 through 11
-editor.regions()       # every tagged span as TextRegion(start, end, kind)
-editor.clearRegions()  # the whole document back to Roman Urdu
+editor.setRegionType(RegionType.Native, 0, 12)  # tag characters 0 through 11
+editor.regions()  # every tagged span as TextRegion(start, end, kind)
+editor.clearRegions()  # every character resolves to the seed kind again
 ```
 
 The tags live in the document itself, so they survive edits and undo. Each
 method that changes regions emits `regionsChanged` once when it finishes.
-`setRegionColor(kind, color)` recolors one kind, inside this widget only.
+`seedRegionKind()` answers the kind untagged text resolves to; the seed is
+read-only. `setRegionColor(kind, color)` recolors one kind's tint, inside
+this widget only — it touches no document state and repaints the tint
+immediately.
 
 ## Roman input
 
@@ -107,8 +111,8 @@ The underline is on by default. Any Arabic-script word inside a Roman Urdu
 region that the romanalfaz dictionary does not know gets a wavy brick-red
 underline, so unknown words are visible without interrupting the flow. It is
 display only: nothing corrects, nothing suggests, nothing enters the undo
-stack, and Latin-region text is never underlined. The switch is independent of
-roman input, so you can run the underline alone:
+stack, and Native-region text is never underlined. The switch is independent
+of roman input, so you can run the underline alone:
 
 ```python
 editor.setSpellCheckEnabled(False)  # hide the underlines
@@ -125,7 +129,7 @@ pyraya/
 ├── src/
 │   └── pyraya/
 │       ├── pyraya_widget.py  # the PyRaya widget and its highlighter
-│       ├── regions.py        # region model: types, spans, colors
+│       ├── regions.py        # region model: kinds, spans, seed, stored-tag property
 │       ├── roman_input.py    # roman-input engine and overlay widgets
 │       ├── __init__.py       # public API and the demo entry point
 │       └── py.typed          # typing marker
