@@ -501,3 +501,4 @@ git add AGENTS.md README.md pyproject.toml uv.lock && git commit -m "docs: regio
   `seedRegionKind()`, `_kindRuns`, `_paintResolvedKinds`, `_rehighlightTags`,
   `_typingKindAt`, `_pendingTagRepaint` — consistent across tasks.
 - Review Focus lines 1–5 each have a named owning test (Task 1 Step 2).
+- Post-execution note (2026-10-23): probe C's premise ("format-only writes and their undo do not trigger a re-highlight") did not reproduce on the shipped dependency set — measured twice (reviewer + executor probes): Qt auto-re-highlights the property-merge write and its undo/redo through its own contentsChange reactions, and the Python `undo()`/`redo()` overrides are dispatched for programmatic undo/redo only (keyboard Ctrl+Z bypasses them). Kept `_pendingTagRepaint` + overrides as belt-and-braces; corrected in AGENTS.md and the touched docstrings ("Measured correction").
