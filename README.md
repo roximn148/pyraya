@@ -120,6 +120,36 @@ of roman input, so you can run the underline alone:
 editor.setSpellCheckEnabled(False)  # hide the underlines
 ```
 
+## Keyboard shortcuts
+
+**In the document:**
+
+| Key | Action |
+| --- | --- |
+| `Ctrl+1` | Tag the current selection as a Native region |
+| `Ctrl+2` | Tag the current selection as a Roman Urdu region |
+| `Ctrl+Space` | Turn assist mode on and open the overlay over the word under the cursor — or, with no such word, an empty overlay at the cursor |
+| `Ctrl+Esc` | Turn assist mode off and close a shown overlay |
+| `Left` / `Right` | Move the cursor in visual (screen) order — the document is right-to-left, so the keys are remapped |
+
+**In the roman-input overlay** (open over a word; see [Roman input](#roman-input)):
+
+| Key | Action |
+| --- | --- |
+| `Up` / `Down` | Move the highlighted suggestion, with wraparound |
+| `Space` | Commit the selected word and a space |
+| `Enter` | Commit the selected word, no newline |
+| `Ctrl+Enter` | Commit the selected word and a newline |
+| Typed punctuation | Commit the word and the mark — ASCII punctuation and the Urdu separator marks (؟ ، ؛ ۔ ٫ ٬ ؜) |
+| `Left` at the left edge / `Right` at the right edge | Move to the adjacent word without writing |
+| `Ctrl+Up` / `Ctrl+Down` | Commit the selected word without a separator, and move the cursor one line up or down |
+| `Esc` | Close the overlay; assist mode stays on |
+| `Ctrl+Esc` | Close the overlay and turn assist mode off |
+
+The standard Qt editing shortcuts (undo, redo, Home/End, ...) work as
+usual, and `Ctrl+Space` and `Ctrl+Esc` work whether or not the overlay is
+open.
+
 ## Repository layout
 
 ```text
