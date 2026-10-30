@@ -8,6 +8,7 @@ Runs headless via the offscreen Qt platform so no window is opened.
 
 import os
 from collections.abc import Generator
+from pathlib import Path
 from typing import cast
 
 import pytest
@@ -33,12 +34,13 @@ from pyraya.roman_input import (
     RomanInputEngine,
     RomanOverlay,
     SuggestionList,
+    _DefaultVocabulary,
     _ListBorder,
     _SuggestionRow,
 )
 
 # Verified zero-match roman strings (no suggestions at distance 0..2).
-ZERO_MATCH_WORDS = ["xqwzrty", "qzxv", "kzqwxv", "zxrqvz", "qwzxq"]
+ZERO_MATCH_WORDS = ["xqwzrty", "qzxvr", "kzqwxv", "zxqvw", "zxrqvz"]
 
 
 # ******************************************************************************
@@ -134,7 +136,7 @@ def testEngineUnavailable(monkeypatch) -> None:
     """A DictionaryNotFoundError yields an unavailable, non-crashing engine."""
 
     class _Missing:
-        def __init__(self) -> None:
+        def __init__(self, vocabularies=None) -> None:
             raise DictionaryNotFoundError("missing")
 
     monkeypatch.setattr("pyraya.roman_input.RomanAlfaz", _Missing)
@@ -143,6 +145,33 @@ def testEngineUnavailable(monkeypatch) -> None:
     assert engine.suggest("khosh") == []
     assert engine.suggestTiers("khosh") == []
     assert engine.learnRomanWord("xqwzrty") == "xqwzrty"
+
+
+# ******************************************************************************
+def testDefaultWordlistIsQamoos() -> None:
+    """The engine's default Vocabulary is the package's qamoos wordlist.
+
+    qamoos.sym is passed as a starter vocabulary, so RomanAlfaz's bundled
+    UrduWords5k.sym fallback is skipped: exactly one Vocabulary is
+    attached, and it is qamoos's — whose top word leads an exact lookup.
+    """
+    engine = RomanInputEngine()
+    assert engine.available is True
+    alfaz = engine._alfaz
+    assert alfaz is not None
+    assert len(alfaz.vocabularies) == 1
+    assert alfaz.vocabularies[0].counter == Vocabulary.load(str(_DefaultVocabulary)).counter
+    assert engine.hasWord("کے")
+    assert engine.suggest("ke")[0].arabic == "کے"
+
+
+# ******************************************************************************
+def testEngineUnavailableOnMissingDefaultWordlist(monkeypatch) -> None:
+    """A missing qamoos.sym yields an unavailable, non-crashing engine."""
+    monkeypatch.setattr("pyraya.roman_input._DefaultVocabulary", Path("nonexistent.sym"))
+    engine = RomanInputEngine()
+    assert engine.available is False
+    assert engine.suggest("khosh") == []
 
 
 # ******************************************************************************
@@ -644,7 +673,7 @@ def testOverlayUnavailableOffersNothing(app: QApplication, monkeypatch) -> None:
     """An unavailable engine offers no rows, no undefined-word row, and no crash."""
 
     class _Missing:
-        def __init__(self) -> None:
+        def __init__(self, vocabularies=None) -> None:
             raise DictionaryNotFoundError("missing")
 
     monkeypatch.setattr("pyraya.roman_input.RomanAlfaz", _Missing)
@@ -1648,6 +1677,7 @@ def testSeededOverlayFlipsListAboveAtLowCursor(app: QApplication) -> None:
     _sendKey(widget, Qt.Key.Key_D, "d")
     overlay = widget._overlay
     assert overlay is not None and overlay.isVisible()
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_A, "a")  # "da" fills several rows
     anchor = widget._anchorPosition
     assert anchor is not None
     rightX, top = widget._cursorAnchor(anchor)
@@ -1664,7 +1694,7 @@ def testSeededOverlayFlipsListAboveAtLowCursor(app: QApplication) -> None:
     assert listHint > belowRoom  # and the list does not fit below either
     rightX, top = widget._cursorAnchor(anchor)  # the width is unchanged; no reflow
     assert overlay.isVisible()
-    assert overlay.lineEdit().text() == "d"  # the typed text survived the resize
+    assert overlay.lineEdit().text() == "da"  # the typed text survived the resize
     lineTop = _lineTopInView(overlay, widget.viewport())
     assert lineTop == top  # the line edit sits on the anchor's line
     assert _listAbove(overlay)

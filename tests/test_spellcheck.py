@@ -180,7 +180,7 @@ def testSpellCheckIndependentOfRomanInput(app: QApplication) -> None:
 def testEngineUnavailableNoUnderline(app: QApplication, monkeypatch) -> None:
     """A dictionary-less engine is an underline no-op, never a crash."""
 
-    def _missing(self=None):
+    def _missing(self, vocabularies=None):
         raise DictionaryNotFoundError("missing")
 
     class _Missing:

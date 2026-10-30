@@ -12,16 +12,19 @@ words into the encoded roman form the lookup consumes, and exposes
 simply returns the typed word as-is, and the hook for the future learning
 feature.
 
-The engine (and its ~0.2 s cold dictionary load) is created on the first
+The engine (and its ~0.3 s cold dictionary load) is created on the first
 overlay activation, or the first spell-check re-highlight whose block
-contains a candidate word — never during widget construction. If the
-default wordlist is missing (:class:`romanalfaz.DictionaryNotFoundError`),
-the engine surfaces an unavailable state rather than raising: suggestions
-are empty and :meth:`RomanInputEngine.learnRomanWord` still works.
+contains a candidate word — never during widget construction. The
+package's own ``qamoos.sym`` wordlist is the engine's default Vocabulary
+(replacing romanalfaz's bundled ``UrduWords5k.sym``); if it is missing or
+malformed (:class:`romanalfaz.DictionaryNotFoundError`), the engine
+surfaces an unavailable state rather than raising: suggestions are empty
+and :meth:`RomanInputEngine.learnRomanWord` still works.
 """
 
 import string
 from dataclasses import dataclass
+from pathlib import Path
 
 from PySide6.QtCore import QObject, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import (
@@ -58,6 +61,12 @@ __all__ = [
     "RomanLineEdit",
     "MaxVisibleRows",
 ]
+
+# ******************************************************************************
+#: The package's own roman wordlist (SymSpell ``word$frequency`` lines),
+#: loaded as the engine's default Vocabulary on construction, replacing
+#: romanalfaz's bundled ``UrduWords5k.sym`` fallback.
+_DefaultVocabulary = Path(__file__).with_name("qamoos.sym")
 
 # ******************************************************************************
 #: The vertical spacing between the overlay's line edit and its suggestion
@@ -149,8 +158,11 @@ class _SuggestionRow:
 class RomanInputEngine:
     """Thin wrapper around a :class:`romanalfaz.RomanAlfaz` engine.
 
-    The default romanalfaz wordlist is loaded on construction and the
-    document-local in-memory :class:`Vocabulary` is attached to it via
+    The package's own wordlist (:data:`_DefaultVocabulary`, ``qamoos.sym``)
+    is loaded on construction as the engine's default Vocabulary — passed
+    as a starter vocabulary to :class:`RomanAlfaz`, replacing the bundled
+    ``UrduWords5k.sym`` fallback — and the document-local in-memory
+    :class:`Vocabulary` is attached to it via
     :meth:`RomanAlfaz.addVocabulary` (so local mutations automatically
     recompile the lookup index). The local vocabulary is never mutated in
     this session — :meth:`learnRomanWord` is a no-op and is the hook for the
@@ -180,12 +192,18 @@ class RomanInputEngine:
         self._alfaz: RomanAlfaz | None = None
         self.available = False
         try:
-            alfaz = RomanAlfaz()
+            # The package's own wordlist is the engine's default
+            # Vocabulary: passed as a starter vocabulary to RomanAlfaz,
+            # which skips its bundled UrduWords5k.sym fallback. A missing
+            # or malformed file surfaces as the same unavailable state
+            # as a bundled-wordlist miss.
+            defaultVocabulary = Vocabulary.load(str(_DefaultVocabulary))
+            alfaz = RomanAlfaz(vocabularies=[defaultVocabulary])
             if localVocabulary is not None:
                 alfaz.addVocabulary(localVocabulary)
             self._alfaz = alfaz
             self.available = True
-        except DictionaryNotFoundError:
+        except DictionaryNotFoundError, OSError, ValueError:
             self._alfaz = None
             self.available = False
 

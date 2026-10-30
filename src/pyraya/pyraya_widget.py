@@ -1068,7 +1068,7 @@ class PyRaya(QPlainTextEdit):
     def romanEngine(self) -> RomanInputEngine | None:
         """The roman-input engine, or ``None`` while the feature is disabled.
 
-        Lazily creates the engine (with its ~0.2 s dictionary cold load) on
+        Lazily creates the engine (with its ~0.3 s dictionary cold load) on
         first call while the feature is enabled; subsequent calls return the
         same instance.
 
@@ -1104,7 +1104,7 @@ class PyRaya(QPlainTextEdit):
         needs it.
 
         Both the roman-input overlay and the spell-check pass consult the
-        same engine instance, so the ~0.2 s dictionary cold load happens
+        same engine instance, so the ~0.3 s dictionary cold load happens
         at most once per widget.
 
         Returns:
