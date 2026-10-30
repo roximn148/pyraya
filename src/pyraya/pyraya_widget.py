@@ -1783,6 +1783,16 @@ class PyRaya(QPlainTextEdit):
         contract: :attr:`regionsChanged` means "a region-touching operation
         invoked through the widget has completed"). An edge commit writes
         nothing and emits neither.
+
+        A Ctrl+Up / Ctrl+Down commit (``Key_Up`` / ``Key_Down``) additionally
+        moves the document cursor one line up or down, in the ``finally``
+        block after ``_committing`` clears: a cursor move during the commit
+        is swallowed by the :meth:`_syncOverlay` funnel's early exit, and
+        the resync is suppressed, so the ``setTextCursor`` there is the
+        funnel's only chance to observe the move — the document must behave
+        exactly as if Up/Down had been pressed in it (a roman-urdu word
+        under the landing cursor re-activates the overlay by the normal
+        assist rules; a bare position stays quiet).
         """
         engine = self.romanEngine()
         overlay = self._overlay
@@ -1805,6 +1815,19 @@ class PyRaya(QPlainTextEdit):
                 # reconciliation still runs even if a button happens to be
                 # held down (see ``_syncOverlay``).
                 self._syncOverlay(bypassMouse=True)
+            if key in (Qt.Key.Key_Up, Qt.Key.Key_Down):
+                # The Ctrl+Up / Ctrl+Down line move, after ``_committing``
+                # clears and the resync runs: ``setTextCursor`` is the
+                # funnel's only chance to observe the move, and the
+                # document must behave exactly as if Up/Down had been
+                # pressed in it.
+                cursor = self.textCursor()
+                cursor.movePosition(
+                    QTextCursor.MoveOperation.Up
+                    if key == Qt.Key.Key_Up
+                    else QTextCursor.MoveOperation.Down
+                )
+                self.setTextCursor(cursor)
 
     # ==========================================================================
     def _committedWord(self, engine: RomanInputEngine, typedRoman: str, selected: object) -> str:
@@ -1834,16 +1857,20 @@ class PyRaya(QPlainTextEdit):
         """The separator a committing key delivers, and its resync decision.
 
         One place for the separator/edge/write decisions (B6). A plain
-        ``Key_Return`` commits the literal ``"\\n"`` (its ``keyText`` is
-        platform-dependent); ``Key_Return`` with ``ControlModifier``
-        commits the empty separator — the cursor rests at the committed
-        word's end, which is over the word, so the resync would only
-        re-trigger the overlay the user just dismissed — and suppresses the
-        resync; every other committing key commits its ``keyText``
-        (``Key_Space``, typed punctuation — including the Arabic script's
-        own separator marks) and resyncs. The edge keys (``Key_Left`` /
-        ``Key_Right``) handle their own separator ("") and decision in
-        :meth:`_edgeCommit`.
+        ``Key_Return`` commits the empty separator — the cursor rests at
+        the committed word's end, which is over the word, so the resync
+        would only re-trigger the overlay the user just dismissed — and
+        suppresses the resync; ``Key_Return`` with ``ControlModifier``
+        commits the literal ``"\\n"`` (its ``keyText`` is
+        platform-dependent) and resyncs; ``Key_Up`` / ``Key_Down`` (the
+        Ctrl+Up / Ctrl+Down commit — the line edit's gate guarantees the
+        exact Ctrl mask) commit the empty separator and suppress the
+        resync, and the caller moves the document cursor one line
+        (:meth:`_onOverlayCommitted`); every other committing key commits
+        its ``keyText`` (``Key_Space``, typed punctuation — including the
+        Arabic script's own separator marks) and resyncs. The edge keys
+        (``Key_Left`` / ``Key_Right``) handle their own separator ("") and
+        decision in :meth:`_edgeCommit`.
 
         Args:
             key: The committing Qt key.
@@ -1857,8 +1884,10 @@ class PyRaya(QPlainTextEdit):
         """
         if key == Qt.Key.Key_Return:
             if modifiers & Qt.KeyboardModifier.ControlModifier.value:
-                return "", False
-            return "\n", True
+                return "\n", True
+            return "", False
+        if key in (Qt.Key.Key_Up, Qt.Key.Key_Down):
+            return "", False
         return keyText, True
 
     # ==========================================================================

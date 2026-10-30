@@ -1180,10 +1180,10 @@ def testGeometryBounds(app: QApplication) -> None:
 
 # ******************************************************************************
 def testTypingInSecondParagraphAfterEnterCommit(app: QApplication) -> None:
-    """Typing in the second paragraph after an Enter commit does not crash.
+    """Typing in the second paragraph after a Ctrl+Enter commit does not crash.
 
-    The Enter commit moves the cursor into the second block, so the seeded
-    overlay's anchor — and every subsequent keystroke — resolves line
+    The Ctrl+Enter commit moves the cursor into the second block, so the
+    seeded overlay's anchor — and every subsequent keystroke — resolves line
     geometry in that block's own layout. ``lineForTextPosition`` and
     ``cursorToX`` take block-local positions; the absolute position overflowed
     the block's layout (a non-None invalid line whose calls segfaulted), and
@@ -1197,7 +1197,12 @@ def testTypingInSecondParagraphAfterEnterCommit(app: QApplication) -> None:
     assert overlay is not None and overlay.isVisible()
     for key, letter in ((Qt.Key.Key_O, "o"), (Qt.Key.Key_S, "s"), (Qt.Key.Key_T, "t")):
         _sendKey(overlay.lineEdit(), key, letter)
-    _sendKey(overlay.lineEdit(), Qt.Key.Key_Return, "\n")
+    _sendKey(
+        overlay.lineEdit(),
+        Qt.Key.Key_Return,
+        "\n",
+        Qt.KeyboardModifier.ControlModifier,
+    )
     assert widget.toPlainText() == "دوست\n"
     # paragraph 2: typing seeds the overlay in the second block
     _sendKey(widget, Qt.Key.Key_H, "h")
@@ -2509,7 +2514,7 @@ def testScenario1CommitReplacesSelection(app: QApplication) -> None:
     assert widget.toPlainText() == "hello " + word + " "
     assert widget.document().isUndoAvailable()
 
-    # Enter commits the word plus the newline over the same selection
+    # Ctrl+Enter commits the word plus the newline over the same selection
     widget2 = PyRaya()
     widget2.show()
     widget2.setPlainText(original)
@@ -2526,7 +2531,12 @@ def testScenario1CommitReplacesSelection(app: QApplication) -> None:
     suggestion2 = row2.suggestion
     assert suggestion2 is not None
     word2 = suggestion2.arabic
-    _sendKey(overlay2.lineEdit(), Qt.Key.Key_Return, "\n")
+    _sendKey(
+        overlay2.lineEdit(),
+        Qt.Key.Key_Return,
+        "\n",
+        Qt.KeyboardModifier.ControlModifier,
+    )
     # a block-terminator character cannot carry a character format, so the
     # newline stays untagged; the committed word characters are RomanUrdu
     assert widget2.toPlainText() == "hello " + word2 + "\n"
@@ -2730,7 +2740,8 @@ def testPostCommitResyncBypassesMouseFlag(app: QApplication) -> None:
 
 # ******************************************************************************
 def testSeparatorCommits(app: QApplication) -> None:
-    """Space, Enter, and typed punctuation commit the word plus separator."""
+    """Space and typed punctuation commit the word plus separator; a plain
+    Enter commits the bare word."""
 
     def setup() -> tuple[PyRaya, RomanOverlay]:
         widget = PyRaya()
@@ -2751,13 +2762,12 @@ def testSeparatorCommits(app: QApplication) -> None:
     assert widget._regionKindAt(9) == RegionType.RomanUrdu  # separator colored
     assert not overlay.isVisible()
 
-    # Enter
+    # Enter: the bare word, no separator, the resync suppressed (the
+    # cursor rests at the committed word's end, over the word)
     widget, overlay = setup()
     _sendKey(overlay.lineEdit(), Qt.Key.Key_Return, "\n")
-    assert widget.toPlainText() == "hello خوش\n world"
-    assert widget.textCursor().position() == 10
-    # a block-terminator character cannot carry a character format, so the
-    # newline stays untagged; the committed word characters are RomanUrdu
+    assert widget.toPlainText() == "hello خوش world"
+    assert widget.textCursor().position() == 9
     assert widget._regionKindAt(8) == RegionType.RomanUrdu
     assert not overlay.isVisible()
 
@@ -2842,8 +2852,9 @@ def testArabicSeparatorsAreWordBoundaries(app: QApplication) -> None:
 
 
 # ******************************************************************************
-def testCtrlReturnCommitsWithoutNewline(app: QApplication) -> None:
-    """Ctrl+Enter commits the word without a newline; plain Enter adds one."""
+def testReturnCommitsWithoutNewline(app: QApplication) -> None:
+    """Plain Enter commits the word without a newline; the resync is
+    suppressed, and the next trigger re-activates the overlay."""
 
     def setup() -> tuple[PyRaya, RomanOverlay]:
         widget = PyRaya()
@@ -2856,16 +2867,12 @@ def testCtrlReturnCommitsWithoutNewline(app: QApplication) -> None:
         assert overlay is not None and overlay.isVisible()
         return widget, overlay
 
-    # Ctrl+Enter: the committed word replaces the span with no newline and
-    # no cursor navigation.
+    # Plain Enter: the committed word replaces the span with no newline,
+    # the cursor rests at the word's end, and the resync is suppressed.
     widget, overlay = setup()
-    _sendKey(
-        overlay.lineEdit(),
-        Qt.Key.Key_Return,
-        "\n",
-        Qt.KeyboardModifier.ControlModifier,
-    )
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Return, "\n")
     assert widget.toPlainText() == "hello خوش world"
+    assert widget.document().blockCount() == 1
     assert widget.textCursor().position() == 9  # no newline after the word
     assert widget._regionKindAt(8) == RegionType.RomanUrdu
     _assertNoOverlay(widget)
@@ -2877,11 +2884,223 @@ def testCtrlReturnCommitsWithoutNewline(app: QApplication) -> None:
     assert overlay is not None and overlay.isVisible()
     assert overlay.lineEdit().text() == "khosh"
 
-    # Plain Enter: the same commit plus a newline.
-    widget, overlay = setup()
-    _sendKey(overlay.lineEdit(), Qt.Key.Key_Return, "\n")
+
+# ******************************************************************************
+def testCtrlReturnCommitsWithNewline(app: QApplication) -> None:
+    """Ctrl+Enter commits the word plus a newline, opening the second block.
+
+    The resync runs: the cursor lands at the new block's start, a bare
+    position, so the overlay stays quiet until the next trigger.
+    """
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello خوش world")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    _sendKey(
+        overlay.lineEdit(),
+        Qt.Key.Key_Return,
+        "\n",
+        Qt.KeyboardModifier.ControlModifier,
+    )
     assert widget.toPlainText() == "hello خوش\n world"
-    assert widget.textCursor().position() == 10
+    assert widget.document().blockCount() == 2
+    assert widget.textCursor().position() == 10  # start of the second block
+    # a block-terminator character cannot carry a character format, so the
+    # newline stays untagged; the committed word characters are RomanUrdu
+    assert widget._regionKindAt(8) == RegionType.RomanUrdu
+    _assertNoOverlay(widget)
+
+
+# ******************************************************************************
+def testCtrlUpCommitsBareAndMovesOneLineUp(app: QApplication) -> None:
+    """Ctrl+Up commits the selected word bare and moves the cursor up one line.
+
+    The commit runs through the normal write path (RomanUrdu tag,
+    ``regionsChanged`` and ``romanWordCommitted`` emitted, one logical undo
+    step), the overlay is closed, assist mode stays on, and the line move
+    lands exactly one line up: the document behaves as if Up had been pressed
+    in it.
+    """
+    widget = PyRaya()
+    widget.show()
+    original = "hello\nخوش\nworld"
+    widget.setPlainText(original)
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    committed: list[tuple[str, str]] = []
+    changed: list[int] = []
+    widget.romanWordCommitted.connect(lambda w, r: committed.append((w, r)))
+    widget.regionsChanged.connect(lambda: changed.append(1))
+    baseline = widget.document().availableUndoSteps()
+    _sendKey(
+        overlay.lineEdit(),
+        Qt.Key.Key_Up,
+        "",
+        Qt.KeyboardModifier.ControlModifier,
+    )
+    # the word commits bare: no separator character, the text is unchanged
+    assert widget.toPlainText() == original
+    # the cursor moved exactly one line up: from block 1 to block 0, over
+    # the last character of the Latin word hello (position 4)
+    assert widget.textCursor().blockNumber() == 0
+    assert widget.textCursor().position() == 4
+    assert committed == [("خوش", "khosh")]
+    assert changed == [1]
+    _assertNoOverlay(widget)
+    assert widget.isAssistEnabled() is True
+    # the span replacement is counted as two undo steps (delete + insert),
+    # but a single undo reverts the whole commit
+    assert widget.document().availableUndoSteps() == baseline + 2
+    widget.undo()
+    assert widget.toPlainText() == original
+    assert widget.document().availableUndoSteps() == baseline
+    # redoing takes the tag step and the commit step, no ping-pong
+    widget.redo()
+    widget.redo()
+    assert widget.toPlainText() == original
+    assert widget.document().isUndoAvailable()
+
+
+# ******************************************************************************
+def testCtrlDownCommitsBareAndMovesOneLineDown(app: QApplication) -> None:
+    """Ctrl+Down commits the selected word bare and moves the cursor down one
+    line: the Ctrl+Up contract's symmetric half."""
+    widget = PyRaya()
+    widget.show()
+    original = "hello\nخوش\nworld"
+    widget.setPlainText(original)
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    _sendKey(
+        overlay.lineEdit(),
+        Qt.Key.Key_Down,
+        "",
+        Qt.KeyboardModifier.ControlModifier,
+    )
+    assert widget.toPlainText() == original
+    # the cursor moved exactly one line down: from block 1 to block 2,
+    # over the last character of the Latin word world (position 14)
+    assert widget.textCursor().blockNumber() == 2
+    assert widget.textCursor().position() == 14
+    _assertNoOverlay(widget)
+    assert widget.isAssistEnabled() is True
+
+
+# ******************************************************************************
+def testCtrlUpLandingOnRomanUrduWordReactivatesOverlay(app: QApplication) -> None:
+    """Ctrl+Up landing on a line whose word sits under the cursor re-activates
+    the overlay: the line move passes through the document's normal assist
+    rules."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("دوست\nخوش\nworld")
+    widget.setRomanInputEnabled(True)
+    _moveCursor(widget, 6)  # inside block 1's word خوش (5..8)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    _sendKey(
+        overlay.lineEdit(),
+        Qt.Key.Key_Up,
+        "",
+        Qt.KeyboardModifier.ControlModifier,
+    )
+    # the line move lands at block 0's word's end, over the word دوست
+    assert widget.textCursor().position() == 4
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    assert widget._activeWord == (0, 4)
+    assert overlay.lineEdit().text() == "dost"
+
+
+# ******************************************************************************
+def testCtrlUpLandingWithoutWordStaysQuiet(app: QApplication) -> None:
+    """Ctrl+Up landing where no word sits under the cursor leaves no overlay:
+    the line move passes through, and the document stays quiet."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello\nخوش\nworld")
+    widget.setRomanInputEnabled(True)
+    _moveCursor(widget, 7)  # inside block 1's word خوش (6..9)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    _sendKey(
+        overlay.lineEdit(),
+        Qt.Key.Key_Up,
+        "",
+        Qt.KeyboardModifier.ControlModifier,
+    )
+    # the line move lands over the Latin word hello, whose characters are
+    # not an Arabic word run, so no overlay activates
+    assert widget.textCursor().position() == 4
+    _assertNoOverlay(widget)
+
+
+# ******************************************************************************
+def testCtrlShiftUpDownStayListNavigation(app: QApplication) -> None:
+    """Ctrl+Shift+Up/Down on the active overlay move only the list highlight:
+    the exact-Ctrl mask excludes Shift, so they keep the plain Up/Down list
+    navigation — the document is untouched and the overlay stays active."""
+    widget = PyRaya()
+    widget.show()
+    original = "hello خوش world"
+    widget.setPlainText(original)
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    overlay.setText("khos")  # six distance-1 suggestions
+    suggestionList = overlay.suggestionList()
+    assert suggestionList.rowCount() > 1
+    assert suggestionList.selectedIndex() == 0
+    shift = Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Down, "", shift)
+    assert suggestionList.selectedIndex() == 1
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Up, "", shift)
+    assert suggestionList.selectedIndex() == 0
+    # no commit: the document, the cursor, and the overlay are all untouched
+    assert widget.toPlainText() == original
+    assert widget.textCursor().position() == 7
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    assert overlay.lineEdit().text() == "khos"
+
+
+# ******************************************************************************
+def testCtrlUpEmptyTextCommitRemovesSpan(app: QApplication) -> None:
+    """An empty-overlay commit via Ctrl+Up follows the empty-commit contract
+    (span removal) plus the line move: the span is deleted, no separator is
+    written, and the cursor lands one line up."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello\nخوش\nworld")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    overlay.setText("")  # clear the overlay text
+    _sendKey(
+        overlay.lineEdit(),
+        Qt.Key.Key_Up,
+        "",
+        Qt.KeyboardModifier.ControlModifier,
+    )
+    # span deleted (the surrounding newlines stay), no separator takes its
+    # place, the cursor one line up, over the last character of hello
+    assert widget.toPlainText() == "hello\n\nworld"
+    assert widget.textCursor().blockNumber() == 0
+    assert widget.textCursor().position() == 5
     _assertNoOverlay(widget)
 
 

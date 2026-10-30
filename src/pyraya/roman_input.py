@@ -571,12 +571,16 @@ class RomanLineEdit(QLineEdit):
     The roman text renders in left-to-right character order, so position 0 is
     the visually left edge and the text end the visually right edge. Typing
     letters/digits edits the roman text and refreshes the suggestions
-    synchronously. Space, Enter, and any typed punctuation character commit
-    the selected suggestion together with the separator character. Left at
-    the visually left edge, or Right at the visually right edge, commits at
-    the edge (no separator character); in-text Left/Right move the cursor
-    visually left/right without committing. Up/Down move the highlighted
-    suggestion with wraparound. Esc cancels. Wheel events are explicitly
+    synchronously. Space and any typed punctuation character commit the
+    selected suggestion together with the separator character; a plain
+    Enter commits the word without one, and Ctrl+Enter commits the word
+    plus a newline. Left at the visually left edge, or Right at the
+    visually right edge, commits at the edge (no separator character);
+    in-text Left/Right move the cursor visually left/right without
+    committing. Up/Down move the highlighted suggestion with wraparound;
+    Ctrl+Up and Ctrl+Down (the exact Ctrl mask, no Shift/Alt/Meta) commit
+    the selected word bare and move the document cursor one line up or
+    down. Esc cancels. Wheel events are explicitly
     forwarded to the nearest scroll-area ancestor, because
     ``QCoreApplication.sendEvent`` does not bubble to parents.
 
@@ -637,12 +641,20 @@ class RomanLineEdit(QLineEdit):
             overlay.canceled.emit()
             event.accept()
             return
+        text = event.text()
+        modifiers = event.modifiers().value
         if key in (Qt.Key.Key_Up, Qt.Key.Key_Down):
+            # Up/Down with the exact Ctrl mask (no Shift/Alt/Meta) commits
+            # the selected word bare and moves the document cursor one
+            # line; every other Up/Down (plain, Ctrl+Shift, …) navigates
+            # the suggestion list.
+            if modifiers == Qt.KeyboardModifier.ControlModifier.value:
+                overlay.commit(key, text, modifiers)
+                event.accept()
+                return
             overlay.moveSelection(-1 if key == Qt.Key.Key_Up else 1)
             event.accept()
             return
-        text = event.text()
-        modifiers = event.modifiers().value
         if key in (Qt.Key.Key_Space, Qt.Key.Key_Return) or (text and text in _Separators):
             overlay.commit(key, text, modifiers)
             event.accept()
@@ -693,8 +705,10 @@ class RomanOverlay(QWidget):
         committed: ``(typedRoman: str, selected: object, key: int,
             keyText: str, modifiers: int)`` — emitted on a committing key
             stroke: a separator-key commit (Space, Enter, typed punctuation —
-            plain Enter commits the word plus a newline, Ctrl+Enter commits
-            the word without a newline) or an edge commit (Left at the
+            a plain Enter commits the word without a newline, Ctrl+Enter
+            commits the word plus a newline, and Ctrl+Up / Ctrl+Down commit
+            the word bare and move the document cursor one line up or down),
+            or an edge commit (Left at the
             visually left edge, i.e. the start of the text, or Right at the
             visually right edge, i.e. the end, which commits without a
             separator). ``typedRoman`` is the overlay's typed text;
@@ -882,8 +896,9 @@ class RomanOverlay(QWidget):
         word from the selected row's :class:`Suggestion` (the undefined-word
         row's blank ``Suggestion`` maps through
         :meth:`RomanInputEngine.learnRomanWord`), and the separator from
-        ``key`` and ``keyText`` — plain ``Key_Return`` commits with a
-        newline, ``Key_Return`` with ``ControlModifier`` without one,
+        ``key`` and ``keyText`` — plain ``Key_Return`` commits without a
+        newline, ``Key_Return`` with ``ControlModifier`` with a newline,
+        ``Key_Up`` / ``Key_Down`` (the exact-Ctrl Up/Down) bare,
         ``Key_Space`` and typed punctuation with ``keyText``, and
         ``Key_Left`` / ``Key_Right`` are edge commits.
 
