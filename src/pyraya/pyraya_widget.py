@@ -1571,14 +1571,20 @@ class PyRaya(QPlainTextEdit):
         return self._overlay is not None and self._overlay.isVisible()
 
     # ==========================================================================
-    def _onOverlayCanceled(self) -> None:
+    def _onOverlayCanceled(self, modifiers: int) -> None:
         """Handle the overlay's Esc: the user wants to be left alone.
 
-        Turns assist mode off, then deactivates the overlay. This is the
-        only path that flips assist mode off — commits and cursor-driven
-        deactivation leave it on.
+        A plain Esc (any modifiers other than the exact Ctrl mask) dismisses
+        the overlay only — assist mode stays on, so typing and cursor
+        movement re-trigger the overlay by the normal assist rules.
+        Ctrl+Esc (the exact Ctrl mask, no Shift/Alt/Meta) additionally
+        turns assist mode off, leaving the user alone until Ctrl+Space in
+        the document or :meth:`setAssistEnabled` turns the mode back on.
+        This is the only path that flips assist mode off on Ctrl+Esc —
+        commits and cursor-driven deactivation leave it on.
         """
-        self._assistMode = False
+        if modifiers == Qt.KeyboardModifier.ControlModifier.value:
+            self._assistMode = False
         self._deactivateOverlay()
 
     # ==========================================================================
@@ -2111,7 +2117,11 @@ class PyRaya(QPlainTextEdit):
         back on and
         activates the overlay — over the RomanUrdu word under the cursor
         with its romanized text, or, with no such word, an empty overlay
-        at the cursor — and never reaches the document. While the
+        at the cursor — and never reaches the document. ``Ctrl+Esc`` (the
+        exact Ctrl mask) turns assist mode off and deactivates the overlay
+        — balancing ``Ctrl+Space``'s re-entry; the overlay is inactive
+        here, since an active overlay holds focus in the line edit, so the
+        key never reaches the document either. While the
         roman-input feature is enabled, assist mode is on, and the
         overlay is inactive, an ASCII alphanumeric key pressed with the
         cursor inside a RomanUrdu region seeds the overlay with that
@@ -2144,6 +2154,20 @@ class PyRaya(QPlainTextEdit):
                     self._activateOverlay(word)
                 else:
                     self._activateOverlayAt("", self.textCursor().position())
+                return
+            if (
+                event.key() == Qt.Key.Key_Escape
+                and event.modifiers().value == Qt.KeyboardModifier.ControlModifier.value
+            ):
+                # Ctrl+Esc (the exact Ctrl mask, no Shift/Alt/Meta) turns
+                # assist mode off and deactivates the overlay — balancing
+                # Ctrl+Space's re-entry. An active overlay holds focus in
+                # the line edit, so the document never sees an Esc while
+                # the overlay is active; the deactivation drops any view
+                # suspension, like every other user decision.
+                self._assistMode = False
+                self._deactivateOverlay()
+                event.accept()
                 return
             if event.key() == Qt.Key.Key_1 and self.textCursor().hasSelection():
                 self.setRegionType(RegionType.Native)

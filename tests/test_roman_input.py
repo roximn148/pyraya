@@ -320,16 +320,28 @@ def testOverlayEdgeCommits(app: QApplication, engine: RomanInputEngine) -> None:
 
 # ******************************************************************************
 def testOverlayEscCancels(app: QApplication, engine: RomanInputEngine) -> None:
-    """Esc emits canceled and never commits."""
+    """Esc emits canceled with the key's modifiers and never commits."""
     overlay, _ = _makeOverlay(app, engine)
     overlay.setText("khosh")
     committed = []
     overlay.committed.connect(lambda *args: committed.append(args))
-    canceled = []
-    overlay.canceled.connect(lambda: canceled.append(None))
+    canceled: list[int] = []
+    overlay.canceled.connect(lambda modifiers: canceled.append(modifiers))
 
     _sendKey(overlay.lineEdit(), Qt.Key.Key_Escape)
-    assert len(canceled) == 1
+    assert canceled == [Qt.KeyboardModifier.NoModifier.value]
+    assert committed == []
+
+    _sendKey(
+        overlay.lineEdit(),
+        Qt.Key.Key_Escape,
+        "",
+        Qt.KeyboardModifier.ControlModifier,
+    )
+    assert canceled == [
+        Qt.KeyboardModifier.NoModifier.value,
+        Qt.KeyboardModifier.ControlModifier.value,
+    ]
     assert committed == []
 
 
@@ -1109,7 +1121,12 @@ def testCtrlSpaceAtWordEndActivatesOverlay(app: QApplication) -> None:
     _moveCursor(widget, 9)  # the word end: the cursor move activates the overlay
     overlay = widget._overlay
     assert overlay is not None and overlay.isVisible()
-    _sendKey(overlay.lineEdit(), Qt.Key.Key_Escape, "")  # dismiss it (assist mode off)
+    _sendKey(
+        overlay.lineEdit(),
+        Qt.Key.Key_Escape,
+        "",
+        Qt.KeyboardModifier.ControlModifier,
+    )  # dismiss it (assist mode off)
     _assertNoOverlay(widget)
     _sendKey(widget, Qt.Key.Key_Space, " ", Qt.KeyboardModifier.ControlModifier)
     overlay = widget._overlay
@@ -2024,9 +2041,9 @@ def testUserDeactivationSuppressesRestore(app: QApplication) -> None:
 
     The word-rect hit test's hiding is a view suspension that resumes
     when the word returns. A user decision — a mouse press anywhere, or
-    Esc turning assist mode off — is an explicit active/inactive state:
-    once the user walked away, scrolling back must not resurrect the
-    overlay over them.
+    Ctrl+Esc turning assist mode off — is an explicit active/inactive
+    state: once the user walked away, scrolling back must not resurrect
+    the overlay over them.
     """
     widget = PyRaya()
     widget.show()
@@ -2050,8 +2067,8 @@ def testUserDeactivationSuppressesRestore(app: QApplication) -> None:
     scrollbar.setValue(3)
     app.processEvents()
     assert not widget._overlayActive()
-    # Esc on an active overlay turns assist mode off; the user is left
-    # alone — no suspension outlives the assist-off state.
+    # Ctrl+Esc on an active overlay turns assist mode off; the user is
+    # left alone — no suspension outlives the assist-off state.
     widget2 = PyRaya()
     widget2.show()
     widget2.resize(400, 240)
@@ -2062,7 +2079,12 @@ def testUserDeactivationSuppressesRestore(app: QApplication) -> None:
     _moveCursor(widget2, span2[0] + 1)
     overlay2 = widget2._overlay
     assert overlay2 is not None and overlay2.isVisible()
-    _sendKey(overlay2.lineEdit(), Qt.Key.Key_Escape, "")  # assist mode off
+    _sendKey(
+        overlay2.lineEdit(),
+        Qt.Key.Key_Escape,
+        "",
+        Qt.KeyboardModifier.ControlModifier,
+    )  # assist mode off
     app.processEvents()
     assert not widget2._assistMode
     scrollbar2 = widget2.verticalScrollBar()
@@ -3556,8 +3578,8 @@ def testAssistModeOnByDefault(app: QApplication) -> None:
 
 
 # ******************************************************************************
-def testEscOnActiveOverlayTurnsAssistModeOff(app: QApplication) -> None:
-    """Esc on the active overlay dismisses it and turns assist mode off."""
+def testEscOnActiveOverlayDismissesOnly(app: QApplication) -> None:
+    """Esc on the active overlay dismisses it; assist mode stays on."""
     widget = PyRaya()
     widget.show()
     widget.setPlainText("hello خوش world دوست")
@@ -3567,7 +3589,136 @@ def testEscOnActiveOverlayTurnsAssistModeOff(app: QApplication) -> None:
     overlay = widget._overlay
     assert overlay is not None and overlay.isVisible()
     _sendKey(overlay.lineEdit(), Qt.Key.Key_Escape)
+    assert widget.isAssistEnabled() is True
+    _assertNoOverlay(widget)
+
+
+# ******************************************************************************
+def testCtrlEscOnActiveOverlayTurnsAssistModeOff(app: QApplication) -> None:
+    """Ctrl+Esc on the active overlay dismisses it and turns assist mode off:
+    the user is left alone until Ctrl+Space or setAssistEnabled."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello خوش world دوست")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    _sendKey(
+        overlay.lineEdit(),
+        Qt.Key.Key_Escape,
+        "",
+        Qt.KeyboardModifier.ControlModifier,
+    )
     assert widget.isAssistEnabled() is False
+    _assertNoOverlay(widget)
+
+
+# ******************************************************************************
+def testCtrlEscInDocumentTurnsAssistModeOff(app: QApplication) -> None:
+    """Ctrl+Esc in the document turns assist mode off directly, balancing
+    Ctrl+Space's re-entry; the overlay is already inactive, so no other
+    visible effect."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello خوش world دوست")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Escape)
+    assert widget.isAssistEnabled() is True  # plain Esc dismisses only
+    _assertNoOverlay(widget)
+    _sendKey(
+        widget,
+        Qt.Key.Key_Escape,
+        "",
+        Qt.KeyboardModifier.ControlModifier,
+    )
+    assert widget.isAssistEnabled() is False
+    _assertNoOverlay(widget)
+    # Shift+Ctrl+Esc does not turn assist off (the exact-Ctrl gate).
+    widget.setAssistEnabled(True)
+    _sendKey(
+        widget,
+        Qt.Key.Key_Escape,
+        "",
+        Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier,
+    )
+    assert widget.isAssistEnabled() is True
+
+
+# ******************************************************************************
+def testTypingReactivatesOverlayAfterEscDismissal(app: QApplication) -> None:
+    """A plain-Esc dismissal leaves assist on: a roman keystroke at the
+    cursor seeds the overlay again by the normal assist rules."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello خوش world دوست")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Escape)
+    assert widget.isAssistEnabled() is True
+    _assertNoOverlay(widget)
+    _sendKey(widget, Qt.Key.Key_K, "k")
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    assert overlay.lineEdit().text() == "k"
+
+
+# ******************************************************************************
+def testCursorMovementReactivatesOverlayAfterEscDismissal(app: QApplication) -> None:
+    """A plain-Esc dismissal leaves assist on: moving the cursor back over
+    a word re-activates the overlay by the normal assist rules."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello خوش world دوست")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Escape)
+    assert widget.isAssistEnabled() is True
+    _assertNoOverlay(widget)
+    # Plain Left/Right move in visual (screen) order: Right retreats the
+    # position, Left advances it. At 6 the cursor is still over the word
+    # (a run start counts), so the overlay re-activates on the move.
+    _sendKey(widget, Qt.Key.Key_Right)  # 7 -> 6, over the word: re-activates
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    _sendKey(widget, Qt.Key.Key_Right)  # 6 -> 5, past the word: dismisses
+    _assertNoOverlay(widget)
+    _sendKey(widget, Qt.Key.Key_Left)  # 5 -> 6, back over the word
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    assert overlay.lineEdit().text() == "khosh"
+
+
+# ******************************************************************************
+def testShiftEscOnActiveOverlayDismissesOnly(app: QApplication) -> None:
+    """Shift+Esc on the active overlay dismisses it; assist mode stays on:
+    the exact-Ctrl gate makes Ctrl+Esc the only dismiss-and-off key."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello خوش world دوست")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    _sendKey(
+        overlay.lineEdit(),
+        Qt.Key.Key_Escape,
+        "",
+        Qt.KeyboardModifier.ShiftModifier,
+    )
+    assert widget.isAssistEnabled() is True
     _assertNoOverlay(widget)
 
 
@@ -3583,7 +3734,12 @@ def testTypingReachesDocumentWhenAssistModeOff(app: QApplication) -> None:
     _moveCursor(widget, 7)
     overlay = widget._overlay
     assert overlay is not None and overlay.isVisible()
-    _sendKey(overlay.lineEdit(), Qt.Key.Key_Escape)
+    _sendKey(
+        overlay.lineEdit(),
+        Qt.Key.Key_Escape,
+        "",
+        Qt.KeyboardModifier.ControlModifier,
+    )
     assert widget.isAssistEnabled() is False
     _sendKey(widget, Qt.Key.Key_K, "k")
     assert widget.toPlainText() == "hello خkوش world دوست"
@@ -3603,7 +3759,12 @@ def testMouseReleaseDoesNotReactivateWhenAssistModeOff(app: QApplication) -> Non
     _moveCursor(widget, 7)
     overlay = widget._overlay
     assert overlay is not None and overlay.isVisible()
-    _sendKey(overlay.lineEdit(), Qt.Key.Key_Escape)
+    _sendKey(
+        overlay.lineEdit(),
+        Qt.Key.Key_Escape,
+        "",
+        Qt.KeyboardModifier.ControlModifier,
+    )
     assert widget.isAssistEnabled() is False
     rect = widget._wordRect(6, 9)
     _sendMouse(widget, "press", rect.right(), rect.center().y())
@@ -3624,7 +3785,12 @@ def testCtrlSpaceOnWordReentersAssistMode(app: QApplication) -> None:
     _moveCursor(widget, 7)
     overlay = widget._overlay
     assert overlay is not None and overlay.isVisible()
-    _sendKey(overlay.lineEdit(), Qt.Key.Key_Escape)
+    _sendKey(
+        overlay.lineEdit(),
+        Qt.Key.Key_Escape,
+        "",
+        Qt.KeyboardModifier.ControlModifier,
+    )
     assert widget.isAssistEnabled() is False
     _sendKey(
         widget,
@@ -3694,7 +3860,12 @@ def testEscInDocumentDoesNotFlipAssistMode(app: QApplication) -> None:
     _moveCursor(widget, 7)
     overlay = widget._overlay
     assert overlay is not None and overlay.isVisible()
-    _sendKey(overlay.lineEdit(), Qt.Key.Key_Escape)
+    _sendKey(
+        overlay.lineEdit(),
+        Qt.Key.Key_Escape,
+        "",
+        Qt.KeyboardModifier.ControlModifier,
+    )
     assert widget.isAssistEnabled() is False
     _sendKey(widget, Qt.Key.Key_Escape)
     assert widget.isAssistEnabled() is False
@@ -3731,7 +3902,12 @@ def testReEnablingFeatureResetsAssistMode(app: QApplication) -> None:
     _moveCursor(widget, 7)
     overlay = widget._overlay
     assert overlay is not None and overlay.isVisible()
-    _sendKey(overlay.lineEdit(), Qt.Key.Key_Escape)
+    _sendKey(
+        overlay.lineEdit(),
+        Qt.Key.Key_Escape,
+        "",
+        Qt.KeyboardModifier.ControlModifier,
+    )
     assert widget.isAssistEnabled() is False
     widget.setRomanInputEnabled(False)
     widget.setRomanInputEnabled(True)

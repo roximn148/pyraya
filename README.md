@@ -96,9 +96,10 @@ rows fit at a time with the list scrolling so the picked row stays visible.
 Space or any punctuation key commits the selected word, and a typed
 Urdu mark such as ۔ or ، goes with it. Enter does not start a new
 line; `Ctrl+Enter` does. `Ctrl+Up` and `Ctrl+Down` commit the selected
-word without any separator and move the cursor one line up or down. Escape closes the overlay and turns assist mode off, so typing and
-clicking stop opening it until `Ctrl+Space` brings it back, over the word
-under the cursor or empty at the cursor. Turning the feature off restores
+word without any separator and move the cursor one line up or down.
+Esc closes the overlay, and `Ctrl+Esc` closes it and turns assist mode
+off, so typing and clicking stop opening it until `Ctrl+Space` brings it
+back, over the word under the cursor or empty at the cursor. Turning the feature off restores
 plain typing:
 
 ```python
