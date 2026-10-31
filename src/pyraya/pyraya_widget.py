@@ -1094,7 +1094,7 @@ class PyRaya(QPlainTextEdit):
         """Install a host learn dialog in place of the built-in AddWordDialog.
 
         The handler receives the trigger word (the Arabic word for the
-        right-click trigger, the typed roman for the + Learn row) and returns
+        right-click trigger, the typed roman for the + [..] row) and returns
         the chosen Arabic word on accept, or ``None`` on cancel. ``None``
         restores the built-in dialog.
 
@@ -1692,9 +1692,15 @@ class PyRaya(QPlainTextEdit):
         untouched), so the overlay is re-placed from the activation anchor
         with the width floored at the activation minimum: over an existing
         word (scenario 2) the word rect, at a seeded cursor (scenario 1) the
-        stored four-roman-character baseline. The signal also fires from the
-        activation ``setText`` calls, which precede the initial placement;
-        the visibility and commit guards skip those.
+        stored four-roman-character baseline. The suggestion rows were
+        already refreshed by the overlay's own ``textChanged`` handler,
+        which runs before this hook (connected in the overlay's
+        constructor): the placement's width derives from the suggestion
+        list's hint, so a placement on the previous keystroke's rows would
+        size the overlay for the previous text (F-6: a cursor-only key fires
+        no ``textChanged``, so it rebuilds neither). The signal also fires
+        from the activation ``setText`` calls, which precede the initial
+        placement; the visibility and commit guards skip those.
         """
         if not self._overlayActive() or self._committing:
             return

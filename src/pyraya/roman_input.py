@@ -146,13 +146,13 @@ class _SuggestionRow:
     """One rendered row of the passive suggestion list.
 
     Every row holds a :class:`Suggestion` (homogeneous); the undefined-word
-    (``+ Learn``) row carries a default-constructed blank one.
+    (``+ [..]``) row carries a default-constructed blank one.
 
     Args:
         suggestion: The suggestion backing the row; for the undefined-word
             row a blank :class:`Suggestion` (``isUndefined()`` true).
         arabic: The Arabic-script text drawn in the document font; for the
-            undefined-word row this is the ``+ Learn <typed roman>`` label.
+            undefined-word row this is the ``+ [<typed roman>]`` label.
         tier: The edit-distance tier (0 = exact, 1, 2); -1 for the
             undefined-word row.
     """
@@ -825,13 +825,7 @@ class RomanLineEdit(QLineEdit):
             overlay.commit(key, text, modifiers)
             event.accept()
             return
-        # Only a text change may rebuild the rows: a cursor-only key (an
-        # in-text Left / Right / Home) would re-run the fuzzy search and
-        # reset the highlighted suggestion to the top row.
-        typedText = self.text()
         super().keyPressEvent(event)
-        if self.text() != typedText:
-            overlay.refreshSuggestions()
 
 
 # ******************************************************************************
@@ -929,6 +923,12 @@ class RomanOverlay(QWidget):
         # the default orientation, up in the flipped one — every time the
         # list's height changes during editing.
         layout.addStretch()
+        # The rows refresh on every line-edit text change, connected here
+        # before the host's ``_ensureOverlay`` hook, so the refresh always
+        # precedes the host's re-placement: the placement's width derives
+        # from the suggestion list's hint, so a placement on the previous
+        # keystroke's rows would size the overlay for the previous text.
+        self._lineEdit.textChanged.connect(self.refreshSuggestions)
 
     # ==========================================================================
     def engine(self) -> RomanInputEngine:
@@ -989,7 +989,12 @@ class RomanOverlay(QWidget):
 
     # ==========================================================================
     def setText(self, roman: str) -> None:
-        """Set the line edit's roman text and refresh the suggestions.
+        """Set the line edit's roman text.
+
+        The rows refresh through the line edit's ``textChanged`` signal
+        (connected in the constructor), so the caller can read them back
+        immediately — except when the text is unchanged, in which case no
+        signal fires and the rows are already current for it.
 
         Args:
             roman: The roman-script text to edit (e.g. the romanized form of
@@ -997,23 +1002,24 @@ class RomanOverlay(QWidget):
         """
         self._lineEdit.setText(roman)
         self._lineEdit.setCursorPosition(len(roman))
-        self.refreshSuggestions()
 
     # ==========================================================================
     def refreshSuggestions(self) -> None:
         """Rebuild the suggestion rows from the current line-edit text.
 
-        Empty text hides the list. A non-empty text with zero matches shows a
-        single undefined-word row, ``+ Learn <typed roman>`` — unless the
-        engine is unavailable, in which case no rows and no undefined-word
-        row are offered.
+        Empty text hides the list. A non-empty text with no exact (tier-0)
+        match appends a trailing undefined-word row, ``+ [<typed roman>]`` —
+        after any fuzzy-match rows — unless the engine is unavailable, in
+        which case no rows and no undefined-word row are offered.
         """
         text = self._lineEdit.text()
         if not text:
             self._list.setRows([])
             return
+        tiered = self._engine.suggestTiers(text)
+        hasExact = any(tier == 0 for _, tier in tiered)
         rows: list[_SuggestionRow] = []
-        for suggestion, tier in self._engine.suggestTiers(text):
+        for suggestion, tier in tiered:
             # The row palette stops at the deepest tint it defines: an
             # engine built with a larger ``distance`` yields deeper tiers,
             # which are clipped to the palette so the paint stays total.
@@ -1024,14 +1030,14 @@ class RomanOverlay(QWidget):
                     tier=min(tier, len(_TierColors) - 1),
                 ),
             )
-        if not rows and self._engine.available:
+        if not hasExact and self._engine.available:
             # The undefined-word row is constructed from a default-constructed
             # blank Suggestion carrying the typed roman, so the commit emits
             # it like any other row's suggestion.
             rows.append(
                 _SuggestionRow(
                     suggestion=Suggestion(encodedRoman=text),
-                    arabic=f"+ Learn {text}",
+                    arabic=f"+ [{text}]",
                     tier=-1,
                 ),
             )

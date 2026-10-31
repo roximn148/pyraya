@@ -457,7 +457,7 @@ def testAddToDictionaryCancelLearnsNothing(app: QApplication) -> None:
 
 # ******************************************************************************
 def testLearnRowEdgeCommitSkipsDialog(app: QApplication) -> None:
-    """A Left edge commit over the + Learn row moves without a dialog.
+    """A Left edge commit over the + [..] row moves without a dialog.
 
     Edge commits write nothing and move in visual order, so they stay
     dialog-free: the handler spy is never called and the Vocabulary stays

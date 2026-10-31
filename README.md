@@ -56,7 +56,7 @@ selected Urdu word lands in the document, in Urdu script.
 - A wavy underline under words the dictionary does not know. See
   [Spell check](#spell-check).
 - Unknown words can be learned into the shared dictionary, from the
-  right-click menu or the `+ Learn` suggestion row. See
+  right-click menu or the `+ [..]` suggestion row. See
   [Learn a word](#learn-a-word).
 
 ## Regions
@@ -127,11 +127,11 @@ editor.setSpellCheckEnabled(False)  # hide the underlines
 
 Words the dictionary does not know can be added to it. Right-click an
 unknown word in a Roman Urdu region and choose "Add to dictionary", or
-commit the `+ Learn` row in the suggestion list. A dialog shows the
+commit the `+ [..]` row in the suggestion list. A dialog shows the
 Arabic word with a live roman preview: OK is enabled only while the
 field holds a mappable word. Accepting adds the word to the dictionary
 — its underline clears, and it becomes suggestable from roman input;
-cancelling adds nothing, and in the `+ Learn` row the typed roman stays
+cancelling adds nothing, and in the `+ [..]` row the typed roman stays
 as-is.
 
 The dictionary is shared by every widget in the process, so a word

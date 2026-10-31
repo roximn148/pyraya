@@ -684,6 +684,28 @@ def testOverlayZeroMatchesShowsUndefinedWord(
 
 
 # ******************************************************************************
+def testOverlayFuzzyNoExactAppendsLearnRow(
+    app: QApplication,
+    engine: RomanInputEngine,
+) -> None:
+    """A typed word with fuzzy matches but no exact match appends a Learn row.
+
+    The undefined-word row is offered whenever there is no exact (tier-0)
+    match, appended after any fuzzy-match rows, and its label is the
+    bracketed typed roman.
+    """
+    overlay, _ = _makeOverlay(app, engine)
+    overlay.setText("khos")  # fuzzy matches, no exact match
+    suggestionList = overlay.suggestionList()
+    fuzzyCount = len(engine.suggestTiers("khos"))
+    assert suggestionList.rowCount() == fuzzyCount + 1  # fuzzy rows + Learn row
+    suggestionList.select(suggestionList.rowCount() - 1)
+    row = suggestionList.selectedRow()
+    assert row is not None and row.suggestion.isUndefined()
+    assert row.arabic == "+ [khos]"
+
+
+# ******************************************************************************
 def testOverlayUnavailableOffersNothing(app: QApplication, monkeypatch) -> None:
     """An unavailable engine offers no rows, no undefined-word row, and no crash."""
 
@@ -724,7 +746,8 @@ def testOverlayRefreshesOnEdit(app: QApplication, engine: RomanInputEngine) -> N
     _sendKey(lineEdit, Qt.Key.Key_B, "b")
     assert lineEdit.text() == "khoshb"
     tiers = engine.suggestTiers("khoshb")
-    expected = len(tiers) if tiers else 1
+    noExact = not any(t == 0 for _, t in tiers)
+    expected = len(tiers) + (1 if noExact else 0)
     assert overlay.suggestionList().rowCount() == expected
 
 
@@ -3483,7 +3506,7 @@ def testEmptyDocumentScenario1Commit(app: QApplication) -> None:
 
 # ******************************************************************************
 def testUndefinedWordCommitScenario1And2(app: QApplication) -> None:
-    """Committing the + Learn row goes through the dialog decision.
+    """Committing the + [..] row goes through the dialog decision.
 
     The dialog decision happens in ``_onOverlayCommitted``: a canceling
     handler (``None``) commits the typed roman as-is — the session no-op:
