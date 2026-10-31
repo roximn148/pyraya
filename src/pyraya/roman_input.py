@@ -318,6 +318,55 @@ class RomanInputEngine:
 
 
 # ******************************************************************************
+class _SharedEngine:
+    """The application-wide shared engine and Vocabulary holder.
+
+    Created once per process (the module-level ``_sharedEngine``
+    singleton). Owns the shared :class:`romanalfaz.Vocabulary` and the
+    shared :class:`RomanInputEngine` (which wraps the shared
+    :class:`romanalfaz.RomanAlfaz` and attaches the shared Vocabulary) —
+    so one ``Vocabulary.add`` triggers exactly one ``recompileLookup``
+    regardless of widget count, and the ~0.3 s dictionary cold load
+    happens once per process.
+    """
+
+    def __init__(self) -> None:
+        self._vocabulary = Vocabulary()
+        self._engine: RomanInputEngine | None = None
+
+    # ==========================================================================
+    @property
+    def vocabulary(self) -> Vocabulary:
+        return self._vocabulary
+
+    # ==========================================================================
+    def engine(self) -> RomanInputEngine:
+        if self._engine is None:
+            self._engine = RomanInputEngine(localVocabulary=self._vocabulary)
+        return self._engine
+
+    # ==========================================================================
+    def replaceVocabulary(self, vocabulary: Vocabulary) -> None:
+        # Host startup path: ``Vocabulary.load(file)`` standalone (bulk,
+        # no recompile storm), then hand the loaded Vocabulary to the
+        # holder — exactly one recompile on first ``engine()`` (a8
+        # docs' populate-before-attaching guidance). Discards a cached
+        # engine.
+        self._vocabulary = vocabulary
+        self._engine = None
+
+    # ==========================================================================
+    def reset(self) -> None:
+        # Test-only seam: fresh empty Vocabulary, engine discarded.
+        self._vocabulary = Vocabulary()
+        self._engine = None
+
+
+# ******************************************************************************
+_sharedEngine = _SharedEngine()
+
+
+# ******************************************************************************
 class SuggestionList(QWidget):
     """Passive row display for roman-input suggestions.
 
