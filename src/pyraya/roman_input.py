@@ -61,6 +61,7 @@ from romanalfaz.engine import Suggestion, Vocabulary
 __all__ = [
     "RomanInputEngine",
     "RomanOverlay",
+    "AddWordDialog",
     "ArabicScriptSeparators",
     "OverlayLayoutSpacing",
     "SuggestionListMargin",
@@ -1054,13 +1055,12 @@ class RomanOverlay(QWidget):
 
         The host derives the commit policy from the arguments: the committed
         word from the selected row's :class:`Suggestion` (the undefined-word
-        row's blank ``Suggestion`` maps through
-        :meth:`RomanInputEngine.learnRomanWord`), and the separator from
-        ``key`` and ``keyText`` — plain ``Key_Return`` commits without a
-        newline, ``Key_Return`` with ``ControlModifier`` with a newline,
-        ``Key_Up`` / ``Key_Down`` (the exact-Ctrl Up/Down) bare,
-        ``Key_Space`` and typed punctuation with ``keyText``, and
-        ``Key_Left`` / ``Key_Right`` are edge commits.
+        row's blank ``Suggestion`` commits the typed roman as the session
+        no-op), and the separator from ``key`` and ``keyText`` — plain
+        ``Key_Return`` commits without a newline, ``Key_Return`` with
+        ``ControlModifier`` with a newline, ``Key_Up`` / ``Key_Down`` (the
+        exact-Ctrl Up/Down) bare, ``Key_Space`` and typed punctuation with
+        ``keyText``, and ``Key_Left`` / ``Key_Right`` are edge commits.
 
         Args:
             key: The committing ``Qt.Key``.

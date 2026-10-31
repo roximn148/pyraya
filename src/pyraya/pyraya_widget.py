@@ -1043,9 +1043,10 @@ class PyRaya(QPlainTextEdit):
         """The application-wide shared in-memory :class:`romanalfaz.Vocabulary`.
 
         Owned by the :class:`_SharedEngine` holder and borrowed by every
-        widget. It is the hook for the future ``learnRomanWord`` update;
-        ``Vocabulary.save``/``Vocabulary.load`` exist for host persistence,
-        and ``isModified()`` is the host's mutation flag.
+        widget. It is mutated by :meth:`RomanInputEngine.learnRomanWord`
+        (the learn-word path); ``Vocabulary.save``/``Vocabulary.load`` exist
+        for host persistence, and ``isModified()`` is the host's mutation
+        flag.
 
         Returns:
             The same shared :class:`Vocabulary` instance, every time.
@@ -1160,7 +1161,7 @@ class PyRaya(QPlainTextEdit):
             word = self._addWordHandler(trigger)
             if word:
                 self._learnWord(word)
-            return word
+            return word or None
         arabic = prefill
         while True:
             dialog = AddWordDialog(arabic, hint=trigger)
@@ -1930,7 +1931,7 @@ class PyRaya(QPlainTextEdit):
                 else:
                     word = typedRoman
             else:
-                word = self._committedWord(engine, typedRoman, selected)
+                word = self._committedWord(typedRoman, selected)
             if key in (Qt.Key.Key_Left, Qt.Key.Key_Right):
                 resync = self._edgeCommit(key == Qt.Key.Key_Left)
             else:
@@ -1958,7 +1959,7 @@ class PyRaya(QPlainTextEdit):
                 self.setTextCursor(cursor)
 
     # ==========================================================================
-    def _committedWord(self, engine: RomanInputEngine, typedRoman: str, selected: object) -> str:
+    def _committedWord(self, typedRoman: str, selected: object) -> str:
         """The committed word, derived from the selected row's suggestion.
 
         ``""`` when no row is selected, the typed roman for the
@@ -1968,7 +1969,6 @@ class PyRaya(QPlainTextEdit):
         row's ``arabic`` otherwise.
 
         Args:
-            engine: The roman-input engine (suggestions come from it).
             typedRoman: The roman text typed into the overlay line edit.
             selected: The committed row's suggestion, or ``None``.
 

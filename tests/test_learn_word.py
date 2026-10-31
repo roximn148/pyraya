@@ -229,6 +229,17 @@ def testSetAddWordHandlerLearnsViaHandler(app: QApplication) -> None:
 
 
 # ******************************************************************************
+def testSetAddWordHandlerEmptyStringIsCancel(app: QApplication) -> None:
+    """A handler returning ``""`` is a cancel: ``None`` and no learn."""
+    widget = PyRaya()
+    widget.setAddWordHandler(lambda _trigger: "")
+    learned = widget._learnDialog("xqm")
+    assert learned is None
+    assert dict(widget.localDictionary().counter) == {}
+    assert widget.localDictionary().isModified() is False
+
+
+# ******************************************************************************
 def testLearnDialogBuiltInAccepted(app: QApplication, monkeypatch: pytest.MonkeyPatch) -> None:
     """The built-in dialog path learns the accepted word into the shared Vocabulary."""
     widget = PyRaya()
@@ -245,6 +256,19 @@ def testLearnDialogBuiltInRejected(app: QApplication, monkeypatch: pytest.Monkey
     monkeypatch.setattr(AddWordDialog, "exec", lambda self: QDialog.DialogCode.Rejected)
     assert widget._learnDialog("xqm") is None
     assert dict(widget.localDictionary().counter) == {}
+
+
+# ******************************************************************************
+def testLearnDialogBuiltInEmptyAcceptIsCancel(
+    app: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An accepted built-in dialog with an empty field is a cancel: None, no learn."""
+    widget = PyRaya()
+    monkeypatch.setattr(AddWordDialog, "exec", lambda self: QDialog.DialogCode.Accepted)
+    monkeypatch.setattr(AddWordDialog, "word", lambda self: "")
+    assert widget._learnDialog("xqm") is None
+    assert dict(widget.localDictionary().counter) == {}
+    assert widget.localDictionary().isModified() is False
 
 
 # ******************************************************************************
