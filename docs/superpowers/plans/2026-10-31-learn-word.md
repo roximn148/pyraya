@@ -194,6 +194,7 @@ pass — the upgrade itself is landed and committed as `ff4b1b0`):
 ```python
 # src/pyraya/roman_input.py — module level, after RomanInputEngine
 
+
 class _SharedEngine:
     """The application-wide shared engine and Vocabulary holder.
 
@@ -233,11 +234,13 @@ class _SharedEngine:
         self._vocabulary = Vocabulary()
         self._engine = None
 
+
 _sharedEngine = _SharedEngine()
 ```
 
 ```python
 # tests/conftest.py — new file (copyright banner + docstring, like the test modules)
+
 
 @pytest.fixture(autouse=True)
 def shared_engine() -> Iterator[None]:
@@ -347,6 +350,7 @@ def shared_engine() -> Iterator[None]:
 ```python
 # src/pyraya/roman_input.py — replaces the no-op at L302–317
 
+
 def learnRomanWord(self, arabicWord: str) -> str:
     """Learn an Arabic-script word into the attached Vocabulary.
 
@@ -417,6 +421,7 @@ def learnRomanWord(self, arabicWord: str) -> str:
 ```python
 # src/pyraya/roman_input.py — new public class (after RomanInputEngine)
 
+
 class AddWordDialog(QDialog):
     """Built-in learn-word dialog.
 
@@ -428,8 +433,9 @@ class AddWordDialog(QDialog):
     Vocabulary; the caller learns the returned word.
     """
 
-    def __init__(self, prefill: str = "", hint: str = "",
-                 parent: QWidget | None = None) -> None: ...
+    def __init__(
+        self, prefill: str = "", hint: str = "", parent: QWidget | None = None
+    ) -> None: ...
 
     def word(self) -> str:
         """The Arabic word in the field (``""`` when empty)."""
@@ -487,6 +493,7 @@ class AddWordDialog(QDialog):
 
 wordAdded = Signal(str)  # next to romanWordCommitted (L536); plain declaration, no docstring
 
+
 def setAddWordHandler(self, handler: Callable[[str], str | None] | None) -> None:
     """Install a host learn dialog in place of the built-in AddWordDialog.
 
@@ -499,6 +506,7 @@ def setAddWordHandler(self, handler: Callable[[str], str | None] | None) -> None
         handler: The host callable, or ``None`` for the built-in dialog.
     """
 
+
 def _learnDialog(self, trigger: str, prefill: str = "") -> str | None:
     """Open the learn UI; the chosen Arabic word on accept, ``None`` on cancel.
 
@@ -508,6 +516,7 @@ def _learnDialog(self, trigger: str, prefill: str = "") -> str | None:
     so this stays open with the user's text until they accept or cancel),
     and treats an empty accepted field as a cancel.
     """
+
 
 def _learnWord(self, word: str) -> None:
     """Learn ``word`` into the shared Vocabulary and clear its underline.
@@ -596,6 +605,7 @@ while True:
 ```python
 # src/pyraya/pyraya_widget.py — PyRaya class
 
+
 def _learnCandidate(self) -> str | None:
     """The "Add to dictionary" candidate: the word under the cursor.
 
@@ -605,6 +615,7 @@ def _learnCandidate(self) -> str | None:
     RomanUrdu-resolved, so the same candidate logic the spell-check
     pass computes.
     """
+
 
 def _addToDictionary(self, word: str) -> None:
     """The "Add to dictionary" trigger: dialog, then learn.
@@ -632,9 +643,7 @@ def _addToDictionary(self, word: str) -> None:
 candidate = self._learnCandidate()
 if candidate is not None:
     action = QAction("Add to dictionary", self)
-    action.triggered.connect(
-        lambda _checked, w=candidate: self._addToDictionary(w)
-    )
+    action.triggered.connect(lambda _checked, w=candidate: self._addToDictionary(w))
     menu.addAction(action)
 ```
 
@@ -687,9 +696,14 @@ if candidate is not None:
   line) becomes:
 
 ```python
-if isinstance(selected, Suggestion) and selected.isUndefined() and key not in (
-    Qt.Key.Key_Left,
-    Qt.Key.Key_Right,
+if (
+    isinstance(selected, Suggestion)
+    and selected.isUndefined()
+    and key
+    not in (
+        Qt.Key.Key_Left,
+        Qt.Key.Key_Right,
+    )
 ):
     # The undefined-word (Learn) row: the dialog decides the committed
     # word (accept: the chosen Arabic word, learned; cancel: the
