@@ -11,9 +11,9 @@ from collections.abc import Generator
 from typing import cast
 
 import pytest
-from PySide6.QtCore import QCoreApplication
-from PySide6.QtGui import QTextCharFormat, QTextCursor
-from PySide6.QtWidgets import QApplication, QDialog, QDialogButtonBox
+from PySide6.QtCore import QCoreApplication, QEvent, Qt
+from PySide6.QtGui import QKeyEvent, QTextCharFormat, QTextCursor
+from PySide6.QtWidgets import QApplication, QDialog, QDialogButtonBox, QWidget
 from romanalfaz.algorithm import tafseerUrduAr2Rm
 from romanalfaz.engine import Vocabulary
 
@@ -279,6 +279,20 @@ def _moveCursor(widget: PyRaya, position: int) -> None:
 
 
 # ******************************************************************************
+def _sendKey(
+    widget: QWidget,
+    key: int,
+    text: str = "",
+    modifiers: Qt.KeyboardModifier = Qt.KeyboardModifier.NoModifier,
+) -> None:
+    """Send a key-press event to a widget."""
+    QCoreApplication.sendEvent(
+        widget,
+        QKeyEvent(QEvent.Type.KeyPress, key, modifiers, text),
+    )
+
+
+# ******************************************************************************
 def _underlinedRanges(widget: PyRaya) -> list[tuple[int, int, object, object]]:
     """Every underlined run of the document layout, in reading order.
 
@@ -414,4 +428,45 @@ def testAddToDictionaryCancelLearnsNothing(app: QApplication) -> None:
     widget.setAddWordHandler(lambda _trigger: None)
     widget._addToDictionary("خلمق")
     assert emitted == []
+    assert dict(widget.localDictionary().counter) == {}
+
+
+# ******************************************************************************
+def testLearnRowEdgeCommitSkipsDialog(app: QApplication) -> None:
+    """A Left edge commit over the + Learn row moves without a dialog.
+
+    Edge commits write nothing and move in visual order, so they stay
+    dialog-free: the handler spy is never called and the Vocabulary stays
+    untouched.
+    """
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello خوش world")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    calls: list[str] = []
+
+    def handler(trigger: str) -> str | None:
+        calls.append(trigger)
+        return None
+
+    widget.setAddWordHandler(handler)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    overlay.setText("xqwzrty")  # zero matches -> undefined-word row
+    row = overlay.suggestionList().selectedRow()
+    assert row is not None and row.suggestion.isUndefined()
+    # Walk to the visually left edge (the text start); the next Left
+    # edge-commits.
+    for _ in range(7):
+        _sendKey(overlay.lineEdit(), Qt.Key.Key_Left, "")
+    assert overlay.lineEdit().cursorPosition() == 0
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Left, "")
+    # Nothing is written: no adjacent Arabic word past the boundary, so the
+    # cursor rests at the word's end and the deactivation sticks.
+    assert widget.toPlainText() == "hello خوش world"
+    assert widget.textCursor().position() == 9
+    assert widget._overlay is None or not widget._overlay.isVisible()
+    assert calls == []
     assert dict(widget.localDictionary().counter) == {}

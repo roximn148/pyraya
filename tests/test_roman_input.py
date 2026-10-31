@@ -3483,14 +3483,14 @@ def testEmptyDocumentScenario1Commit(app: QApplication) -> None:
 
 # ******************************************************************************
 def testUndefinedWordCommitScenario1And2(app: QApplication) -> None:
-    """Committing the undefined-word row trips the mappability gate.
+    """Committing the + Learn row goes through the dialog decision.
 
-    The typed roman is unmappable (Latin letters carry no Arabic-script
-    mapping), so ``learnRomanWord`` raises ``AssertionError`` inside the
-    commit handler before any write (PySide6 swallows the exception from
-    the event dispatch and prints its traceback to stderr): the document
-    stays untouched, no ``romanWordCommitted`` fires, and the Vocabulary
-    is not mutated. The dialog flow replaces this path in a later task.
+    The dialog decision happens in ``_onOverlayCommitted``: a canceling
+    handler (``None``) commits the typed roman as-is — the session no-op:
+    the word is written, nothing is learned — and an accepting handler
+    (the chosen Arabic word) commits the learned word and emits
+    ``wordAdded`` once (the handler path learns internally, so the counter
+    lands at one, never two).
     """
     # scenario 1: typed at a bare cursor position past the span
     widget = PyRaya()
@@ -3499,7 +3499,10 @@ def testUndefinedWordCommitScenario1And2(app: QApplication) -> None:
     widget.setRomanInputEnabled(True)
     widget.setRegionType(RegionType.RomanUrdu, 6, 10)
     committed: list[tuple[str, str]] = []
+    emitted: list[str] = []
     widget.romanWordCommitted.connect(lambda w, r: committed.append((w, r)))
+    widget.wordAdded.connect(lambda word: emitted.append(word))
+    widget.setAddWordHandler(lambda _trigger: None)
     _moveCursor(widget, 10)  # the start of the Latin word (a bare position)
     _sendKey(widget, Qt.Key.Key_X, "x")
     overlay = widget._overlay
@@ -3507,30 +3510,44 @@ def testUndefinedWordCommitScenario1And2(app: QApplication) -> None:
     overlay.setText("xqwzrty")  # zero matches -> undefined-word row
     row = overlay.suggestionList().selectedRow()
     assert row is not None and row.suggestion.isUndefined()
-    _sendKey(overlay.lineEdit(), Qt.Key.Key_Space, " ")  # gate: no write
-    assert widget.toPlainText() == "hello خوش world"
-    assert committed == []
-    # localDictionary is unchanged (the gate fired before the mutation)
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Space, " ")
+    # The canceling handler: the typed roman commits as-is, nothing learned
+    assert widget.toPlainText() == "hello خوش xqwzrty world"
+    assert committed == [("xqwzrty", "xqwzrty")]
+    assert emitted == []
+    # localDictionary is unchanged (the handler canceled)
     assert list(widget.localDictionary().counter) == []
+    widget.setAddWordHandler(None)  # restore the built-in dialog
 
-    # scenario 2: the span-replacement commit trips the same gate
+    # scenario 2: the span-replacement commit learns through the handler
     widget2 = PyRaya()
     widget2.show()
     widget2.setPlainText("hello خوش world")
     widget2.setRomanInputEnabled(True)
     widget2.setRegionType(RegionType.RomanUrdu, 6, 9)
     committed2: list[tuple[str, str]] = []
+    emitted2: list[str] = []
     widget2.romanWordCommitted.connect(lambda w, r: committed2.append((w, r)))
+    widget2.wordAdded.connect(lambda word: emitted2.append(word))
+    widget2.setAddWordHandler(lambda _trigger: "خلمق")
     _moveCursor(widget2, 7)
     overlay2 = widget2._overlay
     assert overlay2 is not None and overlay2.isVisible()
     overlay2.setText("xqwzrty")  # zero matches -> undefined-word row
     row2 = overlay2.suggestionList().selectedRow()
     assert row2 is not None and row2.suggestion.isUndefined()
-    _sendKey(overlay2.lineEdit(), Qt.Key.Key_Space, " ")  # gate: no write
-    assert widget2.toPlainText() == "hello خوش world"
-    assert committed2 == []
-    assert list(widget2.localDictionary().counter) == []
+    _sendKey(overlay2.lineEdit(), Qt.Key.Key_Space, " ")
+    # The accepting handler: the span is replaced with the learned word
+    # (tagged RomanUrdu), the typed roman is not written, and the learn
+    # emits once. The Space separator lands beside the word's own trailing
+    # space, so the two spaces both stay.
+    assert widget2.toPlainText() == "hello خلمق  world"
+    assert widget2._regionKindAt(6) == RegionType.RomanUrdu
+    assert committed2 == [("خلمق", "xqwzrty")]
+    assert emitted2 == ["خلمق"]
+    assert widget2.localDictionary().counter["خلمق"] == 1
+    assert widget2.localDictionary().isModified() is True
+    widget2.setAddWordHandler(None)  # restore the built-in dialog
 
 
 # ******************************************************************************

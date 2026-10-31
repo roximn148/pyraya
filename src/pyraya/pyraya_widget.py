@@ -1873,11 +1873,16 @@ class PyRaya(QPlainTextEdit):
         """Handle the overlay's commit and write to the document.
 
         Everything is derived from the signal arguments (B6): the committed
-        word from the selected row (:meth:`_committedWord`), the separator
-        and resync decision from the committing keystroke
-        (:meth:`_commitSeparator`), and then one of the two commit
-        decisions — the edge commit (:meth:`_edgeCommit`, writes nothing and
-        moves in visual order) or the write (:meth:`_writeCommit`). One
+        word from the dialog decision for the undefined-word (Learn) row —
+        ``_learnDialog`` decides the committed word for every writing
+        commit (accept: the chosen Arabic word, learned inside it;
+        cancel: the session no-op, the typed roman as-is), and edge
+        commits (Left/Right) stay dialog-free —, else from the selected row
+        (:meth:`_committedWord`); the separator and resync decision from
+        the committing keystroke (:meth:`_commitSeparator`), and then one of
+        the two commit decisions — the edge commit (:meth:`_edgeCommit`,
+        writes nothing and moves in visual order) or the write
+        (:meth:`_writeCommit`). One
         post-commit resync runs unless the decision suppressed it.
 
         ``romanWordCommitted`` is emitted for a non-empty committed word,
@@ -1904,7 +1909,28 @@ class PyRaya(QPlainTextEdit):
         self._committing = True
         resync = True
         try:
-            word = self._committedWord(engine, typedRoman, selected)
+            if (
+                isinstance(selected, Suggestion)
+                and selected.isUndefined()
+                and key
+                not in (
+                    Qt.Key.Key_Left,
+                    Qt.Key.Key_Right,
+                )
+            ):
+                # The undefined-word (Learn) row: the dialog decides the
+                # committed word (accept: the chosen Arabic word, learned
+                # inside ``_learnDialog``; cancel: the session no-op, the
+                # typed roman as-is). Edge commits (Left/Right) write
+                # nothing and move in visual order, so they stay
+                # dialog-free.
+                arabic = self._learnDialog(typedRoman)
+                if arabic is not None:
+                    word = arabic
+                else:
+                    word = typedRoman
+            else:
+                word = self._committedWord(engine, typedRoman, selected)
             if key in (Qt.Key.Key_Left, Qt.Key.Key_Right):
                 resync = self._edgeCommit(key == Qt.Key.Key_Left)
             else:
@@ -1935,10 +1961,11 @@ class PyRaya(QPlainTextEdit):
     def _committedWord(self, engine: RomanInputEngine, typedRoman: str, selected: object) -> str:
         """The committed word, derived from the selected row's suggestion.
 
-        ``""`` when no row is selected,
-        :meth:`RomanInputEngine.learnRomanWord` for the undefined-word
-        row's blank :class:`Suggestion` (``isUndefined()`` true), the row's
-        ``arabic`` otherwise.
+        ``""`` when no row is selected, the typed roman for the
+        undefined-word row's blank :class:`Suggestion` (``isUndefined()``
+        true — the dialog decision happens in :meth:`_onOverlayCommitted`,
+        and its write commits the typed roman as the session no-op), the
+        row's ``arabic`` otherwise.
 
         Args:
             engine: The roman-input engine (suggestions come from it).
@@ -1946,11 +1973,12 @@ class PyRaya(QPlainTextEdit):
             selected: The committed row's suggestion, or ``None``.
 
         Returns:
-            The committed Arabic word (empty for a blank commit).
+            The committed word: the selected row's Arabic word, the typed
+            roman for the undefined-word row, empty for a blank commit.
         """
         if isinstance(selected, Suggestion):
             if selected.isUndefined():
-                return engine.learnRomanWord(typedRoman)
+                return typedRoman
             return selected.arabic
         return ""
 
