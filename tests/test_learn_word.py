@@ -8,14 +8,16 @@ Runs headless via the offscreen Qt platform so no window is opened.
 
 import os
 from collections.abc import Generator
+from typing import cast
 
 import pytest
 from PySide6.QtCore import QCoreApplication
+from PySide6.QtGui import QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import QApplication, QDialog, QDialogButtonBox
 from romanalfaz.algorithm import tafseerUrduAr2Rm
 from romanalfaz.engine import Vocabulary
 
-from pyraya import AddWordDialog, PyRaya
+from pyraya import AddWordDialog, PyRaya, RegionType
 from pyraya.roman_input import RomanInputEngine, _sharedEngine
 
 
@@ -266,3 +268,150 @@ def testDialogPathAddsNoUndoSteps(app: QApplication) -> None:
     widget.setAddWordHandler(lambda _trigger: "خلمق")
     assert widget._learnDialog("xqm") == "خلمق"
     assert widget.document().availableUndoSteps() == baseline
+
+
+# ******************************************************************************
+def _moveCursor(widget: PyRaya, position: int) -> None:
+    """Move the widget's document cursor to a character offset."""
+    cursor = widget.textCursor()
+    cursor.setPosition(position)
+    widget.setTextCursor(cursor)
+
+
+# ******************************************************************************
+def _underlinedRanges(widget: PyRaya) -> list[tuple[int, int, object, object]]:
+    """Every underlined run of the document layout, in reading order.
+
+    Returns ``(start, end, underlineStyle, underlineColor)`` triples with
+    document character offsets, from the per-block text layouts' format
+    ranges (the authoritative observation point for layout-only formats).
+    The style and color are copied to plain Python values immediately:
+    the ``QTextCharFormat`` a ``FormatRange`` reports borrows its C++
+    object, which PySide6 deletes with the range wrapper, so holding the
+    wrapper itself would use-after-free.
+    """
+    ranges: list[tuple[int, int, object, object]] = []
+    block = widget.document().begin()
+    while block.isValid():
+        base = block.position()
+        for r in block.layout().formats():
+            # The venv stub declares FormatRange's attributes as `...` with
+            # `# type:` comments pyrefly does not read; the runtime types are
+            # the ones the comments name, so cast them here.
+            rformat = cast(QTextCharFormat, r.format)
+            if rformat.underlineStyle() == QTextCharFormat.UnderlineStyle.NoUnderline:
+                continue
+            ranges.append(
+                (
+                    base + cast(int, r.start),
+                    base + cast(int, r.start) + cast(int, r.length),
+                    rformat.underlineStyle(),
+                    rformat.underlineColor(),
+                )
+            )
+        block = block.next()
+    return ranges
+
+
+# ******************************************************************************
+def testAddToDictionaryActionAppearsOverUnknownWord(app: QApplication) -> None:
+    """The context menu offers "Add to dictionary" over an unknown word.
+
+    Both the untagged (seed-resolved) and the explicitly tagged run offer
+    the action.
+    """
+    widget = PyRaya()
+    widget.setSpellCheckEnabled(False)
+    widget.setPlainText("کتاب خلمق")
+    assert widget._ensureEngine().hasWord("خلمق") is False
+    _moveCursor(widget, 6)  # inside خلمق
+    menu = widget.createPopupMenu()
+    byText = {action.text(): action for action in menu.actions()}
+    assert "Add to dictionary" in byText
+    # Repeat with an explicitly tagged RomanUrdu run over the same word.
+    widget.setRegionType(RegionType.RomanUrdu, 5, 9)
+    menu = widget.createPopupMenu()
+    byText = {action.text(): action for action in menu.actions()}
+    assert "Add to dictionary" in byText
+
+
+# ******************************************************************************
+def testAddToDictionaryActionHiddenOverKnownWord(app: QApplication) -> None:
+    """A word the dictionary already knows offers no learn action."""
+    widget = PyRaya()
+    widget.setPlainText("کتاب خلمق")
+    assert widget._ensureEngine().hasWord("کتاب") is True
+    _moveCursor(widget, 1)  # inside کتاب
+    menu = widget.createPopupMenu()
+    assert "Add to dictionary" not in {action.text() for action in menu.actions()}
+
+
+# ******************************************************************************
+def testAddToDictionaryActionHiddenOverNativeRegion(app: QApplication) -> None:
+    """A run tagged Native offers no learn action: only RomanUrdu words
+    are candidates, the stored tag wins over the seed."""
+    widget = PyRaya()
+    widget.setPlainText("کتاب خلمق")
+    widget.setRegionType(RegionType.Native, 5, 9)
+    _moveCursor(widget, 6)  # inside the Native-tagged خلمق
+    menu = widget.createPopupMenu()
+    assert "Add to dictionary" not in {action.text() for action in menu.actions()}
+
+
+# ******************************************************************************
+def testAddToDictionaryActionHiddenOverWhitespaceLatin(app: QApplication) -> None:
+    """A cursor over whitespace or a Latin word offers no learn action."""
+    widget = PyRaya()
+    widget.setPlainText("hello world خلمق")
+    _moveCursor(widget, 5)  # the space after "hello"
+    menu = widget.createPopupMenu()
+    assert "Add to dictionary" not in {action.text() for action in menu.actions()}
+    _moveCursor(widget, 7)  # inside "world"
+    menu = widget.createPopupMenu()
+    assert "Add to dictionary" not in {action.text() for action in menu.actions()}
+
+
+# ******************************************************************************
+def testAddToDictionaryActionHiddenWithSelection(app: QApplication) -> None:
+    """A selection spanning the unknown word offers no learn action."""
+    widget = PyRaya()
+    widget.setPlainText("کتاب خلمق")
+    cursor = widget.textCursor()
+    cursor.setPosition(5)
+    cursor.setPosition(9, QTextCursor.MoveMode.KeepAnchor)
+    widget.setTextCursor(cursor)
+    menu = widget.createPopupMenu()
+    assert "Add to dictionary" not in {action.text() for action in menu.actions()}
+
+
+# ******************************************************************************
+def testAddToDictionaryLearnsAndClearsUnderline(app: QApplication) -> None:
+    """The learn action learns the word and its underline clears.
+
+    The menu-trigger path is the same callable; the handler accepts the
+    prefilled word, ``wordAdded`` fires once, and the spell-check underline
+    for the word is gone from the text layouts.
+    """
+    widget = PyRaya()
+    widget.setPlainText("کتاب خلمق")
+    assert [(start, end) for start, end, _, _ in _underlinedRanges(widget)] == [(5, 9)]
+    emitted: list[str] = []
+    widget.wordAdded.connect(lambda word: emitted.append(word))
+    widget.setAddWordHandler(lambda _trigger: "خلمق")
+    widget._addToDictionary("خلمق")
+    assert emitted == ["خلمق"]
+    assert widget.localDictionary().counter["خلمق"] == 1
+    assert _underlinedRanges(widget) == []
+
+
+# ******************************************************************************
+def testAddToDictionaryCancelLearnsNothing(app: QApplication) -> None:
+    """A canceling handler leaves the Vocabulary untouched and emits nothing."""
+    widget = PyRaya()
+    widget.setPlainText("کتاب خلمق")
+    emitted: list[str] = []
+    widget.wordAdded.connect(lambda word: emitted.append(word))
+    widget.setAddWordHandler(lambda _trigger: None)
+    widget._addToDictionary("خلمق")
+    assert emitted == []
+    assert dict(widget.localDictionary().counter) == {}

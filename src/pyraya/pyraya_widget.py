@@ -1188,6 +1188,40 @@ class PyRaya(QPlainTextEdit):
         self.wordAdded.emit(word)
 
     # ==========================================================================
+    def _learnCandidate(self) -> str | None:
+        """The "Add to dictionary" candidate: the word under the cursor.
+
+        ``None`` when the cursor has a selection, when there is no word run,
+        or when the engine already knows the word. The word is the maximal
+        Arabic run :meth:`_wordUnderCursor` returns — entirely
+        RomanUrdu-resolved, so the same candidate logic the spell-check
+        pass computes.
+        """
+        cursor = self.textCursor()
+        if cursor.hasSelection():
+            return None
+        word = self._wordUnderCursor()
+        if word is None:
+            return None
+        start, end = word
+        block = self.document().findBlock(start)
+        text = block.text()[start - block.position() : end - block.position()]
+        if self._ensureEngine().hasWord(text):
+            return None
+        return text
+
+    # ==========================================================================
+    def _addToDictionary(self, word: str) -> None:
+        """The "Add to dictionary" trigger: the dialog learns, and a cancel
+        leaves the Vocabulary untouched.
+
+        ``_learnDialog`` learns the accepted word internally on both paths
+        (handler and built-in dialog), so nothing further follows its
+        result; ``None`` (cancel) simply means the word was not learned.
+        """
+        self._learnDialog(word, prefill=word)
+
+    # ==========================================================================
     def _syncOverlay(self, *, bypassMouse: bool = False) -> None:
         """Activate, reposition, or deactivate the overlay for the cursor.
 
@@ -2121,10 +2155,11 @@ class PyRaya(QPlainTextEdit):
 
         Builds on Qt's standard text-editing context menu (Undo, Redo, Cut,
         Copy, Paste, Delete and Select All, with their usual enable states)
-        and appends the region actions.
+        and appends the region actions and, when the cursor rests on an
+        unknown RomanUrdu word, the "Add to dictionary" action.
 
         Returns:
-            The context menu with editing and region actions.
+            The context menu with editing, region, and learn actions.
         """
         menu = self.createStandardContextMenu(QPoint())
         menu.addSeparator()
@@ -2154,6 +2189,12 @@ class PyRaya(QPlainTextEdit):
         clearAll.setEnabled(bool(self._regionSpans()))
         clearAll.triggered.connect(self.clearRegions)
         menu.addAction(clearAll)
+
+        candidate = self._learnCandidate()
+        if candidate is not None:
+            action = QAction("Add to dictionary", self)
+            action.triggered.connect(lambda _checked, w=candidate: self._addToDictionary(w))
+            menu.addAction(action)
         return menu
 
     # ==========================================================================
