@@ -124,11 +124,13 @@ def testSuggestDistanceConfig(engine: RomanInputEngine) -> None:
 
 
 # ******************************************************************************
-def testLearnRomanWordNoOp(engine: RomanInputEngine) -> None:
-    """learnRomanWord returns the same word as-is for this session."""
+def testLearnRomanWordRaisesWithoutAttachedVocabulary(engine: RomanInputEngine) -> None:
+    """learnRomanWord raises AssertionError without an attached Vocabulary."""
     for word in ZERO_MATCH_WORDS:
-        assert engine.learnRomanWord(word) == word
-    assert engine.learnRomanWord("") == ""
+        with pytest.raises(AssertionError):
+            engine.learnRomanWord(word)
+    with pytest.raises(AssertionError):
+        engine.learnRomanWord("")
 
 
 # ******************************************************************************
@@ -144,7 +146,8 @@ def testEngineUnavailable(monkeypatch) -> None:
     assert engine.available is False
     assert engine.suggest("khosh") == []
     assert engine.suggestTiers("khosh") == []
-    assert engine.learnRomanWord("xqwzrty") == "xqwzrty"
+    with pytest.raises(AssertionError):
+        engine.learnRomanWord("xqwzrty")
 
 
 # ******************************************************************************
@@ -3480,7 +3483,15 @@ def testEmptyDocumentScenario1Commit(app: QApplication) -> None:
 
 # ******************************************************************************
 def testUndefinedWordCommitScenario1And2(app: QApplication) -> None:
-    """Committing the undefined-word row learns and commits the typed roman word."""
+    """Committing the undefined-word row trips the mappability gate.
+
+    The typed roman is unmappable (Latin letters carry no Arabic-script
+    mapping), so ``learnRomanWord`` raises ``AssertionError`` inside the
+    commit handler before any write (PySide6 swallows the exception from
+    the event dispatch and prints its traceback to stderr): the document
+    stays untouched, no ``romanWordCommitted`` fires, and the Vocabulary
+    is not mutated. The dialog flow replaces this path in a later task.
+    """
     # scenario 1: typed at a bare cursor position past the span
     widget = PyRaya()
     widget.show()
@@ -3496,15 +3507,13 @@ def testUndefinedWordCommitScenario1And2(app: QApplication) -> None:
     overlay.setText("xqwzrty")  # zero matches -> undefined-word row
     row = overlay.suggestionList().selectedRow()
     assert row is not None and row.suggestion.isUndefined()
-    _sendKey(overlay.lineEdit(), Qt.Key.Key_Space, " ")
-    assert widget.toPlainText() == "hello خوش xqwzrty world"
-    assert committed == [("xqwzrty", "xqwzrty")]
-    assert widget.textCursor().position() == 18
-    _assertNoOverlay(widget)
-    # localDictionary is unchanged (learnRomanWord is a no-op this session)
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Space, " ")  # gate: no write
+    assert widget.toPlainText() == "hello خوش world"
+    assert committed == []
+    # localDictionary is unchanged (the gate fired before the mutation)
     assert list(widget.localDictionary().counter) == []
 
-    # scenario 2: the span is replaced by the learned word
+    # scenario 2: the span-replacement commit trips the same gate
     widget2 = PyRaya()
     widget2.show()
     widget2.setPlainText("hello خوش world")
@@ -3518,10 +3527,10 @@ def testUndefinedWordCommitScenario1And2(app: QApplication) -> None:
     overlay2.setText("xqwzrty")  # zero matches -> undefined-word row
     row2 = overlay2.suggestionList().selectedRow()
     assert row2 is not None and row2.suggestion.isUndefined()
-    _sendKey(overlay2.lineEdit(), Qt.Key.Key_Space, " ")
-    assert widget2.toPlainText() == "hello xqwzrty  world"
-    assert committed2 == [("xqwzrty", "xqwzrty")]
-    _assertNoOverlay(widget2)
+    _sendKey(overlay2.lineEdit(), Qt.Key.Key_Space, " ")  # gate: no write
+    assert widget2.toPlainText() == "hello خوش world"
+    assert committed2 == []
+    assert list(widget2.localDictionary().counter) == []
 
 
 # ******************************************************************************

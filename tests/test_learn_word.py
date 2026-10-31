@@ -15,7 +15,7 @@ from PySide6.QtWidgets import QApplication
 from romanalfaz.engine import Vocabulary
 
 from pyraya import PyRaya
-from pyraya.roman_input import _sharedEngine
+from pyraya.roman_input import RomanInputEngine, _sharedEngine
 
 
 # ******************************************************************************
@@ -92,3 +92,80 @@ def testSharedEngineIsCreatedOnce(app: QApplication) -> None:
     assert _sharedEngine._engine is None
     assert widget.romanEngine() is other.romanEngine()
     assert _sharedEngine._engine is not None
+
+
+# ******************************************************************************
+def testLearnRomanWordMappabilityGate(app: QApplication) -> None:
+    """An unmappable word raises AssertionError and mutates nothing."""
+    vocabulary = Vocabulary()
+    engine = RomanInputEngine(localVocabulary=vocabulary)
+    notifications = 0
+
+    def observe() -> None:
+        nonlocal notifications
+        notifications += 1
+
+    callbacks = vocabulary.onChangeCallbacks
+    callbacks.append(observe)
+    try:
+        with pytest.raises(AssertionError):
+            engine.learnRomanWord("کA")
+    finally:
+        callbacks.remove(observe)
+    assert dict(vocabulary.counter) == {}
+    assert notifications == 0
+
+
+# ******************************************************************************
+def testLearnRomanWordSuccess(app: QApplication) -> None:
+    """A mappable word is learned with one add(isCompleted=True) mutation."""
+    vocabulary = Vocabulary()
+    engine = RomanInputEngine(localVocabulary=vocabulary)
+    notifications = 0
+
+    def observe() -> None:
+        nonlocal notifications
+        notifications += 1
+
+    callbacks = vocabulary.onChangeCallbacks
+    callbacks.append(observe)
+    try:
+        result = engine.learnRomanWord("خلمق")
+    finally:
+        callbacks.remove(observe)
+    assert result == "خلمق"
+    assert dict(vocabulary.counter) == {"خلمق": 1}
+    assert "خلمق" in vocabulary.completed
+    assert notifications == 1
+    assert vocabulary.isModified() is True
+
+
+# ******************************************************************************
+def testLearnRomanWordIdempotentRetry(app: QApplication) -> None:
+    """A second learn increments the count and never duplicates the entry."""
+    vocabulary = Vocabulary()
+    engine = RomanInputEngine(localVocabulary=vocabulary)
+    notifications = 0
+
+    def observe() -> None:
+        nonlocal notifications
+        notifications += 1
+
+    callbacks = vocabulary.onChangeCallbacks
+    callbacks.append(observe)
+    try:
+        engine.learnRomanWord("خلمق")
+        engine.learnRomanWord("خلمق")
+    finally:
+        callbacks.remove(observe)
+    assert dict(vocabulary.counter) == {"خلمق": 2}
+    assert len(vocabulary.counter) == 1
+    assert notifications == 2
+
+
+# ******************************************************************************
+def testLearnRomanWordRequiresVocabulary(app: QApplication) -> None:
+    """A bare engine (no localVocabulary) raises AssertionError."""
+    engine = RomanInputEngine()
+    with pytest.raises(AssertionError):
+        engine.learnRomanWord("خلمق")

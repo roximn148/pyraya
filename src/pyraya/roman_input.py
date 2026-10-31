@@ -8,10 +8,9 @@ dictionary engine. It merges the three edit-distance tiers (exact,
 edit distance 1, edit distance 2) into a single ordered, globally
 deduplicated list of :class:`Suggestion` objects, romanizes Arabic-script
 words into the encoded roman form the lookup consumes, and exposes
-:meth:`RomanInputEngine.learnRomanWord` — a no-op for now that
-simply returns the typed word as-is, and the hook for the future
-learning feature, introduced in a later task. For now, the module
-also carries the :class:`_SharedEngine` holder owning the
+:meth:`RomanInputEngine.learnRomanWord`, which learns an Arabic-script
+word into the attached Vocabulary, guarded by full mappability. The
+module also carries the :class:`_SharedEngine` holder owning the
 application-wide shared :class:`Vocabulary` and the shared engine
 every widget borrows.
 
@@ -168,7 +167,8 @@ class RomanInputEngine:
     :class:`Vocabulary` is added to it via
     :meth:`RomanAlfaz.addVocabulary` (so local mutations automatically
     recompile the lookup index). The attached Vocabulary is the
-    application-wide shared one, mutated by :meth:`learnRomanWord`.
+    application-wide shared one, and :meth:`learnRomanWord` learns into
+    it, guarded by full mappability.
 
     Args:
         localVocabulary: The in-memory dictionary to attach;
@@ -301,22 +301,35 @@ class RomanInputEngine:
         return encoded.lower()
 
     # ==========================================================================
-    def learnRomanWord(self, word: str) -> str:
-        """Learn a typed roman word.
+    def learnRomanWord(self, arabicWord: str) -> str:
+        """Learn an Arabic-script word into the attached Vocabulary.
 
-        **No-op for this session**: simply returns the same word as-is (the
-        typed roman). It is the hook the undefined-word (Learn) commit maps
-        to; in the future it will return the Arabic-script word for the
-        typed roman and update the local vocabulary, guarded by full
-        mappability.
+        Mappability is validated **before** the mutation:
+        ``tafseerUrduAr2Rm`` must return ``undef == 0``, because the
+        recompile the mutation triggers hard-asserts ``undef == 0`` and names
+        the offending word. ``add`` with ``isCompleted=True`` is one
+        mutation — one change notification, one ``recompileLookup`` — and
+        the word lands in ``completed`` so the host's ``Vocabulary.save``
+        persists it. ``add`` is idempotent: a retry increments the count,
+        never duplicates the entry.
 
         Args:
-            word: The typed roman word.
+            arabicWord: The Arabic-script word to learn.
 
         Returns:
-            The same word, unchanged.
+            The Arabic word, unchanged.
+
+        Raises:
+            AssertionError: When no Vocabulary is attached, or the word is
+                unmappable.
         """
-        return word
+        _encoded, undef = tafseerUrduAr2Rm(arabicWord)
+        if self._localVocabulary is None:
+            raise AssertionError("no Vocabulary attached")
+        if undef:
+            raise AssertionError(f"unmappable word {arabicWord!r}: {undef} unmapped character(s)")
+        self._localVocabulary.add(arabicWord, isCompleted=True)
+        return arabicWord
 
 
 # ******************************************************************************
