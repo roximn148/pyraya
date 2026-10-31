@@ -8,9 +8,12 @@ dictionary engine. It merges the three edit-distance tiers (exact,
 edit distance 1, edit distance 2) into a single ordered, globally
 deduplicated list of :class:`Suggestion` objects, romanizes Arabic-script
 words into the encoded roman form the lookup consumes, and exposes
-:meth:`RomanInputEngine.learnRomanWord` — a no-op for this session that
-simply returns the typed word as-is, and the hook for the future learning
-feature.
+:meth:`RomanInputEngine.learnRomanWord` — a no-op for now that
+simply returns the typed word as-is, and the hook for the future
+learning feature, introduced in a later task. For now, the module
+also carries the :class:`_SharedEngine` holder owning the
+application-wide shared :class:`Vocabulary` and the shared engine
+every widget borrows.
 
 The engine (and its ~0.3 s cold dictionary load) is created on the first
 overlay activation, or the first spell-check re-highlight whose block
@@ -161,15 +164,14 @@ class RomanInputEngine:
     The package's own wordlist (:data:`_DefaultVocabulary`, ``qamoos.sym``)
     is loaded on construction as the engine's default Vocabulary — passed
     as a starter vocabulary to :class:`RomanAlfaz`, replacing the bundled
-    ``UrduWords5k.sym`` fallback — and the document-local in-memory
-    :class:`Vocabulary` is attached to it via
+    ``UrduWords5k.sym`` fallback — and the attached in-memory
+    :class:`Vocabulary` is added to it via
     :meth:`RomanAlfaz.addVocabulary` (so local mutations automatically
-    recompile the lookup index). The local vocabulary is never mutated in
-    this session — :meth:`learnRomanWord` is a no-op and is the hook for the
-    future learning feature.
+    recompile the lookup index). The attached Vocabulary is the
+    application-wide shared one, mutated by :meth:`learnRomanWord`.
 
     Args:
-        localVocabulary: The document-local in-memory dictionary to attach;
+        localVocabulary: The in-memory dictionary to attach;
             ``None`` for a default-wordlist-only engine.
         distance: The maximum edit distance searched (tiers: exact,
             distance 1, …, distance ``distance``).
@@ -341,23 +343,20 @@ class _SharedEngine:
 
     # ==========================================================================
     def engine(self) -> RomanInputEngine:
+        """Return the shared engine, creating it lazily on first use."""
         if self._engine is None:
             self._engine = RomanInputEngine(localVocabulary=self._vocabulary)
         return self._engine
 
     # ==========================================================================
     def replaceVocabulary(self, vocabulary: Vocabulary) -> None:
-        # Host startup path: ``Vocabulary.load(file)`` standalone (bulk,
-        # no recompile storm), then hand the loaded Vocabulary to the
-        # holder — exactly one recompile on first ``engine()`` (a8
-        # docs' populate-before-attaching guidance). Discards a cached
-        # engine.
+        """Swap the shared Vocabulary and discard a cached engine."""
         self._vocabulary = vocabulary
         self._engine = None
 
     # ==========================================================================
     def reset(self) -> None:
-        # Test-only seam: fresh empty Vocabulary, engine discarded.
+        """Test-only seam: a fresh empty Vocabulary, engine discarded."""
         self._vocabulary = Vocabulary()
         self._engine = None
 

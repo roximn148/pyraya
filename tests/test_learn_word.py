@@ -14,6 +14,7 @@ from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QApplication
 from romanalfaz.engine import Vocabulary
 
+from pyraya import PyRaya
 from pyraya.roman_input import _sharedEngine
 
 
@@ -48,3 +49,46 @@ def testResetRestoresFreshState(app: QApplication) -> None:
     _sharedEngine.reset()
     assert dict(_sharedEngine.vocabulary.counter) == {}
     assert _sharedEngine._engine is None
+
+
+# ******************************************************************************
+def testSharedVocabularyIsApplicationWide(app: QApplication) -> None:
+    """Every widget borrows the same application-wide shared Vocabulary."""
+    first = PyRaya()
+    second = PyRaya()
+    assert first.localDictionary() is second.localDictionary()
+    word = "خلمق"
+    first.localDictionary().add(word, isCompleted=True)
+    assert second.localDictionary().counter[word] == 1
+
+
+# ******************************************************************************
+def testOneLearnTriggersOneNotification(app: QApplication) -> None:
+    """One Vocabulary mutation triggers exactly one change callback."""
+    widget = PyRaya()
+    assert widget.localDictionary() is _sharedEngine.vocabulary
+    notifications = 0
+
+    def observe() -> None:
+        nonlocal notifications
+        notifications += 1
+
+    callbacks = _sharedEngine.vocabulary.onChangeCallbacks
+    callbacks.append(observe)
+    try:
+        word = "خلمق"
+        widget.localDictionary().add(word, isCompleted=True)
+    finally:
+        callbacks.remove(observe)
+    assert notifications == 1
+    assert word in widget.localDictionary().completed
+
+
+# ******************************************************************************
+def testSharedEngineIsCreatedOnce(app: QApplication) -> None:
+    """Both widgets borrow one lazily-created shared engine."""
+    widget = PyRaya()
+    other = PyRaya()
+    assert _sharedEngine._engine is None
+    assert widget.romanEngine() is other.romanEngine()
+    assert _sharedEngine._engine is not None

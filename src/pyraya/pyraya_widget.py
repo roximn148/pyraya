@@ -65,6 +65,7 @@ from .roman_input import (
     OverlayLayoutSpacing,
     RomanInputEngine,
     RomanOverlay,
+    _sharedEngine,
 )
 
 __all__ = [
@@ -551,15 +552,15 @@ class PyRaya(QPlainTextEdit):
         self.setShowWhitespace(True)
         # Roman-input overlay state: the feature and assist mode are on by
         # default so the widget is ready for roman Urdu out of the box; the
-        # dictionary and engine are owned by the widget (the engine is
-        # created lazily on demand). All of these fields must exist before
-        # the highlighter is constructed: its constructor re-highlights
-        # (even the empty) document, and the spell-check pass queries the
-        # shared engine through the provider passed below.
+        # dictionary and engine are borrowed from the application-wide
+        # shared holder (the engine is created lazily on first use). All of
+        # these fields must exist before the highlighter is constructed:
+        # its constructor re-highlights (even the empty) document, and the
+        # spell-check pass queries the shared engine through the provider
+        # passed below.
         self._romanInputEnabled = True
         self._assistMode = True
-        self._localDictionary = Vocabulary()
-        self._romanEngine: RomanInputEngine | None = None
+        self._localDictionary = _sharedEngine.vocabulary
         self._activeWord: tuple[int, int] | None = None
         self._anchorPosition: int | None = None
         # A view-caused suspension of the overlay: the word-rect hit test
@@ -1032,15 +1033,15 @@ class PyRaya(QPlainTextEdit):
 
     # ==========================================================================
     def localDictionary(self) -> Vocabulary:
-        """The document-local in-memory :class:`romanalfaz.Vocabulary`.
+        """The application-wide shared in-memory :class:`romanalfaz.Vocabulary`.
 
-        Owned by the widget and passed to the engine on lazy load. It is the
-        hook for the future ``learnRomanWord`` update;
-        ``Vocabulary.save``/``Vocabulary.load`` exist for persistence, and it
-        is never mutated in this session.
+        Owned by the :class:`_SharedEngine` holder and borrowed by every
+        widget. It is the hook for the future ``learnRomanWord`` update;
+        ``Vocabulary.save``/``Vocabulary.load`` exist for host persistence,
+        and ``isModified()`` is the host's mutation flag.
 
         Returns:
-            The same in-memory :class:`Vocabulary` instance, every time.
+            The same shared :class:`Vocabulary` instance, every time.
         """
         return self._localDictionary
 
@@ -1066,14 +1067,15 @@ class PyRaya(QPlainTextEdit):
 
     # ==========================================================================
     def romanEngine(self) -> RomanInputEngine | None:
-        """The roman-input engine, or ``None`` while the feature is disabled.
+        """The shared roman-input engine, or ``None`` while disabled.
 
-        Lazily creates the engine (with its ~0.3 s dictionary cold load) on
-        first call while the feature is enabled; subsequent calls return the
-        same instance.
+        Returns the application-wide shared engine, created lazily on first
+        use (with its ~0.3 s dictionary cold load); every widget borrows
+        the same instance.
 
         Returns:
-            The engine when the feature is enabled; ``None`` otherwise.
+            The shared engine when the feature is enabled; ``None``
+            otherwise.
         """
         if not self._romanInputEnabled:
             return None
@@ -1100,19 +1102,17 @@ class PyRaya(QPlainTextEdit):
 
     # ==========================================================================
     def _ensureEngine(self) -> RomanInputEngine:
-        """The shared roman-input engine, created lazily when either feature
-        needs it.
+        """The application-wide shared roman-input engine, created lazily on
+        first use.
 
         Both the roman-input overlay and the spell-check pass consult the
-        same engine instance, so the ~0.3 s dictionary cold load happens
-        at most once per widget.
+        same instance, and every widget borrows it, so the ~0.3 s dictionary
+        cold load happens at most once per process.
 
         Returns:
             The shared engine, creating it on first use.
         """
-        if self._romanEngine is None:
-            self._romanEngine = RomanInputEngine(self._localDictionary)
-        return self._romanEngine
+        return _sharedEngine.engine()
 
     # ==========================================================================
     def _spellEngine(self) -> RomanInputEngine:
