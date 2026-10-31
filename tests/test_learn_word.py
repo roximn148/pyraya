@@ -470,3 +470,35 @@ def testLearnRowEdgeCommitSkipsDialog(app: QApplication) -> None:
     assert widget._overlay is None or not widget._overlay.isVisible()
     assert calls == []
     assert dict(widget.localDictionary().counter) == {}
+
+
+# ******************************************************************************
+def testIsModifiedLifecycle(app: QApplication, tmp_path) -> None:
+    """isModified is the host's read-only signal; PyRaya never wraps save.
+
+    The host polls the flag on the very Vocabulary ``localDictionary``
+    returns, and a host-side save round-trips through
+    :meth:`Vocabulary.load` — the word and its completed flag restored,
+    the flag reset, and the learned word at hasWord level.
+    """
+    # Fresh holder from the autouse reset: the flag starts false.
+    assert _sharedEngine.vocabulary.isModified() is False
+    widget = PyRaya()
+    widget._learnWord("خلمق")
+    assert widget.localDictionary().isModified() is True
+    # The host saves the shared Vocabulary itself; the save resets the flag.
+    path = str(tmp_path / "vocab.sym")
+    widget.localDictionary().save(path)
+    assert widget.localDictionary().isModified() is False
+    # The save round-trip mirrors the a8 wheel checks: load restores the
+    # counter and the completed set and resets the flag.
+    loaded = Vocabulary.load(path)
+    assert loaded.counter["خلمق"] == 1
+    assert "خلمق" in loaded.completed
+    assert loaded.isModified() is False
+    # No PyRaya wrapper: the host's save reset the flag on the very
+    # Vocabulary the widget borrows, and the word is hasWord-level knowledge.
+    assert widget.localDictionary() is _sharedEngine.vocabulary
+    engine = widget.romanEngine()
+    assert isinstance(engine, RomanInputEngine)
+    assert engine.hasWord("خلمق") is True
