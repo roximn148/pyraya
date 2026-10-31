@@ -12,7 +12,8 @@ words into the encoded roman form the lookup consumes, and exposes
 word into the attached Vocabulary, guarded by full mappability. The
 module also carries the :class:`_SharedEngine` holder owning the
 application-wide shared :class:`Vocabulary` and the shared engine
-every widget borrows.
+every widget borrows, and the built-in :class:`AddWordDialog`, the
+pure-UI learn-word dialog with live mappability feedback.
 
 The engine (and its ~0.3 s cold dictionary load) is created on the first
 overlay activation, or the first spell-check re-highlight whose block
@@ -43,7 +44,11 @@ from PySide6.QtGui import (
     QWheelEvent,
 )
 from PySide6.QtWidgets import (
+    QAbstractButton,
     QAbstractScrollArea,
+    QDialog,
+    QDialogButtonBox,
+    QLabel,
     QLineEdit,
     QSizePolicy,
     QVBoxLayout,
@@ -330,6 +335,95 @@ class RomanInputEngine:
             raise AssertionError(f"unmappable word {arabicWord!r}: {undef} unmapped character(s)")
         self._localVocabulary.add(arabicWord, isCompleted=True)
         return arabicWord
+
+
+# ******************************************************************************
+class AddWordDialog(QDialog):
+    """Built-in learn-word dialog.
+
+    An editable Arabic-script word field (pre-filled with the trigger
+    word), a read-only roman preview, and live mappability feedback:
+    OK is enabled only while the field is non-empty **and** mappable
+    (``tafseerUrduAr2Rm`` returns ``undef == 0``). OK accepts the dialog;
+    Cancel rejects it. The dialog is pure UI — it never mutates the
+    Vocabulary; the caller learns the returned word.
+    """
+
+    def __init__(self, prefill: str = "", hint: str = "", parent: QWidget | None = None) -> None:
+        """Create the learn-word dialog.
+
+        Args:
+            prefill: The Arabic-script word pre-filled into the field
+                (typically the trigger word).
+            hint: The roman text shown in the preview while the field is
+                empty (the typed roman); ``""`` shows the ``"—"``
+                placeholder.
+            parent: The parent widget.
+        """
+        super().__init__(parent)
+        self._hint = hint
+        self._field = QLineEdit(self)
+        self._field.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        # Read-only by construction: the preview is a plain QLabel whose
+        # text is driven solely by ``_updatePreview``; the no-interaction
+        # flag keeps it inert under the mouse as well.
+        self._preview = QLabel(self)
+        self._preview.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        self._buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            self,
+        )
+        self._buttons.clicked.connect(self._onButtonClicked)
+        self._field.textChanged.connect(self._updatePreview)
+        layout = QVBoxLayout(self)
+        layout.addWidget(self._field)
+        layout.addWidget(self._preview)
+        layout.addWidget(self._buttons)
+        self._field.setText(prefill)
+        # ``setText("")`` on an already-empty field emits no
+        # ``textChanged``, so seed the preview explicitly either way.
+        self._updatePreview()
+
+    # ==========================================================================
+    def word(self) -> str:
+        """The Arabic word in the field (``""`` when empty)."""
+        return self._field.text()
+
+    # ==========================================================================
+    def _onButtonClicked(
+        self, button: QAbstractButton, standardButton: QDialogButtonBox.StandardButton
+    ) -> None:
+        """OK accepts the dialog; Cancel rejects it."""
+        if standardButton == QDialogButtonBox.StandardButton.Ok:
+            self.accept()
+        elif standardButton == QDialogButtonBox.StandardButton.Cancel:
+            self.reject()
+
+    # ==========================================================================
+    def _updatePreview(self) -> None:
+        """Update the preview text and the OK button's state.
+
+        An empty field shows the hint (or ``"—"``) and disables OK; an
+        unmappable word shows a warning naming the unmappable character
+        count and disables OK; a mappable word shows its lowercased
+        ``tafseerUrduAr2Rm`` roman form (the
+        :meth:`RomanInputEngine.romanizeArabic` form) and enables OK.
+        """
+        okButton = self._buttons.button(QDialogButtonBox.StandardButton.Ok)
+        assert okButton is not None
+        text = self._field.text()
+        if not text:
+            self._preview.setText(self._hint or "—")
+            okButton.setEnabled(False)
+            return
+        encoded, undef = tafseerUrduAr2Rm(text)
+        if undef:
+            unit = "character" if undef == 1 else "characters"
+            self._preview.setText(f"unmappable: {undef} {unit}")
+            okButton.setEnabled(False)
+            return
+        self._preview.setText(encoded.lower())
+        okButton.setEnabled(True)
 
 
 # ******************************************************************************

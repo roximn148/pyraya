@@ -27,6 +27,7 @@ from .regions import (
     resolveRegionKind,
 )
 from .roman_input import (
+    AddWordDialog,
     ArabicScriptSeparators,
     MaxVisibleRows,
     OverlayLayoutSpacing,
@@ -58,6 +59,7 @@ __all__ = [
     "MaxVisibleRows",
     "OverlayLayoutSpacing",
     "SuggestionListMargin",
+    "AddWordDialog",
     "main",
 ]
 

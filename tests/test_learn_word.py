@@ -11,10 +11,11 @@ from collections.abc import Generator
 
 import pytest
 from PySide6.QtCore import QCoreApplication
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QDialogButtonBox
+from romanalfaz.algorithm import tafseerUrduAr2Rm
 from romanalfaz.engine import Vocabulary
 
-from pyraya import PyRaya
+from pyraya import AddWordDialog, PyRaya
 from pyraya.roman_input import RomanInputEngine, _sharedEngine
 
 
@@ -169,3 +170,46 @@ def testLearnRomanWordRequiresVocabulary(app: QApplication) -> None:
     engine = RomanInputEngine()
     with pytest.raises(AssertionError):
         engine.learnRomanWord("خلمق")
+
+
+# ******************************************************************************
+def testAddWordDialogPrefillsAndReturnsWord(app: QApplication) -> None:
+    """The dialog prefills its field and returns the word after accept."""
+    dialog = AddWordDialog(prefill="خلمق")
+    assert dialog._field.text() == "خلمق"
+    dialog.accept()
+    assert dialog.word() == "خلمق"
+
+
+# ******************************************************************************
+def testAddWordDialogPreviewTracksMappability(app: QApplication) -> None:
+    """The preview tracks mappability and the OK button follows it."""
+    dialog = AddWordDialog()
+    okButton = dialog._buttons.button(QDialogButtonBox.StandardButton.Ok)
+    # A mappable word: the preview shows the lowercased roman form, OK enabled.
+    dialog._field.setText("خلمق")
+    encoded, undef = tafseerUrduAr2Rm("خلمق")
+    assert undef == 0
+    assert dialog._preview.text() == encoded.lower()
+    assert okButton.isEnabled() is True
+    # An unmappable word: the preview names the unmappable count, OK disabled.
+    dialog._field.setText("کA")
+    assert dialog._preview.text() == "unmappable: 1 character"
+    assert okButton.isEnabled() is False
+    # Clearing the field disables OK again.
+    dialog._field.clear()
+    assert okButton.isEnabled() is False
+
+
+# ******************************************************************************
+def testAddWordDialogEmptyFieldDisablesOk(app: QApplication) -> None:
+    """A fresh dialog with an empty field has a disabled OK button."""
+    dialog = AddWordDialog()
+    assert dialog._field.text() == ""
+    assert dialog.word() == ""
+    okButton = dialog._buttons.button(QDialogButtonBox.StandardButton.Ok)
+    assert okButton.isEnabled() is False
+    # An empty field with no hint shows the placeholder; a hint shows instead.
+    assert dialog._preview.text() == "\u2014"
+    hinted = AddWordDialog(hint="khlmq")
+    assert hinted._preview.text() == "khlmq"
