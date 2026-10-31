@@ -706,6 +706,32 @@ def testOverlayFuzzyNoExactAppendsLearnRow(
 
 
 # ******************************************************************************
+def testOverlayLearnRowElidesLongInput(app: QApplication, engine: RomanInputEngine) -> None:
+    """The undefined-word row elides typed input above 8 characters.
+
+    A 9-character word displays its first and last 4 characters with
+    ``..`` between, capping the label at 14 Latin characters; an
+    8-character word displays in full. Display-only: the row's suggestion
+    carries the full typed roman, so a commit writes the complete word.
+    """
+    overlay, _ = _makeOverlay(app, engine)
+    overlay.setText("abcdefghi")
+    suggestionList = overlay.suggestionList()
+    suggestionList.select(suggestionList.rowCount() - 1)
+    row = suggestionList.selectedRow()
+    assert row is not None and row.suggestion.isUndefined()
+    assert row.arabic == "+ [abcd..fghi]"
+    assert row.suggestion.encodedRoman == "abcdefghi"
+
+    overlay.setText("abcdefgh")
+    suggestionList = overlay.suggestionList()
+    suggestionList.select(suggestionList.rowCount() - 1)
+    row = suggestionList.selectedRow()
+    assert row is not None and row.suggestion.isUndefined()
+    assert row.arabic == "+ [abcdefgh]"
+
+
+# ******************************************************************************
 def testOverlayUnavailableOffersNothing(app: QApplication, monkeypatch) -> None:
     """An unavailable engine offers no rows, no undefined-word row, and no crash."""
 

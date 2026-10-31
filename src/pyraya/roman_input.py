@@ -152,7 +152,8 @@ class _SuggestionRow:
         suggestion: The suggestion backing the row; for the undefined-word
             row a blank :class:`Suggestion` (``isUndefined()`` true).
         arabic: The Arabic-script text drawn in the document font; for the
-            undefined-word row this is the ``+ [<typed roman>]`` label.
+            undefined-word row this is the ``+ [<typed roman>]`` label
+            (elided above 8 characters, display-only).
         tier: The edit-distance tier (0 = exact, 1, 2); -1 for the
             undefined-word row.
     """
@@ -1004,13 +1005,30 @@ class RomanOverlay(QWidget):
         self._lineEdit.setCursorPosition(len(roman))
 
     # ==========================================================================
+    def _learnRowLabel(self, text: str) -> str:
+        """The undefined-word row's display label for the typed roman.
+
+        Words of at most 8 characters display in full; longer words elide
+        to their first and last 4 characters with ``..`` between, capping
+        the label at 14 Latin characters (``+ [`` + 10 + ``]``) and thus
+        the suggestion list's maximum width. Display-only: the row's
+        suggestion still carries the full typed roman, so a commit writes
+        the complete word.
+        """
+        if len(text) > 8:
+            text = text[:4] + ".." + text[-4:]
+        return f"+ [{text}]"
+
+    # ==========================================================================
     def refreshSuggestions(self) -> None:
         """Rebuild the suggestion rows from the current line-edit text.
 
         Empty text hides the list. A non-empty text with no exact (tier-0)
-        match appends a trailing undefined-word row, ``+ [<typed roman>]`` —
-        after any fuzzy-match rows — unless the engine is unavailable, in
-        which case no rows and no undefined-word row are offered.
+        match appends a trailing undefined-word row, ``+ [<typed roman>]``
+        (input above 8 characters elided to its first and last 4 with
+        ``..`` between) — after any fuzzy-match rows — unless the engine is
+        unavailable, in which case no rows and no undefined-word row are
+        offered.
         """
         text = self._lineEdit.text()
         if not text:
@@ -1033,11 +1051,12 @@ class RomanOverlay(QWidget):
         if not hasExact and self._engine.available:
             # The undefined-word row is constructed from a default-constructed
             # blank Suggestion carrying the typed roman, so the commit emits
-            # it like any other row's suggestion.
+            # it like any other row's suggestion; the label is display-only
+            # (elided above 8 characters), never the committed text.
             rows.append(
                 _SuggestionRow(
                     suggestion=Suggestion(encodedRoman=text),
-                    arabic=f"+ [{text}]",
+                    arabic=self._learnRowLabel(text),
                     tier=-1,
                 ),
             )
