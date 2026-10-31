@@ -49,7 +49,7 @@ from PySide6.QtGui import (
     QTextLine,
     QTextOption,
 )
-from PySide6.QtWidgets import QLayout, QMenu, QPlainTextEdit, QWidget
+from PySide6.QtWidgets import QDialog, QLayout, QMenu, QPlainTextEdit, QWidget
 from romanalfaz.engine import Suggestion, Vocabulary
 
 from .regions import (
@@ -61,6 +61,7 @@ from .regions import (
     resolveRegionKind,
 )
 from .roman_input import (
+    AddWordDialog,
     ArabicScriptSeparators,
     OverlayLayoutSpacing,
     RomanInputEngine,
@@ -536,6 +537,8 @@ class PyRaya(QPlainTextEdit):
     #: the typed roman for an undefined-word commit) and the typed roman.
     romanWordCommitted = Signal(str, str)
 
+    wordAdded = Signal(str)
+
     # ==========================================================================
     def __init__(self, parent: QWidget | None = None) -> None:
         """Initialize the widget.
@@ -561,6 +564,10 @@ class PyRaya(QPlainTextEdit):
         self._romanInputEnabled = True
         self._assistMode = True
         self._localDictionary = _sharedEngine.vocabulary
+        # The host learn dialog handler: receives the trigger word and
+        # returns the chosen Arabic word on accept, or ``None`` on cancel.
+        # ``None`` restores the built-in :class:`AddWordDialog`.
+        self._addWordHandler: Callable[[str], str | None] | None = None
         self._activeWord: tuple[int, int] | None = None
         self._anchorPosition: int | None = None
         # A view-caused suspension of the overlay: the word-rect hit test
@@ -1082,6 +1089,20 @@ class PyRaya(QPlainTextEdit):
         return self._ensureEngine()
 
     # ==========================================================================
+    def setAddWordHandler(self, handler: Callable[[str], str | None] | None) -> None:
+        """Install a host learn dialog in place of the built-in AddWordDialog.
+
+        The handler receives the trigger word (the Arabic word for the
+        right-click trigger, the typed roman for the + Learn row) and returns
+        the chosen Arabic word on accept, or ``None`` on cancel. ``None``
+        restores the built-in dialog.
+
+        Args:
+            handler: The host callable, or ``None`` for the built-in dialog.
+        """
+        self._addWordHandler = handler
+
+    # ==========================================================================
     def setSpellCheckEnabled(self, enabled: bool) -> None:
         """Enable or disable the spell-check underline.
 
@@ -1124,6 +1145,47 @@ class PyRaya(QPlainTextEdit):
         None-while-disabled contract.
         """
         return self._ensureEngine()
+
+    # ==========================================================================
+    def _learnDialog(self, trigger: str, prefill: str = "") -> str | None:
+        """Open the learn UI; the chosen Arabic word on accept, ``None`` on cancel.
+
+        The handler path returns the handler's result. The built-in path
+        re-opens the dialog on ``AssertionError`` (the mappability
+        pre-validation is belt-and-braces behind the dialog's live feedback,
+        so this stays open with the user's text until they accept or cancel),
+        and treats an empty accepted field as a cancel.
+        """
+        if self._addWordHandler is not None:
+            word = self._addWordHandler(trigger)
+            if word:
+                self._learnWord(word)
+            return word
+        arabic = prefill
+        while True:
+            dialog = AddWordDialog(arabic, hint=trigger)
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return None
+            word = dialog.word()
+            if not word:
+                return None
+            try:
+                self._learnWord(word)
+                return word
+            except AssertionError:
+                arabic = word  # stay open: re-open with the user's text
+
+    # ==========================================================================
+    def _learnWord(self, word: str) -> None:
+        """Learn ``word`` into the shared Vocabulary and clear its underline.
+
+        ``RomanInputEngine.learnRomanWord`` (one mutation, one recompile),
+        then a whole-document re-highlight so the spell-check underline for
+        the word clears immediately, then ``wordAdded``.
+        """
+        self._ensureEngine().learnRomanWord(word)
+        self._highlighter.rehighlight()
+        self.wordAdded.emit(word)
 
     # ==========================================================================
     def _syncOverlay(self, *, bypassMouse: bool = False) -> None:

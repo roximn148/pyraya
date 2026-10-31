@@ -11,7 +11,7 @@ from collections.abc import Generator
 
 import pytest
 from PySide6.QtCore import QCoreApplication
-from PySide6.QtWidgets import QApplication, QDialogButtonBox
+from PySide6.QtWidgets import QApplication, QDialog, QDialogButtonBox
 from romanalfaz.algorithm import tafseerUrduAr2Rm
 from romanalfaz.engine import Vocabulary
 
@@ -213,3 +213,56 @@ def testAddWordDialogEmptyFieldDisablesOk(app: QApplication) -> None:
     assert dialog._preview.text() == "\u2014"
     hinted = AddWordDialog(hint="khlmq")
     assert hinted._preview.text() == "khlmq"
+
+
+# ******************************************************************************
+def testSetAddWordHandlerLearnsViaHandler(app: QApplication) -> None:
+    """An installed handler replaces the built-in dialog and learns its pick."""
+    widget = PyRaya()
+    widget.setAddWordHandler(lambda _trigger: "خلمق")
+    learned = widget._learnDialog("xqm")
+    assert learned == "خلمق"
+    assert widget.localDictionary().counter["خلمق"] == 1
+    assert widget.localDictionary().isModified() is True
+
+
+# ******************************************************************************
+def testLearnDialogBuiltInAccepted(app: QApplication, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The built-in dialog path learns the accepted word into the shared Vocabulary."""
+    widget = PyRaya()
+    monkeypatch.setattr(AddWordDialog, "exec", lambda self: QDialog.DialogCode.Accepted)
+    assert widget._learnDialog("قلم", prefill="قلم") == "قلم"
+    assert widget.localDictionary().counter["قلم"] == 1
+    assert widget.localDictionary().isModified() is True
+
+
+# ******************************************************************************
+def testLearnDialogBuiltInRejected(app: QApplication, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A rejected built-in dialog returns None and mutates nothing."""
+    widget = PyRaya()
+    monkeypatch.setattr(AddWordDialog, "exec", lambda self: QDialog.DialogCode.Rejected)
+    assert widget._learnDialog("xqm") is None
+    assert dict(widget.localDictionary().counter) == {}
+
+
+# ******************************************************************************
+def testLearnWordEmitsWordAddedOnce(app: QApplication) -> None:
+    """_learnWord emits wordAdded exactly once and touches no document state."""
+    widget = PyRaya()
+    emitted: list[str] = []
+    widget.wordAdded.connect(lambda word: emitted.append(word))
+    widget._learnWord("خلمق")
+    assert emitted == ["خلمق"]
+    assert widget.localDictionary().isModified() is True
+    assert widget.document().availableUndoSteps() == 0
+
+
+# ******************************************************************************
+def testDialogPathAddsNoUndoSteps(app: QApplication) -> None:
+    """The handler-OK dialog path adds no undo steps to a non-empty document."""
+    widget = PyRaya()
+    widget.setPlainText("hello")
+    baseline = widget.document().availableUndoSteps()
+    widget.setAddWordHandler(lambda _trigger: "خلمق")
+    assert widget._learnDialog("xqm") == "خلمق"
+    assert widget.document().availableUndoSteps() == baseline
