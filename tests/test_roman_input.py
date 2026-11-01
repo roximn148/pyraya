@@ -4120,3 +4120,97 @@ def testReEnablingFeatureResetsAssistMode(app: QApplication) -> None:
     widget.setRomanInputEnabled(False)
     widget.setRomanInputEnabled(True)
     assert widget.isAssistEnabled() is True
+
+
+# ******************************************************************************
+class _FakeMonotonic:
+    """A controllable monotonic clock for deterministic double-tap tests.
+
+    The double-tap rule keys off ``time.monotonic()``; the tests advance the
+    clock explicitly rather than rely on wall-clock timing.
+    """
+
+    def __init__(self) -> None:
+        self._t = 0.0
+
+    def __call__(self) -> float:
+        return self._t
+
+    def advance(self, dt: float) -> None:
+        self._t += dt
+
+
+# ******************************************************************************
+def testDoubleEscInDocumentTurnsAssistModeOff(app: QApplication, monkeypatch) -> None:
+    """Two quick Esc in the document (overlay inactive) turn assist mode off:
+    the rule holds irrespective of overlay display."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello world")
+    widget.setRomanInputEnabled(True)
+    _moveCursor(widget, 1)
+    clock = _FakeMonotonic()
+    monkeypatch.setattr("pyraya.pyraya_widget.monotonic", clock)
+    _sendKey(widget, Qt.Key.Key_Escape)  # first tap, at t=0.0
+    assert widget.isAssistEnabled() is True  # a single Esc does not turn off
+    clock.advance(0.1)  # within the 0.3 s interval
+    _sendKey(widget, Qt.Key.Key_Escape)  # second tap, at t=0.1
+    assert widget.isAssistEnabled() is False  # the double tap turns it off
+    _assertNoOverlay(widget)
+
+
+# ******************************************************************************
+def testDoubleEscWithActiveOverlayTurnsAssistModeOff(app: QApplication, monkeypatch) -> None:
+    """Two quick Esc starting from an active overlay turn assist mode off: the
+    first Esc dismisses the overlay, the second Esc (in the document)
+    completes the double tap."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello خوش world دوست")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    clock = _FakeMonotonic()
+    monkeypatch.setattr("pyraya.pyraya_widget.monotonic", clock)
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Escape)  # first tap: dismiss, t=0.0
+    assert widget.isAssistEnabled() is True  # a single Esc does not turn off
+    _assertNoOverlay(widget)
+    clock.advance(0.1)  # within the 0.3 s interval
+    _sendKey(widget, Qt.Key.Key_Escape)  # second tap: in the document, t=0.1
+    assert widget.isAssistEnabled() is False  # the double tap turns it off
+    _assertNoOverlay(widget)
+
+
+# ******************************************************************************
+def testSingleEscDoesNotTurnAssistModeOff(app: QApplication, monkeypatch) -> None:
+    """A single Esc records the tap but does not turn assist mode off."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello world")
+    widget.setRomanInputEnabled(True)
+    _moveCursor(widget, 1)
+    clock = _FakeMonotonic()
+    monkeypatch.setattr("pyraya.pyraya_widget.monotonic", clock)
+    _sendKey(widget, Qt.Key.Key_Escape)
+    assert widget.isAssistEnabled() is True
+    _assertNoOverlay(widget)
+
+
+# ******************************************************************************
+def testSlowEscDoesNotTurnAssistModeOff(app: QApplication, monkeypatch) -> None:
+    """A second Esc out of the double-tap interval does not turn assist mode
+    off: only two quick Esc count as a double tap."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello world")
+    widget.setRomanInputEnabled(True)
+    _moveCursor(widget, 1)
+    clock = _FakeMonotonic()
+    monkeypatch.setattr("pyraya.pyraya_widget.monotonic", clock)
+    _sendKey(widget, Qt.Key.Key_Escape)  # first tap, at t=0.0
+    clock.advance(0.5)  # out of the 0.3 s interval
+    _sendKey(widget, Qt.Key.Key_Escape)  # second tap, at t=0.5 (too slow)
+    assert widget.isAssistEnabled() is True
+    _assertNoOverlay(widget)

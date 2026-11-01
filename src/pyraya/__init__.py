@@ -13,6 +13,7 @@ from romanalfaz.engine import Suggestion
 
 from .pyraya_widget import (
     DefaultFontSize,
+    EscDoubleTapInterval,
     PyRaya,
     PyRayaFonts,
     PyRayaHighlighter,
@@ -43,6 +44,7 @@ __all__ = [
     "PyRayaHighlighter",
     "PyRayaFonts",
     "DefaultFontSize",
+    "EscDoubleTapInterval",
     "RegionColors",
     "RegionType",
     "TextRegion",

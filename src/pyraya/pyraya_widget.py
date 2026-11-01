@@ -18,6 +18,7 @@ back into identity.
 """
 
 from collections.abc import Callable, Generator, Iterable, Sequence
+from time import monotonic
 from typing import cast
 
 from PySide6.QtCore import (
@@ -93,6 +94,9 @@ DefaultFontSize: float = 14.0
 
 #: Muted brick red used for the spell-check underline.
 SpellCheckUnderlineColor: QColor = QColor("#B22222")
+
+#: Maximum interval between two Esc presses that count as a double tap.
+EscDoubleTapInterval: float = 0.3
 
 
 def _isArabicChar(char: str) -> bool:
@@ -563,6 +567,11 @@ class PyRaya(QPlainTextEdit):
         # passed below.
         self._romanInputEnabled = True
         self._assistMode = True
+        # The monotonic-clock timestamp of the last plain-Esc press, or
+        # ``None``: a second plain Esc within :data:`EscDoubleTapInterval`
+        # turns assist mode off, irrespective of whether the overlay is
+        # shown.
+        self._lastEscAt: float | None = None
         self._localDictionary = _sharedEngine.vocabulary
         # The host learn dialog handler: receives the trigger word and
         # returns the chosen Arabic word on accept, or ``None`` on cancel.
@@ -1671,16 +1680,28 @@ class PyRaya(QPlainTextEdit):
     def _onOverlayCanceled(self, modifiers: int) -> None:
         """Handle the overlay's Esc: the user wants to be left alone.
 
-        A plain Esc (any modifiers other than the exact Ctrl mask) dismisses
-        the overlay only — assist mode stays on, so typing and cursor
-        movement re-trigger the overlay by the normal assist rules.
-        Ctrl+Esc (the exact Ctrl mask, no Shift/Alt/Meta) additionally
-        turns assist mode off, leaving the user alone until Ctrl+Space in
-        the document or :meth:`setAssistEnabled` turns the mode back on.
-        This is the only path that flips assist mode off on Ctrl+Esc —
-        commits and cursor-driven deactivation leave it on.
+        The overlay is always dismissed. A plain Esc (no modifiers) is the
+        double-tap candidate: a second plain Esc within
+        :data:`EscDoubleTapInterval` turns assist mode off, irrespective of
+        whether the overlay was shown — otherwise the single Esc leaves
+        assist on, so typing and cursor movement re-trigger the overlay by
+        the normal assist rules. Ctrl+Esc (the exact Ctrl mask, no
+        Shift/Alt/Meta) turns assist mode off directly, balancing Ctrl+Space
+        re-entry. Either way the user is left alone until Ctrl+Space in the
+        document or :meth:`setAssistEnabled` turns the mode back on; commits
+        and cursor-driven deactivation leave assist on.
         """
-        if modifiers == Qt.KeyboardModifier.ControlModifier.value:
+        if modifiers == 0:
+            # A plain Esc is the double-tap candidate: a second plain Esc
+            # within the interval turns assist mode off.
+            now = monotonic()
+            if self._lastEscAt is not None and now - self._lastEscAt <= EscDoubleTapInterval:
+                self._assistMode = False
+                self._lastEscAt = None
+            else:
+                self._lastEscAt = now
+        elif modifiers == Qt.KeyboardModifier.ControlModifier.value:
+            # Ctrl+Esc (the exact Ctrl mask) turns assist mode off directly.
             self._assistMode = False
         self._deactivateOverlay()
 
@@ -2258,7 +2279,11 @@ class PyRaya(QPlainTextEdit):
         exact Ctrl mask) turns assist mode off and deactivates the overlay
         — balancing ``Ctrl+Space``'s re-entry; the overlay is inactive
         here, since an active overlay holds focus in the line edit, so the
-        key never reaches the document either. While the
+        key never reaches the document either. A plain ``Esc`` (no
+        modifiers) is the double-tap candidate: a second plain ``Esc``
+        within :data:`EscDoubleTapInterval` turns assist mode off,
+        irrespective of whether the overlay is shown; a single press is a
+        no-op here. While the
         roman-input feature is enabled, assist mode is on, and the
         overlay is inactive, an ASCII alphanumeric key pressed with the
         cursor inside a RomanUrdu region seeds the overlay with that
@@ -2329,6 +2354,24 @@ class PyRaya(QPlainTextEdit):
             cursor.setPosition(position)
             self.setTextCursor(cursor)
             event.accept()
+            return
+        if event.modifiers() == Qt.KeyboardModifier.NoModifier and (
+            event.key() == Qt.Key.Key_Escape
+        ):
+            # A plain Esc in the document is the double-tap candidate: a
+            # second plain Esc within the interval turns assist mode off,
+            # irrespective of whether the overlay is shown; a single tap
+            # only records the timestamp and falls through (a no-op here),
+            # balancing Ctrl+Esc and Ctrl+Space.
+            now = monotonic()
+            if self._lastEscAt is not None and now - self._lastEscAt <= EscDoubleTapInterval:
+                self._assistMode = False
+                self._lastEscAt = None
+                self._deactivateOverlay()
+                event.accept()
+                return
+            self._lastEscAt = now
+            super().keyPressEvent(event)
             return
         super().keyPressEvent(event)
 

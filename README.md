@@ -104,7 +104,9 @@ line; `Ctrl+Enter` does. `Ctrl+Up` and `Ctrl+Down` commit the selected
 word without any separator and move the cursor one line up or down.
 Esc closes the overlay, and `Ctrl+Esc` closes it and turns assist mode
 off, so typing and clicking stop opening it until `Ctrl+Space` brings it
-back, over the word under the cursor or empty at the cursor. Turning the feature off restores
+back, over the word under the cursor or empty at the cursor. Two quick
+Esc presses turn assist mode off as well, whether or not the overlay is
+shown. Turning the feature off restores
 plain typing:
 
 ```python
@@ -158,6 +160,7 @@ if editor.localDictionary().isModified():
 | `Ctrl+2` | Tag the current selection as a Roman Urdu region |
 | `Ctrl+Space` | Turn assist mode on and open the overlay over the word under the cursor — or, with no such word, an empty overlay at the cursor |
 | `Ctrl+Esc` | Turn assist mode off and close a shown overlay |
+| two quick `Esc` | Turn assist mode off — a single `Esc` in the document does nothing, but two within a short interval turn it off, whether or not the overlay is shown |
 | `Left` / `Right` | Move the cursor in visual (screen) order — the document is right-to-left, so the keys are remapped |
 
 **In the roman-input overlay** (open over a word; see [Roman input](#roman-input)):
@@ -175,8 +178,8 @@ if editor.localDictionary().isModified():
 | `Ctrl+Esc` | Close the overlay and turn assist mode off |
 
 The standard Qt editing shortcuts (undo, redo, Home/End, ...) work as
-usual, and `Ctrl+Space` and `Ctrl+Esc` work whether or not the overlay is
-open.
+usual, and `Ctrl+Space`, `Ctrl+Esc`, and two quick `Esc` presses work
+whether or not the overlay is open.
 
 ## Repository layout
 
