@@ -148,7 +148,7 @@ MaxVisibleRows: int = 5
 #: removable vowels; two keeps that miss window narrow while still covering the
 #: common over-typing pattern (doubled vowels), so a realistic word never
 #: feels strangulated.
-_InputLengthMargin = 2
+_InputLengthMargin: int = 2
 
 
 # ******************************************************************************
@@ -250,7 +250,9 @@ class RomanInputEngine:
 
         Merges the three edit-distance tiers in tier order, deduplicates
         globally by Arabic word (the earlier tier wins), and caps the list
-        at ``maxSuggestions``.
+        at ``maxSuggestions``. The input word is truncated to
+        :attr:`maxInputLength` before lookup (see :meth:`suggestTiers`); the
+        truncation is internal and does not affect the commit path.
 
         Args:
             romanWord: The roman-script word to look up.
@@ -268,6 +270,12 @@ class RomanInputEngine:
         Like :meth:`suggest`, but returns ``(suggestion, tier)`` pairs so the
         overlay can color-code rows by edit-distance tier (0 = exact,
         1 = distance 1, 2 = distance 2) without re-deriving the distance.
+
+        The input word is first truncated to :attr:`maxInputLength` (the
+        collective vocabulary's longest word plus the search depth plus the
+        margin) so the per-keystroke cost stays bounded. The truncation is
+        internal to the suggestion pathway: the line edit and the commit path
+        are untouched, so a long typed word still commits in full.
 
         Args:
             romanWord: The roman-script word to look up.

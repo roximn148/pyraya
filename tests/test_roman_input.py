@@ -216,8 +216,13 @@ def testMaxInputLengthBundledIndex(engine: RomanInputEngine) -> None:
     """maxInputLength is the bundled index's longest word plus depth plus margin.
 
     qamoos' longest roman word is 12 chars; with distance 2 and the margin of
-    2, the cap is 16.
+    2, the cap is 16. The stat is pinned alongside the cap so a change to
+    qamoos.sym fails here (the dictionary) rather than at the cap (the
+    formula), keeping the coupling to the bundled wordlist explicit.
     """
+    alfaz = engine._alfaz
+    assert alfaz is not None
+    assert alfaz.maxRomanWordLength == 12  # pin the bundled max
     assert engine.maxInputLength == 16
 
 
@@ -279,9 +284,9 @@ def testSuggestTiersTruncatesToCap(engine: RomanInputEngine, monkeypatch) -> Non
 
     def spy(
         romanWord: str,
-        distance: int = 1,
-        maxPredictions: int | None = 5,
-    ) -> object:
+        distance: int,
+        maxPredictions: int | None,
+    ) -> tuple[list[Suggestion], list[Suggestion], list[Suggestion]]:
         captured.append(romanWord)
         return realSuggest(romanWord, distance=distance, maxPredictions=maxPredictions)
 

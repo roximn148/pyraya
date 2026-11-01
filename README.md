@@ -95,6 +95,8 @@ edited in that line while the document keeps its Urdu script. A suggestion
 list sits under the line, or above it when the bottom is crowded. Green rows
 match the word exactly, orange rows are one edit away, red rows two, and five
 rows fit at a time with the list scrolling so the picked row stays visible.
+The lookup is capped to the dictionary's longest word, so a long typed word
+stays fast; the cap affects only the lookup, so the full word still commits.
 
 Space or any punctuation key commits the selected word, and a typed
 Urdu mark such as ۔ or ، goes with it. Enter does not start a new
