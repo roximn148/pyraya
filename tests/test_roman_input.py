@@ -26,6 +26,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QApplication, QPlainTextEdit, QWidget
 from romanalfaz import DictionaryNotFoundError
+from romanalfaz.algorithm import tafseerUrduAr2Rm
 from romanalfaz.engine import Suggestion, Vocabulary
 
 from pyraya import PyRaya
@@ -36,6 +37,7 @@ from pyraya.roman_input import (
     SuggestionList,
     _DefaultVocabulary,
     _ListBorder,
+    _sharedEngine,
     _SuggestionRow,
 )
 
@@ -184,6 +186,132 @@ def testAddVocabularyAttached(app: QApplication) -> None:
     engine = RomanInputEngine(local)
     assert engine.available is True
     assert engine.suggest("khosh")[0].arabic == "خوش"
+
+
+# ******************************************************************************
+def _longArabicWord() -> tuple[str, int]:
+    """A mappable Arabic word whose roman form exceeds the bundled max.
+
+    Takes qamoos' longest word (12 roman chars) and appends two 'ba'
+    consonants (each encoding to 'B'), yielding a 14-char roman form.
+    """
+    longest_ar, longest_roman = "", 0
+    with open(_DefaultVocabulary, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            w = line.split("$")[0]
+            enc, undef = tafseerUrduAr2Rm(w)
+            if undef == 0 and len(enc) > longest_roman:
+                longest_roman, longest_ar = len(enc), w
+    extended = longest_ar + "\u0628\u0628"
+    enc, undef = tafseerUrduAr2Rm(extended)
+    assert undef == 0
+    return extended, len(enc)
+
+
+# ******************************************************************************
+def testMaxInputLengthBundledIndex(engine: RomanInputEngine) -> None:
+    """maxInputLength is the bundled index's longest word plus depth plus margin.
+
+    qamoos' longest roman word is 12 chars; with distance 2 and the margin of
+    2, the cap is 16.
+    """
+    assert engine.maxInputLength == 16
+
+
+# ******************************************************************************
+def testMaxInputLengthTracksHostVocabulary() -> None:
+    """The cap tracks the collective vocabulary live, with no re-creation.
+
+    A learned word longer than the bundled max raises the cap in place; the
+    cap is read fresh from the engine's stat, so it never goes stale.
+    """
+    word, romanLen = _longArabicWord()
+    assert romanLen > 12
+    host = Vocabulary()
+    engine = RomanInputEngine(host)
+    assert engine.maxInputLength == 16  # host empty -> qamoos' 12
+    host.add(word)  # live mutation -> recompile -> cap updates in place
+    assert engine.maxInputLength == romanLen + 2 + 2
+
+
+# ******************************************************************************
+def testMaxInputLengthReplaceVocabularyRecomputes() -> None:
+    """replaceVocabulary discards the engine; the new engine's cap is fresh.
+
+    The shared holder swaps the Vocabulary and drops the cached engine, so
+    the next engine() call re-creates it on the new Vocabulary and its cap
+    reflects that Vocabulary.
+    """
+    word, romanLen = _longArabicWord()
+    engine = _sharedEngine.engine()
+    assert engine.maxInputLength == 16  # shared Vocabulary empty -> qamoos' 12
+    newVocab = Vocabulary()
+    newVocab.add(word)
+    _sharedEngine.replaceVocabulary(newVocab)
+    fresh = _sharedEngine.engine()
+    assert fresh is not engine  # a new engine instance
+    assert fresh.maxInputLength == romanLen + 2 + 2
+
+
+# ******************************************************************************
+def testMaxInputLengthUnavailable(monkeypatch) -> None:
+    """An unavailable engine's maxInputLength is distance plus margin."""
+
+    class _Missing:
+        def __init__(self, vocabularies=None) -> None:
+            raise DictionaryNotFoundError("missing")
+
+    monkeypatch.setattr("pyraya.roman_input.RomanAlfaz", _Missing)
+    engine = RomanInputEngine()
+    assert engine.maxInputLength == 4  # distance 2 + margin 2
+
+
+# ******************************************************************************
+def testSuggestTiersTruncatesToCap(engine: RomanInputEngine, monkeypatch) -> None:
+    """A word past the cap is searched as its cap-length prefix."""
+    captured: list[str] = []
+    alfaz = engine._alfaz
+    assert alfaz is not None
+    realSuggest = alfaz.suggest
+
+    def spy(
+        romanWord: str,
+        distance: int = 1,
+        maxPredictions: int | None = 5,
+    ) -> object:
+        captured.append(romanWord)
+        return realSuggest(romanWord, distance=distance, maxPredictions=maxPredictions)
+
+    monkeypatch.setattr(alfaz, "suggest", spy)
+    cap = engine.maxInputLength
+    word = "khosh" + "x" * (cap + 1 - len("khosh"))
+    assert len(word) == cap + 1
+    engine.suggestTiers(word)
+    assert captured == [word[:cap]]
+
+
+# ******************************************************************************
+def testOverlayCommitsFullWord(app: QApplication, engine: RomanInputEngine) -> None:
+    """The cap is internal: a word past the cap commits in full, untruncated."""
+    overlay, _ = _makeOverlay(app, engine)
+    longWord = "khosh" + "x" * 12  # 17 chars, past the bundled cap of 16
+    assert len(longWord) == 17
+    captured: list[tuple[str, object, int, str, int]] = []
+    overlay.committed.connect(
+        lambda roman, selected, key, keyText, modifiers: captured.append(
+            (roman, selected, key, keyText, modifiers),
+        ),
+    )
+    overlay.lineEdit().setCursorPosition(0)
+    overlay.setText(longWord)
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Return, "\n")
+    assert len(captured) == 1
+    roman, selected, key, keyText, modifiers = captured[0]
+    assert roman == longWord  # the full word, not its cap-length prefix
+    assert key == Qt.Key.Key_Return
 
 
 # ******************************************************************************

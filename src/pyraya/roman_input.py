@@ -139,6 +139,17 @@ _ListRadius = 6
 #: keep the selected row visible while navigating.
 MaxVisibleRows: int = 5
 
+#: The margin added to the engine's longest roman word length to form the
+#: input cap, in characters. The cap is a one-sided length approximation of
+#: the exact "can this input still match" test — which depends on how many
+#: vowels the pipeline can delete, only knowable after running the pipeline.
+#: A typed word is cut off only if it is longer than the longest dictionary
+#: word plus the search depth plus this margin AND carries at least three
+#: removable vowels; two keeps that miss window narrow while still covering the
+#: common over-typing pattern (doubled vowels), so a realistic word never
+#: feels strangulated.
+_InputLengthMargin = 2
+
 
 # ******************************************************************************
 @dataclass(frozen=True, slots=True)
@@ -217,6 +228,23 @@ class RomanInputEngine:
             self.available = False
 
     # ==========================================================================
+    @property
+    def maxInputLength(self) -> int:
+        """The current input cap, in characters.
+
+        ``maxRomanWordLength + distance + _InputLengthMargin``, read fresh
+        from the engine on every access, so the cap tracks the collective
+        vocabulary (qamoos plus any attached host Vocabulary, including
+        learned words) with no staleness. Returns ``distance +
+        _InputLengthMargin`` (i.e., ``maxRomanWordLength = 0``) when the
+        engine is unavailable or its dictionary is empty.
+        """
+        alfaz = self._alfaz
+        if alfaz is None:
+            return self._distance + _InputLengthMargin
+        return (alfaz.maxRomanWordLength or 0) + self._distance + _InputLengthMargin
+
+    # ==========================================================================
     def suggest(self, romanWord: str) -> list[Suggestion]:
         """Suggest Arabic-script words for a roman word.
 
@@ -251,6 +279,14 @@ class RomanInputEngine:
         alfaz = self._alfaz
         if not self.available or alfaz is None:
             return []
+        # Cap the input word to the collective vocabulary's longest word plus
+        # the search depth plus the margin, so the per-keystroke suggest cost
+        # stays bounded. The cap is internal to the suggestion pathway: the
+        # line edit and the commit path are untouched, so a long typed word
+        # still commits in full.
+        cap = self.maxInputLength
+        if len(romanWord) > cap:
+            romanWord = romanWord[:cap]
         tierLists = alfaz.suggest(
             romanWord,
             distance=self._distance,
