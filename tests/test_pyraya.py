@@ -676,13 +676,13 @@ def testRegionTypeAtTerminatorOffsetIsNone(app: QApplication) -> None:
 
 # ******************************************************************************
 def testKeyboardShortcutsAssignRegions(app: QApplication) -> None:
-    """Ctrl+1 tags the selection Native and Ctrl+2 Roman Urdu (the seed
-    kind), so Ctrl+2 over a Native region resets the resolution to the
+    """Alt+1 tags the selection Native and Alt+2 Roman Urdu (the seed
+    kind), so Alt+2 over a Native region resets the resolution to the
     seed everywhere."""
     widget = PyRaya()
     widget.setPlainText("abcdefghij")
     _select(widget, 1, 3)
-    _keyPress(widget, Qt.Key.Key_1, Qt.KeyboardModifier.ControlModifier)
+    _keyPress(widget, Qt.Key.Key_1, Qt.KeyboardModifier.AltModifier)
     assert widget.regions() == [
         TextRegion(0, 1, RegionType.RomanUrdu),
         TextRegion(1, 3, RegionType.Native),
@@ -690,18 +690,18 @@ def testKeyboardShortcutsAssignRegions(app: QApplication) -> None:
     ]
     assert widget.toPlainText() == "abcdefghij"
 
-    _keyPress(widget, Qt.Key.Key_2, Qt.KeyboardModifier.ControlModifier)
+    _keyPress(widget, Qt.Key.Key_2, Qt.KeyboardModifier.AltModifier)
     assert widget.regions() == [TextRegion(0, 10, RegionType.RomanUrdu)]
     assert widget.toPlainText() == "abcdefghij"
 
 
 # ******************************************************************************
 def testKeyboardShortcutsIgnoredWithoutSelection(app: QApplication) -> None:
-    """Ctrl+1 / Ctrl+2 do nothing without a selection; typing a
+    """Alt+1 / Alt+2 do nothing without a selection; typing a
     non-roman character is unaffected and resolves to the seed."""
     widget = PyRaya()
     widget.setPlainText("abcd")
-    _keyPress(widget, Qt.Key.Key_1, Qt.KeyboardModifier.ControlModifier)
+    _keyPress(widget, Qt.Key.Key_1, Qt.KeyboardModifier.AltModifier)
     assert widget.regions() == [TextRegion(0, 4, RegionType.RomanUrdu)]
 
     _keyPress(widget, Qt.Key.Key_Space, Qt.KeyboardModifier.NoModifier, " ")

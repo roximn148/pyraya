@@ -1016,7 +1016,7 @@ class PyRaya(QPlainTextEdit):
         """Enable or disable overlay assist mode.
 
         While assist mode is off, the user is left alone: typing and mouse
-        presses never activate the overlay, and only Ctrl+Space in the
+        presses never activate the overlay, and only Alt+Space in the
         document turns the mode back on. Disabling the mode hides a shown
         overlay; enabling it only marks the mode ready and does not show
         the overlay.
@@ -1033,7 +1033,7 @@ class PyRaya(QPlainTextEdit):
         """Whether overlay assist mode is enabled.
 
         While assist mode is off, the user is left alone: typing and mouse
-        presses never activate the overlay, and only Ctrl+Space in the
+        presses never activate the overlay, and only Alt+Space in the
         document turns the mode back on.
         """
         return self._assistMode
@@ -1227,7 +1227,7 @@ class PyRaya(QPlainTextEdit):
         """Activate, reposition, or deactivate the overlay for the cursor.
 
         Returns early while the feature is disabled, assist mode is off
-        (the user is left alone until Ctrl+Space), a commit is in
+        (the user is left alone until Alt+Space), a commit is in
         progress, or — unless ``bypassMouse`` — a mouse button is held
         down: a drag is moving the document cursor, and the overlay would
         reposition mid-drag, and, when it crosses the word boundary,
@@ -1671,16 +1671,16 @@ class PyRaya(QPlainTextEdit):
     def _onOverlayCanceled(self, modifiers: int) -> None:
         """Handle the overlay's Esc: the user wants to be left alone.
 
-        A plain Esc (any modifiers other than the exact Ctrl mask) dismisses
+        A plain Esc (any modifiers other than the exact Alt mask) dismisses
         the overlay only — assist mode stays on, so typing and cursor
         movement re-trigger the overlay by the normal assist rules.
-        Ctrl+Esc (the exact Ctrl mask, no Shift/Alt/Meta) additionally
-        turns assist mode off, leaving the user alone until Ctrl+Space in
+        Alt+Esc (the exact Alt mask, no Shift/Ctrl/Meta) additionally
+        turns assist mode off, leaving the user alone until Alt+Space in
         the document or :meth:`setAssistEnabled` turns the mode back on.
-        This is the only path that flips assist mode off on Ctrl+Esc —
+        This is the only path that flips assist mode off on Alt+Esc —
         commits and cursor-driven deactivation leave it on.
         """
-        if modifiers == Qt.KeyboardModifier.ControlModifier.value:
+        if modifiers == Qt.KeyboardModifier.AltModifier.value:
             self._assistMode = False
         self._deactivateOverlay()
 
@@ -1898,7 +1898,7 @@ class PyRaya(QPlainTextEdit):
         invoked through the widget has completed"). An edge commit writes
         nothing and emits neither.
 
-        A Ctrl+Up / Ctrl+Down commit (``Key_Up`` / ``Key_Down``) additionally
+        A Alt+Up / Alt+Down commit (``Key_Up`` / ``Key_Down``) additionally
         moves the document cursor one line up or down, in the ``finally``
         block after ``_committing`` clears: a cursor move during the commit
         is swallowed by the :meth:`_syncOverlay` funnel's early exit, and
@@ -1951,7 +1951,7 @@ class PyRaya(QPlainTextEdit):
                 # held down (see ``_syncOverlay``).
                 self._syncOverlay(bypassMouse=True)
             if key in (Qt.Key.Key_Up, Qt.Key.Key_Down):
-                # The Ctrl+Up / Ctrl+Down line move, after ``_committing``
+                # The Alt+Up / Alt+Down line move, after ``_committing``
                 # clears and the resync runs: ``setTextCursor`` is the
                 # funnel's only chance to observe the move, and the
                 # document must behave exactly as if Up/Down had been
@@ -1996,11 +1996,11 @@ class PyRaya(QPlainTextEdit):
         ``Key_Return`` commits the empty separator — the cursor rests at
         the committed word's end, which is over the word, so the resync
         would only re-trigger the overlay the user just dismissed — and
-        suppresses the resync; ``Key_Return`` with ``ControlModifier``
+        suppresses the resync; ``Key_Return`` with ``AltModifier``
         commits the literal ``"\\n"`` (its ``keyText`` is
         platform-dependent) and resyncs; ``Key_Up`` / ``Key_Down`` (the
-        Ctrl+Up / Ctrl+Down commit — the line edit's gate guarantees the
-        exact Ctrl mask) commit the empty separator and suppress the
+        Alt+Up / Alt+Down commit — the line edit's gate guarantees the
+        exact Alt mask) commit the empty separator and suppress the
         resync, and the caller moves the document cursor one line
         (:meth:`_onOverlayCommitted`); every other committing key commits
         its ``keyText`` (``Key_Space``, typed punctuation — including the
@@ -2019,7 +2019,7 @@ class PyRaya(QPlainTextEdit):
             resync.
         """
         if key == Qt.Key.Key_Return:
-            if modifiers & Qt.KeyboardModifier.ControlModifier.value:
+            if modifiers & Qt.KeyboardModifier.AltModifier.value:
                 return "\n", True
             return "", False
         if key in (Qt.Key.Key_Up, Qt.Key.Key_Down):
@@ -2249,14 +2249,14 @@ class PyRaya(QPlainTextEdit):
     def keyPressEvent(self, event: QKeyEvent) -> None:
         """Handle region shortcuts and intercept roman-input keystrokes.
 
-        ``Ctrl+1`` tags the current selection Native and ``Ctrl+2`` tags
-        it as Roman Urdu (the seed kind). ``Ctrl+Space`` turns assist mode
+        ``Alt+1`` tags the current selection Native and ``Alt+2`` tags
+        it as Roman Urdu (the seed kind). ``Alt+Space`` turns assist mode
         back on and
         activates the overlay — over the RomanUrdu word under the cursor
         with its romanized text, or, with no such word, an empty overlay
-        at the cursor — and never reaches the document. ``Ctrl+Esc`` (the
-        exact Ctrl mask) turns assist mode off and deactivates the overlay
-        — balancing ``Ctrl+Space``'s re-entry; the overlay is inactive
+        at the cursor — and never reaches the document. ``Alt+Esc`` (the
+        exact Alt mask) turns assist mode off and deactivates the overlay
+        — balancing ``Alt+Space``'s re-entry; the overlay is inactive
         here, since an active overlay holds focus in the line edit, so the
         key never reaches the document either. While the
         roman-input feature is enabled, assist mode is on, and the
@@ -2277,13 +2277,14 @@ class PyRaya(QPlainTextEdit):
             and self._assistMode
             and not self._overlayActive()
             and not (event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+            and not (event.modifiers() & Qt.KeyboardModifier.AltModifier)
         ):
             text = event.text()
             if len(text) == 1 and text.isascii() and text.isalnum():
                 if self._regionKindForTyping() is RegionType.RomanUrdu:
                     self._activateOverlayAt(text, self.textCursor().position())
                     return
-        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+        if event.modifiers() & Qt.KeyboardModifier.AltModifier:
             if event.key() == Qt.Key.Key_Space:
                 self._assistMode = True
                 word = self._wordUnderCursor()
@@ -2294,11 +2295,11 @@ class PyRaya(QPlainTextEdit):
                 return
             if (
                 event.key() == Qt.Key.Key_Escape
-                and event.modifiers().value == Qt.KeyboardModifier.ControlModifier.value
+                and event.modifiers().value == Qt.KeyboardModifier.AltModifier.value
             ):
-                # Ctrl+Esc (the exact Ctrl mask, no Shift/Alt/Meta) turns
+                # Alt+Esc (the exact Alt mask, no Shift/Ctrl/Meta) turns
                 # assist mode off and deactivates the overlay — balancing
-                # Ctrl+Space's re-entry. An active overlay holds focus in
+                # Alt+Space's re-entry. An active overlay holds focus in
                 # the line edit, so the document never sees an Esc while
                 # the overlay is active; the deactivation drops any view
                 # suspension, like every other user decision.

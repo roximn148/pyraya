@@ -472,11 +472,11 @@ def testOverlayEscCancels(app: QApplication, engine: RomanInputEngine) -> None:
         overlay.lineEdit(),
         Qt.Key.Key_Escape,
         "",
-        Qt.KeyboardModifier.ControlModifier,
+        Qt.KeyboardModifier.AltModifier,
     )
     assert canceled == [
         Qt.KeyboardModifier.NoModifier.value,
-        Qt.KeyboardModifier.ControlModifier.value,
+        Qt.KeyboardModifier.AltModifier.value,
     ]
     assert committed == []
 
@@ -1296,8 +1296,8 @@ def testMouseReleaseAtWordEndReactivates(app: QApplication) -> None:
 
 
 # ******************************************************************************
-def testCtrlSpaceAtWordEndActivatesOverlay(app: QApplication) -> None:
-    """Ctrl+Space at the word end activates the overlay over the word."""
+def testAltSpaceAtWordEndActivatesOverlay(app: QApplication) -> None:
+    """Alt+Space at the word end activates the overlay over the word."""
     widget = PyRaya()
     widget.show()
     widget.setPlainText("hello خوش world")
@@ -1310,10 +1310,10 @@ def testCtrlSpaceAtWordEndActivatesOverlay(app: QApplication) -> None:
         overlay.lineEdit(),
         Qt.Key.Key_Escape,
         "",
-        Qt.KeyboardModifier.ControlModifier,
+        Qt.KeyboardModifier.AltModifier,
     )  # dismiss it (assist mode off)
     _assertNoOverlay(widget)
-    _sendKey(widget, Qt.Key.Key_Space, " ", Qt.KeyboardModifier.ControlModifier)
+    _sendKey(widget, Qt.Key.Key_Space, " ", Qt.KeyboardModifier.AltModifier)
     overlay = widget._overlay
     assert overlay is not None and overlay.isVisible()
     assert overlay.lineEdit().text() == "khosh"  # the word, not an empty seed
@@ -1382,9 +1382,9 @@ def testGeometryBounds(app: QApplication) -> None:
 
 # ******************************************************************************
 def testTypingInSecondParagraphAfterEnterCommit(app: QApplication) -> None:
-    """Typing in the second paragraph after a Ctrl+Enter commit does not crash.
+    """Typing in the second paragraph after an Alt+Enter commit does not crash.
 
-    The Ctrl+Enter commit moves the cursor into the second block, so the
+    The Alt+Enter commit moves the cursor into the second block, so the
     seeded overlay's anchor — and every subsequent keystroke — resolves line
     geometry in that block's own layout. ``lineForTextPosition`` and
     ``cursorToX`` take block-local positions; the absolute position overflowed
@@ -1403,7 +1403,7 @@ def testTypingInSecondParagraphAfterEnterCommit(app: QApplication) -> None:
         overlay.lineEdit(),
         Qt.Key.Key_Return,
         "\n",
-        Qt.KeyboardModifier.ControlModifier,
+        Qt.KeyboardModifier.AltModifier,
     )
     assert widget.toPlainText() == "دوست\n"
     # paragraph 2: typing seeds the overlay in the second block
@@ -2226,7 +2226,7 @@ def testUserDeactivationSuppressesRestore(app: QApplication) -> None:
 
     The word-rect hit test's hiding is a view suspension that resumes
     when the word returns. A user decision — a mouse press anywhere, or
-    Ctrl+Esc turning assist mode off — is an explicit active/inactive
+    Alt+Esc turning assist mode off — is an explicit active/inactive
     state: once the user walked away, scrolling back must not resurrect
     the overlay over them.
     """
@@ -2252,7 +2252,7 @@ def testUserDeactivationSuppressesRestore(app: QApplication) -> None:
     scrollbar.setValue(3)
     app.processEvents()
     assert not widget._overlayActive()
-    # Ctrl+Esc on an active overlay turns assist mode off; the user is
+    # Alt+Esc on an active overlay turns assist mode off; the user is
     # left alone — no suspension outlives the assist-off state.
     widget2 = PyRaya()
     widget2.show()
@@ -2268,7 +2268,7 @@ def testUserDeactivationSuppressesRestore(app: QApplication) -> None:
         overlay2.lineEdit(),
         Qt.Key.Key_Escape,
         "",
-        Qt.KeyboardModifier.ControlModifier,
+        Qt.KeyboardModifier.AltModifier,
     )  # assist mode off
     app.processEvents()
     assert not widget2._assistMode
@@ -2721,7 +2721,7 @@ def testScenario1CommitReplacesSelection(app: QApplication) -> None:
     assert widget.toPlainText() == "hello " + word + " "
     assert widget.document().isUndoAvailable()
 
-    # Ctrl+Enter commits the word plus the newline over the same selection
+    # Alt+Enter commits the word plus the newline over the same selection
     widget2 = PyRaya()
     widget2.show()
     widget2.setPlainText(original)
@@ -2742,7 +2742,7 @@ def testScenario1CommitReplacesSelection(app: QApplication) -> None:
         overlay2.lineEdit(),
         Qt.Key.Key_Return,
         "\n",
-        Qt.KeyboardModifier.ControlModifier,
+        Qt.KeyboardModifier.AltModifier,
     )
     # a block-terminator character cannot carry a character format, so the
     # newline stays untagged; the committed word characters are RomanUrdu
@@ -3085,16 +3085,16 @@ def testReturnCommitsWithoutNewline(app: QApplication) -> None:
     _assertNoOverlay(widget)
     # the resync was skipped: the cursor rests at the committed word's end,
     # over the word, but the overlay the user just dismissed is not shown;
-    # Ctrl+Space re-triggers it over the word
-    _sendKey(widget, Qt.Key.Key_Space, " ", Qt.KeyboardModifier.ControlModifier)
+    # Alt+Space re-triggers it over the word
+    _sendKey(widget, Qt.Key.Key_Space, " ", Qt.KeyboardModifier.AltModifier)
     overlay = widget._overlay
     assert overlay is not None and overlay.isVisible()
     assert overlay.lineEdit().text() == "khosh"
 
 
 # ******************************************************************************
-def testCtrlReturnCommitsWithNewline(app: QApplication) -> None:
-    """Ctrl+Enter commits the word plus a newline, opening the second block.
+def testAltReturnCommitsWithNewline(app: QApplication) -> None:
+    """Alt+Enter commits the word plus a newline, opening the second block.
 
     The resync runs: the cursor lands at the new block's start, a bare
     position, so the overlay stays quiet until the next trigger.
@@ -3111,7 +3111,7 @@ def testCtrlReturnCommitsWithNewline(app: QApplication) -> None:
         overlay.lineEdit(),
         Qt.Key.Key_Return,
         "\n",
-        Qt.KeyboardModifier.ControlModifier,
+        Qt.KeyboardModifier.AltModifier,
     )
     assert widget.toPlainText() == "hello خوش\n world"
     assert widget.document().blockCount() == 2
@@ -3123,8 +3123,8 @@ def testCtrlReturnCommitsWithNewline(app: QApplication) -> None:
 
 
 # ******************************************************************************
-def testCtrlUpCommitsBareAndMovesOneLineUp(app: QApplication) -> None:
-    """Ctrl+Up commits the selected word bare and moves the cursor up one line.
+def testAltUpCommitsBareAndMovesOneLineUp(app: QApplication) -> None:
+    """Alt+Up commits the selected word bare and moves the cursor up one line.
 
     The commit runs through the normal write path (RomanUrdu tag,
     ``regionsChanged`` and ``romanWordCommitted`` emitted, one logical undo
@@ -3150,7 +3150,7 @@ def testCtrlUpCommitsBareAndMovesOneLineUp(app: QApplication) -> None:
         overlay.lineEdit(),
         Qt.Key.Key_Up,
         "",
-        Qt.KeyboardModifier.ControlModifier,
+        Qt.KeyboardModifier.AltModifier,
     )
     # the word commits bare: no separator character, the text is unchanged
     assert widget.toPlainText() == original
@@ -3176,9 +3176,9 @@ def testCtrlUpCommitsBareAndMovesOneLineUp(app: QApplication) -> None:
 
 
 # ******************************************************************************
-def testCtrlDownCommitsBareAndMovesOneLineDown(app: QApplication) -> None:
-    """Ctrl+Down commits the selected word bare and moves the cursor down one
-    line: the Ctrl+Up contract's symmetric half."""
+def testAltDownCommitsBareAndMovesOneLineDown(app: QApplication) -> None:
+    """Alt+Down commits the selected word bare and moves the cursor down one
+    line: the Alt+Up contract's symmetric half."""
     widget = PyRaya()
     widget.show()
     original = "hello\nخوش\nworld"
@@ -3192,7 +3192,7 @@ def testCtrlDownCommitsBareAndMovesOneLineDown(app: QApplication) -> None:
         overlay.lineEdit(),
         Qt.Key.Key_Down,
         "",
-        Qt.KeyboardModifier.ControlModifier,
+        Qt.KeyboardModifier.AltModifier,
     )
     assert widget.toPlainText() == original
     # the cursor moved exactly one line down: from block 1 to block 2,
@@ -3204,8 +3204,8 @@ def testCtrlDownCommitsBareAndMovesOneLineDown(app: QApplication) -> None:
 
 
 # ******************************************************************************
-def testCtrlUpLandingOnRomanUrduWordReactivatesOverlay(app: QApplication) -> None:
-    """Ctrl+Up landing on a line whose word sits under the cursor re-activates
+def testAltUpLandingOnRomanUrduWordReactivatesOverlay(app: QApplication) -> None:
+    """Alt+Up landing on a line whose word sits under the cursor re-activates
     the overlay: the line move passes through the document's normal assist
     rules."""
     widget = PyRaya()
@@ -3219,7 +3219,7 @@ def testCtrlUpLandingOnRomanUrduWordReactivatesOverlay(app: QApplication) -> Non
         overlay.lineEdit(),
         Qt.Key.Key_Up,
         "",
-        Qt.KeyboardModifier.ControlModifier,
+        Qt.KeyboardModifier.AltModifier,
     )
     # the line move lands at block 0's word's end, over the word دوست
     assert widget.textCursor().position() == 4
@@ -3230,8 +3230,8 @@ def testCtrlUpLandingOnRomanUrduWordReactivatesOverlay(app: QApplication) -> Non
 
 
 # ******************************************************************************
-def testCtrlUpLandingWithoutWordStaysQuiet(app: QApplication) -> None:
-    """Ctrl+Up landing where no word sits under the cursor leaves no overlay:
+def testAltUpLandingWithoutWordStaysQuiet(app: QApplication) -> None:
+    """Alt+Up landing where no word sits under the cursor leaves no overlay:
     the line move passes through, and the document stays quiet."""
     widget = PyRaya()
     widget.show()
@@ -3244,7 +3244,7 @@ def testCtrlUpLandingWithoutWordStaysQuiet(app: QApplication) -> None:
         overlay.lineEdit(),
         Qt.Key.Key_Up,
         "",
-        Qt.KeyboardModifier.ControlModifier,
+        Qt.KeyboardModifier.AltModifier,
     )
     # the line move lands over the Latin word hello, whose characters are
     # not an Arabic word run, so no overlay activates
@@ -3253,9 +3253,9 @@ def testCtrlUpLandingWithoutWordStaysQuiet(app: QApplication) -> None:
 
 
 # ******************************************************************************
-def testCtrlShiftUpDownStayListNavigation(app: QApplication) -> None:
-    """Ctrl+Shift+Up/Down on the active overlay move only the list highlight:
-    the exact-Ctrl mask excludes Shift, so they keep the plain Up/Down list
+def testAltShiftUpDownStayListNavigation(app: QApplication) -> None:
+    """Alt+Shift+Up/Down on the active overlay move only the list highlight:
+    the exact-Alt mask excludes Shift, so they keep the plain Up/Down list
     navigation — the document is untouched and the overlay stays active."""
     widget = PyRaya()
     widget.show()
@@ -3270,7 +3270,7 @@ def testCtrlShiftUpDownStayListNavigation(app: QApplication) -> None:
     suggestionList = overlay.suggestionList()
     assert suggestionList.rowCount() > 1
     assert suggestionList.selectedIndex() == 0
-    shift = Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier
+    shift = Qt.KeyboardModifier.AltModifier | Qt.KeyboardModifier.ShiftModifier
     _sendKey(overlay.lineEdit(), Qt.Key.Key_Down, "", shift)
     assert suggestionList.selectedIndex() == 1
     _sendKey(overlay.lineEdit(), Qt.Key.Key_Up, "", shift)
@@ -3284,8 +3284,8 @@ def testCtrlShiftUpDownStayListNavigation(app: QApplication) -> None:
 
 
 # ******************************************************************************
-def testCtrlUpEmptyTextCommitRemovesSpan(app: QApplication) -> None:
-    """An empty-overlay commit via Ctrl+Up follows the empty-commit contract
+def testAltUpEmptyTextCommitRemovesSpan(app: QApplication) -> None:
+    """An empty-overlay commit via Alt+Up follows the empty-commit contract
     (span removal) plus the line move: the span is deleted, no separator is
     written, and the cursor lands one line up."""
     widget = PyRaya()
@@ -3301,7 +3301,7 @@ def testCtrlUpEmptyTextCommitRemovesSpan(app: QApplication) -> None:
         overlay.lineEdit(),
         Qt.Key.Key_Up,
         "",
-        Qt.KeyboardModifier.ControlModifier,
+        Qt.KeyboardModifier.AltModifier,
     )
     # span deleted (the surrounding newlines stay), no separator takes its
     # place, the cursor one line up, over the last character of hello
@@ -3802,9 +3802,9 @@ def testEscOnActiveOverlayDismissesOnly(app: QApplication) -> None:
 
 
 # ******************************************************************************
-def testCtrlEscOnActiveOverlayTurnsAssistModeOff(app: QApplication) -> None:
-    """Ctrl+Esc on the active overlay dismisses it and turns assist mode off:
-    the user is left alone until Ctrl+Space or setAssistEnabled."""
+def testAltEscOnActiveOverlayTurnsAssistModeOff(app: QApplication) -> None:
+    """Alt+Esc on the active overlay dismisses it and turns assist mode off:
+    the user is left alone until Alt+Space or setAssistEnabled."""
     widget = PyRaya()
     widget.show()
     widget.setPlainText("hello خوش world دوست")
@@ -3817,16 +3817,16 @@ def testCtrlEscOnActiveOverlayTurnsAssistModeOff(app: QApplication) -> None:
         overlay.lineEdit(),
         Qt.Key.Key_Escape,
         "",
-        Qt.KeyboardModifier.ControlModifier,
+        Qt.KeyboardModifier.AltModifier,
     )
     assert widget.isAssistEnabled() is False
     _assertNoOverlay(widget)
 
 
 # ******************************************************************************
-def testCtrlEscInDocumentTurnsAssistModeOff(app: QApplication) -> None:
-    """Ctrl+Esc in the document turns assist mode off directly, balancing
-    Ctrl+Space's re-entry; the overlay is already inactive, so no other
+def testAltEscInDocumentTurnsAssistModeOff(app: QApplication) -> None:
+    """Alt+Esc in the document turns assist mode off directly, balancing
+    Alt+Space's re-entry; the overlay is already inactive, so no other
     visible effect."""
     widget = PyRaya()
     widget.show()
@@ -3843,17 +3843,17 @@ def testCtrlEscInDocumentTurnsAssistModeOff(app: QApplication) -> None:
         widget,
         Qt.Key.Key_Escape,
         "",
-        Qt.KeyboardModifier.ControlModifier,
+        Qt.KeyboardModifier.AltModifier,
     )
     assert widget.isAssistEnabled() is False
     _assertNoOverlay(widget)
-    # Shift+Ctrl+Esc does not turn assist off (the exact-Ctrl gate).
+    # Shift+Alt+Esc does not turn assist off (the exact-Alt gate).
     widget.setAssistEnabled(True)
     _sendKey(
         widget,
         Qt.Key.Key_Escape,
         "",
-        Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier,
+        Qt.KeyboardModifier.AltModifier | Qt.KeyboardModifier.ShiftModifier,
     )
     assert widget.isAssistEnabled() is True
 
@@ -3911,7 +3911,7 @@ def testCursorMovementReactivatesOverlayAfterEscDismissal(app: QApplication) -> 
 # ******************************************************************************
 def testShiftEscOnActiveOverlayDismissesOnly(app: QApplication) -> None:
     """Shift+Esc on the active overlay dismisses it; assist mode stays on:
-    the exact-Ctrl gate makes Ctrl+Esc the only dismiss-and-off key."""
+    the exact-Alt gate makes Alt+Esc the only dismiss-and-off key."""
     widget = PyRaya()
     widget.show()
     widget.setPlainText("hello خوش world دوست")
@@ -3946,7 +3946,7 @@ def testTypingReachesDocumentWhenAssistModeOff(app: QApplication) -> None:
         overlay.lineEdit(),
         Qt.Key.Key_Escape,
         "",
-        Qt.KeyboardModifier.ControlModifier,
+        Qt.KeyboardModifier.AltModifier,
     )
     assert widget.isAssistEnabled() is False
     _sendKey(widget, Qt.Key.Key_K, "k")
@@ -3971,7 +3971,7 @@ def testMouseReleaseDoesNotReactivateWhenAssistModeOff(app: QApplication) -> Non
         overlay.lineEdit(),
         Qt.Key.Key_Escape,
         "",
-        Qt.KeyboardModifier.ControlModifier,
+        Qt.KeyboardModifier.AltModifier,
     )
     assert widget.isAssistEnabled() is False
     rect = widget._wordRect(6, 9)
@@ -3982,8 +3982,8 @@ def testMouseReleaseDoesNotReactivateWhenAssistModeOff(app: QApplication) -> Non
 
 
 # ******************************************************************************
-def testCtrlSpaceOnWordReentersAssistMode(app: QApplication) -> None:
-    """Ctrl+Space over a word turns assist mode back on and activates the
+def testAltSpaceOnWordReentersAssistMode(app: QApplication) -> None:
+    """Alt+Space over a word turns assist mode back on and activates the
     overlay over the word; the key never reaches the document."""
     widget = PyRaya()
     widget.show()
@@ -3997,14 +3997,14 @@ def testCtrlSpaceOnWordReentersAssistMode(app: QApplication) -> None:
         overlay.lineEdit(),
         Qt.Key.Key_Escape,
         "",
-        Qt.KeyboardModifier.ControlModifier,
+        Qt.KeyboardModifier.AltModifier,
     )
     assert widget.isAssistEnabled() is False
     _sendKey(
         widget,
         Qt.Key.Key_Space,
         "\u00a0",
-        Qt.KeyboardModifier.ControlModifier,
+        Qt.KeyboardModifier.AltModifier,
     )
     assert widget.isAssistEnabled() is True
     overlay = widget._overlay
@@ -4014,8 +4014,8 @@ def testCtrlSpaceOnWordReentersAssistMode(app: QApplication) -> None:
 
 
 # ******************************************************************************
-def testCtrlSpaceWithoutWordShowsEmptyOverlay(app: QApplication) -> None:
-    """Ctrl+Space with no word under the cursor shows an empty overlay at
+def testAltSpaceWithoutWordShowsEmptyOverlay(app: QApplication) -> None:
+    """Alt+Space with no word under the cursor shows an empty overlay at
     the cursor; the key never reaches the document."""
     widget = PyRaya()
     widget.show()
@@ -4025,7 +4025,7 @@ def testCtrlSpaceWithoutWordShowsEmptyOverlay(app: QApplication) -> None:
         widget,
         Qt.Key.Key_Space,
         "\u00a0",
-        Qt.KeyboardModifier.ControlModifier,
+        Qt.KeyboardModifier.AltModifier,
     )
     app.processEvents()
     assert widget.isAssistEnabled() is True
@@ -4072,7 +4072,7 @@ def testEscInDocumentDoesNotFlipAssistMode(app: QApplication) -> None:
         overlay.lineEdit(),
         Qt.Key.Key_Escape,
         "",
-        Qt.KeyboardModifier.ControlModifier,
+        Qt.KeyboardModifier.AltModifier,
     )
     assert widget.isAssistEnabled() is False
     _sendKey(widget, Qt.Key.Key_Escape)
@@ -4114,7 +4114,7 @@ def testReEnablingFeatureResetsAssistMode(app: QApplication) -> None:
         overlay.lineEdit(),
         Qt.Key.Key_Escape,
         "",
-        Qt.KeyboardModifier.ControlModifier,
+        Qt.KeyboardModifier.AltModifier,
     )
     assert widget.isAssistEnabled() is False
     widget.setRomanInputEnabled(False)

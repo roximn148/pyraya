@@ -774,15 +774,15 @@ class RomanLineEdit(QLineEdit):
     letters/digits edits the roman text and refreshes the suggestions
     synchronously. Space and any typed punctuation character commit the
     selected suggestion together with the separator character; a plain
-    Enter commits the word without one, and Ctrl+Enter commits the word
+    Enter commits the word without one, and Alt+Enter commits the word
     plus a newline. Left at the visually left edge, or Right at the
     visually right edge, commits at the edge (no separator character);
     in-text Left/Right move the cursor visually left/right without
     committing. Up/Down move the highlighted suggestion with wraparound;
-    Ctrl+Up and Ctrl+Down (the exact Ctrl mask, no Shift/Alt/Meta) commit
+    Alt+Up and Alt+Down (the exact Alt mask, no Shift/Ctrl/Meta) commit
     the selected word bare and move the document cursor one line up or
     down. Esc emits ``canceled`` with the key's modifiers: the host
-    distinguishes a plain Esc (dismiss only) from Ctrl+Esc (dismiss plus
+    distinguishes a plain Esc (dismiss only) from Alt+Esc (dismiss plus
     assist mode off) by them. Wheel events are explicitly
     forwarded to the nearest scroll-area ancestor, because
     ``QCoreApplication.sendEvent`` does not bubble to parents.
@@ -847,11 +847,11 @@ class RomanLineEdit(QLineEdit):
             event.accept()
             return
         if key in (Qt.Key.Key_Up, Qt.Key.Key_Down):
-            # Up/Down with the exact Ctrl mask (no Shift/Alt/Meta) commits
+            # Up/Down with the exact Alt mask (no Shift/Ctrl/Meta) commits
             # the selected word bare and moves the document cursor one
-            # line; every other Up/Down (plain, Ctrl+Shift, …) navigates
+            # line; every other Up/Down (plain, Alt+Shift, …) navigates
             # the suggestion list.
-            if modifiers == Qt.KeyboardModifier.ControlModifier.value:
+            if modifiers == Qt.KeyboardModifier.AltModifier.value:
                 overlay.commit(key, text, modifiers)
                 event.accept()
                 return
@@ -902,8 +902,8 @@ class RomanOverlay(QWidget):
         committed: ``(typedRoman: str, selected: object, key: int,
             keyText: str, modifiers: int)`` — emitted on a committing key
             stroke: a separator-key commit (Space, Enter, typed punctuation —
-            a plain Enter commits the word without a newline, Ctrl+Enter
-            commits the word plus a newline, and Ctrl+Up / Ctrl+Down commit
+            a plain Enter commits the word without a newline, Alt+Enter
+            commits the word plus a newline, and Alt+Up / Alt+Down commit
             the word bare and move the document cursor one line up or down),
             or an edge commit (Left at the
             visually left edge, i.e. the start of the text, or Right at the
@@ -918,7 +918,7 @@ class RomanOverlay(QWidget):
         canceled: ``(modifiers: int)`` — emitted when Esc is pressed,
             carrying the key event's ``Qt.KeyboardModifiers`` value: the
             host distinguishes a plain Esc (dismiss only, assist stays on)
-            from Ctrl+Esc (dismiss plus assist off) by it.
+            from Alt+Esc (dismiss plus assist off) by it.
     """
 
     committed = Signal(str, object, int, str, int)
@@ -1127,8 +1127,8 @@ class RomanOverlay(QWidget):
         row's blank ``Suggestion`` commits the typed roman as the session
         no-op), and the separator from ``key`` and ``keyText`` — plain
         ``Key_Return`` commits without a newline, ``Key_Return`` with
-        ``ControlModifier`` with a newline, ``Key_Up`` / ``Key_Down`` (the
-        exact-Ctrl Up/Down) bare, ``Key_Space`` and typed punctuation with
+        ``AltModifier`` with a newline, ``Key_Up`` / ``Key_Down`` (the
+        exact-Alt Up/Down) bare, ``Key_Space`` and typed punctuation with
         ``keyText``, and ``Key_Left`` / ``Key_Right`` are edge commits.
 
         Args:

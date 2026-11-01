@@ -69,8 +69,8 @@ gets the Roman-Urdu tint and takes roman input). Native text carries no tint;
 nothing else changes for it.
 
 Tag a span three ways. Select text and use the right-click menu ("Region:
-Native", "Region: Roman Urdu"), or with a selection press `Ctrl+1` for Native
-or `Ctrl+2` for Roman Urdu, or call the API:
+Native", "Region: Roman Urdu"), or with a selection press `Alt+1` for Native
+or `Alt+2` for Roman Urdu, or call the API:
 
 ```python
 from pyraya import RegionType
@@ -100,10 +100,10 @@ stays fast; the cap affects only the lookup, so the full word still commits.
 
 Space or any punctuation key commits the selected word, and a typed
 Urdu mark such as ۔ or ، goes with it. Enter does not start a new
-line; `Ctrl+Enter` does. `Ctrl+Up` and `Ctrl+Down` commit the selected
+line; `Alt+Enter` does. `Alt+Up` and `Alt+Down` commit the selected
 word without any separator and move the cursor one line up or down.
-Esc closes the overlay, and `Ctrl+Esc` closes it and turns assist mode
-off, so typing and clicking stop opening it until `Ctrl+Space` brings it
+Esc closes the overlay, and `Alt+Esc` closes it and turns assist mode
+off, so typing and clicking stop opening it until `Alt+Space` brings it
 back, over the word under the cursor or empty at the cursor. Turning the feature off restores
 plain typing:
 
@@ -154,10 +154,10 @@ if editor.localDictionary().isModified():
 
 | Key | Action |
 | --- | --- |
-| `Ctrl+1` | Tag the current selection as a Native region |
-| `Ctrl+2` | Tag the current selection as a Roman Urdu region |
-| `Ctrl+Space` | Turn assist mode on and open the overlay over the word under the cursor — or, with no such word, an empty overlay at the cursor |
-| `Ctrl+Esc` | Turn assist mode off and close a shown overlay |
+| `Alt+1` | Tag the current selection as a Native region |
+| `Alt+2` | Tag the current selection as a Roman Urdu region |
+| `Alt+Space` | Turn assist mode on and open the overlay over the word under the cursor — or, with no such word, an empty overlay at the cursor |
+| `Alt+Esc` | Turn assist mode off and close a shown overlay |
 | `Left` / `Right` | Move the cursor in visual (screen) order — the document is right-to-left, so the keys are remapped |
 
 **In the roman-input overlay** (open over a word; see [Roman input](#roman-input)):
@@ -167,15 +167,15 @@ if editor.localDictionary().isModified():
 | `Up` / `Down` | Move the highlighted suggestion, with wraparound |
 | `Space` | Commit the selected word and a space |
 | `Enter` | Commit the selected word, no newline |
-| `Ctrl+Enter` | Commit the selected word and a newline |
+| `Alt+Enter` | Commit the selected word and a newline |
 | Typed punctuation | Commit the word and the mark — ASCII punctuation and the Urdu separator marks (؟ ، ؛ ۔ ٫ ٬ ؜) |
 | `Left` at the left edge / `Right` at the right edge | Move to the adjacent word without writing |
-| `Ctrl+Up` / `Ctrl+Down` | Commit the selected word without a separator, and move the cursor one line up or down |
+| `Alt+Up` / `Alt+Down` | Commit the selected word without a separator, and move the cursor one line up or down |
 | `Esc` | Close the overlay; assist mode stays on |
-| `Ctrl+Esc` | Close the overlay and turn assist mode off |
+| `Alt+Esc` | Close the overlay and turn assist mode off |
 
 The standard Qt editing shortcuts (undo, redo, Home/End, ...) work as
-usual, and `Ctrl+Space` and `Ctrl+Esc` work whether or not the overlay is
+usual, and `Alt+Space` and `Alt+Esc` work whether or not the overlay is
 open.
 
 ## Repository layout
