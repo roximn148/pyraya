@@ -1669,18 +1669,20 @@ class PyRaya(QPlainTextEdit):
 
     # ==========================================================================
     def _onOverlayCanceled(self, modifiers: int) -> None:
-        """Handle the overlay's Esc: the user wants to be left alone.
+        """Handle the overlay's dismissal: the user wants to be left alone.
 
-        A plain Esc (any modifiers other than the exact Ctrl mask) dismisses
-        the overlay only — assist mode stays on, so typing and cursor
-        movement re-trigger the overlay by the normal assist rules.
-        Ctrl+Esc (the exact Ctrl mask, no Shift/Alt/Meta) additionally
-        turns assist mode off, leaving the user alone until Ctrl+Space in
-        the document or :meth:`setAssistEnabled` turns the mode back on.
-        This is the only path that flips assist mode off on Ctrl+Esc —
-        commits and cursor-driven deactivation leave it on.
+        A plain Esc (no Ctrl) dismisses the overlay only — assist mode stays
+        on, so typing and cursor movement re-trigger the overlay by the
+        normal assist rules. With Ctrl held — Ctrl+Esc, or Ctrl+~ (the
+        assist-off shortcut, which moved from Ctrl+Esc; ~ is matched by
+        Ctrl being present rather than the exact mask, because a US keyboard
+        produces ~ with Shift) — assist mode is additionally turned off,
+        leaving the user alone until Ctrl+Space in the document or
+        :meth:`setAssistEnabled` turns the mode back on. This is the only
+        path that flips assist mode off from a dismissal — commits and
+        cursor-driven deactivation leave it on.
         """
-        if modifiers == Qt.KeyboardModifier.ControlModifier.value:
+        if modifiers & Qt.KeyboardModifier.ControlModifier.value:
             self._assistMode = False
         self._deactivateOverlay()
 
@@ -2302,6 +2304,17 @@ class PyRaya(QPlainTextEdit):
                 # the line edit, so the document never sees an Esc while
                 # the overlay is active; the deactivation drops any view
                 # suspension, like every other user decision.
+                self._assistMode = False
+                self._deactivateOverlay()
+                event.accept()
+                return
+            if event.text() == "~":
+                # Ctrl+~ (the assist-off shortcut, which moved from Ctrl+Esc,
+                # that still works) turns assist mode off and deactivates the
+                # overlay — balancing Ctrl+Space's re-entry. ~ is matched by
+                # the produced character with Ctrl present, not the exact
+                # mask: a US keyboard produces ~ with Shift, so Ctrl+Shift
+                # must also count.
                 self._assistMode = False
                 self._deactivateOverlay()
                 event.accept()

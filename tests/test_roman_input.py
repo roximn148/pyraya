@@ -2988,6 +2988,26 @@ def testSeparatorCommits(app: QApplication) -> None:
 
 
 # ******************************************************************************
+def testPlainTildeCommitsAsSeparator(app: QApplication) -> None:
+    """A plain ~ (no Ctrl) commits the word plus the ~ separator; only
+    Ctrl+~ turns assist mode off, so a plain ~ is unaffected by the shortcut."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello خوش world")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_AsciiTilde, "~")
+    assert widget.toPlainText() == "hello خوش~ world"
+    assert widget.textCursor().position() == 10
+    assert widget._regionKindAt(9) == RegionType.RomanUrdu
+    assert widget.isAssistEnabled() is True  # plain ~ does not turn assist off
+    assert not overlay.isVisible()
+
+
+# ******************************************************************************
 def testArabicSeparatorsCommitAsSeparatorKeys(app: QApplication) -> None:
     """The Arabic script's own separator marks commit like ASCII ones.
 
@@ -3856,6 +3876,54 @@ def testCtrlEscInDocumentTurnsAssistModeOff(app: QApplication) -> None:
         Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier,
     )
     assert widget.isAssistEnabled() is True
+
+
+# ******************************************************************************
+def testCtrlTildeOnActiveOverlayTurnsAssistModeOff(app: QApplication) -> None:
+    """Ctrl+~ on the active overlay dismisses it and turns assist mode off:
+    the user is left alone until Ctrl+Space or setAssistEnabled."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello خوش world دوست")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    _sendKey(
+        overlay.lineEdit(),
+        Qt.Key.Key_AsciiTilde,
+        "~",
+        Qt.KeyboardModifier.ControlModifier,
+    )
+    assert widget.isAssistEnabled() is False
+    _assertNoOverlay(widget)
+
+
+# ******************************************************************************
+def testCtrlTildeInDocumentTurnsAssistModeOff(app: QApplication) -> None:
+    """Ctrl+~ in the document turns assist mode off directly, balancing
+    Ctrl+Space's re-entry; the overlay is already inactive, so no other
+    visible effect."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello خوش world دوست")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Escape)
+    assert widget.isAssistEnabled() is True  # plain Esc dismisses only
+    _assertNoOverlay(widget)
+    _sendKey(
+        widget,
+        Qt.Key.Key_AsciiTilde,
+        "~",
+        Qt.KeyboardModifier.ControlModifier,
+    )
+    assert widget.isAssistEnabled() is False
+    _assertNoOverlay(widget)
 
 
 # ******************************************************************************

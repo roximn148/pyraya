@@ -102,9 +102,10 @@ Space or any punctuation key commits the selected word, and a typed
 Urdu mark such as ۔ or ، goes with it. Enter does not start a new
 line; `Ctrl+Enter` does. `Ctrl+Up` and `Ctrl+Down` commit the selected
 word without any separator and move the cursor one line up or down.
-Esc closes the overlay, and `Ctrl+Esc` closes it and turns assist mode
-off, so typing and clicking stop opening it until `Ctrl+Space` brings it
-back, over the word under the cursor or empty at the cursor. Turning the feature off restores
+Esc closes the overlay, and `Ctrl+~` closes it and turns assist mode off
+(the shortcut moved from `Ctrl+Esc`, which still works), so typing and
+clicking stop opening it until `Ctrl+Space` brings it back, over the word
+under the cursor or empty at the cursor. Turning the feature off restores
 plain typing:
 
 ```python
@@ -157,7 +158,7 @@ if editor.localDictionary().isModified():
 | `Ctrl+1` | Tag the current selection as a Native region |
 | `Ctrl+2` | Tag the current selection as a Roman Urdu region |
 | `Ctrl+Space` | Turn assist mode on and open the overlay over the word under the cursor — or, with no such word, an empty overlay at the cursor |
-| `Ctrl+Esc` | Turn assist mode off and close a shown overlay |
+| `Ctrl+~` | Turn assist mode off and close a shown overlay (also `Ctrl+Esc`) |
 | `Left` / `Right` | Move the cursor in visual (screen) order — the document is right-to-left, so the keys are remapped |
 
 **In the roman-input overlay** (open over a word; see [Roman input](#roman-input)):
@@ -172,11 +173,11 @@ if editor.localDictionary().isModified():
 | `Left` at the left edge / `Right` at the right edge | Move to the adjacent word without writing |
 | `Ctrl+Up` / `Ctrl+Down` | Commit the selected word without a separator, and move the cursor one line up or down |
 | `Esc` | Close the overlay; assist mode stays on |
-| `Ctrl+Esc` | Close the overlay and turn assist mode off |
+| `Ctrl+~` | Close the overlay and turn assist mode off (also `Ctrl+Esc`) |
 
 The standard Qt editing shortcuts (undo, redo, Home/End, ...) work as
-usual, and `Ctrl+Space` and `Ctrl+Esc` work whether or not the overlay is
-open.
+usual, and `Ctrl+Space` and `Ctrl+~` (or `Ctrl+Esc`) work whether or not
+the overlay is open.
 
 ## Repository layout
 
