@@ -1673,10 +1673,10 @@ class PyRaya(QPlainTextEdit):
 
         A plain Esc (no Ctrl) dismisses the overlay only — assist mode stays
         on, so typing and cursor movement re-trigger the overlay by the
-        normal assist rules. With Ctrl held — Ctrl+Esc, or Ctrl+~ (the
-        assist-off shortcut, which moved from Ctrl+Esc; ~ is matched by
-        Ctrl being present rather than the exact mask, because a US keyboard
-        produces ~ with Shift) — assist mode is additionally turned off,
+        normal assist rules. With Ctrl held — Ctrl+Esc, or Ctrl+` (the
+        assist-off shortcut, which moved from Ctrl+~; ` is matched by
+        Ctrl being present rather than the exact mask) — assist mode is
+        additionally turned off,
         leaving the user alone until Ctrl+Space in the document or
         :meth:`setAssistEnabled` turns the mode back on. This is the only
         path that flips assist mode off from a dismissal — commits and
@@ -2308,13 +2308,12 @@ class PyRaya(QPlainTextEdit):
                 self._deactivateOverlay()
                 event.accept()
                 return
-            if event.text() == "~":
-                # Ctrl+~ (the assist-off shortcut, which moved from Ctrl+Esc,
-                # that still works) turns assist mode off and deactivates the
-                # overlay — balancing Ctrl+Space's re-entry. ~ is matched by
-                # the produced character with Ctrl present, not the exact
-                # mask: a US keyboard produces ~ with Shift, so Ctrl+Shift
-                # must also count.
+            if event.text() == "`":
+                # Ctrl+` (the assist-off shortcut, which moved from Ctrl+~;
+                # Ctrl+Esc still works too) turns assist mode off and
+                # deactivates the overlay — balancing Ctrl+Space's re-entry.
+                # ` is matched by the produced character with Ctrl present,
+                # not the exact mask.
                 self._assistMode = False
                 self._deactivateOverlay()
                 event.accept()

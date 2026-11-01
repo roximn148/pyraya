@@ -782,9 +782,9 @@ class RomanLineEdit(QLineEdit):
     Ctrl+Up and Ctrl+Down (the exact Ctrl mask, no Shift/Alt/Meta) commit
     the selected word bare and move the document cursor one line up or
     down. Esc emits ``canceled`` with the key's modifiers, and so does
-    Ctrl+~ — the assist-off shortcut (moved from Ctrl+Esc, which still
-    works) — and the host turns assist mode off when the modifiers carry
-    Ctrl, so a plain Esc dismisses only. Wheel events are explicitly
+    Ctrl+` — the assist-off shortcut (moved from Ctrl+~; Ctrl+Esc still
+    works too) — and the host turns assist mode off when the modifiers
+    carry Ctrl, so a plain Esc dismisses only. Wheel events are explicitly
     forwarded to the nearest scroll-area ancestor, because
     ``QCoreApplication.sendEvent`` does not bubble to parents.
 
@@ -847,10 +847,10 @@ class RomanLineEdit(QLineEdit):
             overlay.canceled.emit(modifiers)
             event.accept()
             return
-        if text == "~" and modifiers & Qt.KeyboardModifier.ControlModifier.value:
-            # Ctrl+~ dismisses and turns assist mode off — the assist-off
-            # shortcut, which moved from Ctrl+Esc (that still works). A
-            # plain ~ (no Ctrl) still commits as a separator below.
+        if text == "`" and modifiers & Qt.KeyboardModifier.ControlModifier.value:
+            # Ctrl+` dismisses and turns assist mode off — the assist-off
+            # shortcut, which moved from Ctrl+~ (Ctrl+Esc still works too).
+            # A plain ` (no Ctrl) still commits as a separator below.
             overlay.canceled.emit(modifiers)
             event.accept()
             return
@@ -924,8 +924,8 @@ class RomanOverlay(QWidget):
             ``Qt.Key``, ``keyText`` its ``event.text()``, and ``modifiers``
             the committing ``Qt.KeyboardModifiers``.
         canceled: ``(modifiers: int)`` — emitted when Esc is pressed, and
-            when Ctrl+~ is pressed (the assist-off shortcut, moved from
-            Ctrl+Esc, which still works), carrying the key event's
+            when Ctrl+` is pressed (the assist-off shortcut, moved from
+            Ctrl+~; Ctrl+Esc still works too), carrying the key event's
             ``Qt.KeyboardModifiers`` value: the host dismisses on a plain
             Esc (assist stays on) and additionally turns assist mode off
             when the modifiers carry Ctrl.

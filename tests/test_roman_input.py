@@ -2988,9 +2988,9 @@ def testSeparatorCommits(app: QApplication) -> None:
 
 
 # ******************************************************************************
-def testPlainTildeCommitsAsSeparator(app: QApplication) -> None:
-    """A plain ~ (no Ctrl) commits the word plus the ~ separator; only
-    Ctrl+~ turns assist mode off, so a plain ~ is unaffected by the shortcut."""
+def testPlainBacktickCommitsAsSeparator(app: QApplication) -> None:
+    """A plain ` (no Ctrl) commits the word plus the ` separator; only
+    Ctrl+` turns assist mode off, so a plain ` is unaffected by the shortcut."""
     widget = PyRaya()
     widget.show()
     widget.setPlainText("hello خوش world")
@@ -2999,11 +2999,11 @@ def testPlainTildeCommitsAsSeparator(app: QApplication) -> None:
     _moveCursor(widget, 7)
     overlay = widget._overlay
     assert overlay is not None and overlay.isVisible()
-    _sendKey(overlay.lineEdit(), Qt.Key.Key_AsciiTilde, "~")
-    assert widget.toPlainText() == "hello خوش~ world"
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_QuoteLeft, "`")
+    assert widget.toPlainText() == "hello خوش` world"
     assert widget.textCursor().position() == 10
     assert widget._regionKindAt(9) == RegionType.RomanUrdu
-    assert widget.isAssistEnabled() is True  # plain ~ does not turn assist off
+    assert widget.isAssistEnabled() is True  # plain ` does not turn assist off
     assert not overlay.isVisible()
 
 
@@ -3879,8 +3879,8 @@ def testCtrlEscInDocumentTurnsAssistModeOff(app: QApplication) -> None:
 
 
 # ******************************************************************************
-def testCtrlTildeOnActiveOverlayTurnsAssistModeOff(app: QApplication) -> None:
-    """Ctrl+~ on the active overlay dismisses it and turns assist mode off:
+def testCtrlBacktickOnActiveOverlayTurnsAssistModeOff(app: QApplication) -> None:
+    """Ctrl+` on the active overlay dismisses it and turns assist mode off:
     the user is left alone until Ctrl+Space or setAssistEnabled."""
     widget = PyRaya()
     widget.show()
@@ -3892,8 +3892,8 @@ def testCtrlTildeOnActiveOverlayTurnsAssistModeOff(app: QApplication) -> None:
     assert overlay is not None and overlay.isVisible()
     _sendKey(
         overlay.lineEdit(),
-        Qt.Key.Key_AsciiTilde,
-        "~",
+        Qt.Key.Key_QuoteLeft,
+        "`",
         Qt.KeyboardModifier.ControlModifier,
     )
     assert widget.isAssistEnabled() is False
@@ -3901,8 +3901,8 @@ def testCtrlTildeOnActiveOverlayTurnsAssistModeOff(app: QApplication) -> None:
 
 
 # ******************************************************************************
-def testCtrlTildeInDocumentTurnsAssistModeOff(app: QApplication) -> None:
-    """Ctrl+~ in the document turns assist mode off directly, balancing
+def testCtrlBacktickInDocumentTurnsAssistModeOff(app: QApplication) -> None:
+    """Ctrl+` in the document turns assist mode off directly, balancing
     Ctrl+Space's re-entry; the overlay is already inactive, so no other
     visible effect."""
     widget = PyRaya()
@@ -3918,11 +3918,47 @@ def testCtrlTildeInDocumentTurnsAssistModeOff(app: QApplication) -> None:
     _assertNoOverlay(widget)
     _sendKey(
         widget,
+        Qt.Key.Key_QuoteLeft,
+        "`",
+        Qt.KeyboardModifier.ControlModifier,
+    )
+    assert widget.isAssistEnabled() is False
+    _assertNoOverlay(widget)
+
+
+# ******************************************************************************
+def testCtrlTildeNoLongerTurnsAssistOff(app: QApplication) -> None:
+    """Ctrl+~ is no longer the assist-off shortcut: on the active overlay
+    it commits like any other Ctrl+punctuation stroke (the word plus ~),
+    and in the document it does nothing — assist stays on either way."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello خوش world دوست")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    _sendKey(
+        overlay.lineEdit(),
         Qt.Key.Key_AsciiTilde,
         "~",
         Qt.KeyboardModifier.ControlModifier,
     )
-    assert widget.isAssistEnabled() is False
+    # Commits like any other separator key: the word plus ~, assist on.
+    assert widget.toPlainText() == "hello خوش~ world دوست"
+    assert widget.textCursor().position() == 10
+    assert widget.isAssistEnabled() is True
+    _assertNoOverlay(widget)
+    # In the document (overlay inactive), Ctrl+~ does nothing.
+    _sendKey(
+        widget,
+        Qt.Key.Key_AsciiTilde,
+        "~",
+        Qt.KeyboardModifier.ControlModifier,
+    )
+    assert widget.toPlainText() == "hello خوش~ world دوست"
+    assert widget.isAssistEnabled() is True
     _assertNoOverlay(widget)
 
 
