@@ -108,6 +108,18 @@ def testPaletteDefaultsViewOnly(app: QApplication) -> None:  # noqa: ARG001
 
 
 # ******************************************************************************
+def testRomanUrduTintIsBlueHue(app: QApplication) -> None:  # noqa: ARG001
+    """The RomanUrdu tint is a blue hue: the blue channel dominates.
+
+    Pins the hue category (blue), not an exact value, so the tint can be
+    re-tuned without breaking the test.
+    """
+    roman = RegionColors[RegionType.RomanUrdu]
+    assert roman.blue() > roman.red()
+    assert roman.blue() > roman.green()
+
+
+# ******************************************************************************
 def testSeedRegionKindIsRomanUrdu(app: QApplication) -> None:  # noqa: ARG001
     """SeedRegionKind names a RegionType member."""
     assert SeedRegionKind in set(RegionType)

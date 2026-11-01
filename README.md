@@ -49,7 +49,7 @@ selected Urdu word lands in the document, in Urdu script.
 - Right-to-left paragraphs, right-aligned from the first keystroke.
 - Nastaliq and Latin on one line, from one font stack.
 - Spaces and tabs drawn as visible marks.
-- Spans tagged Native or Roman Urdu; Roman-Urdu text gets a faint orange
+- Spans tagged Native or Roman Urdu; Roman-Urdu text gets a faint
   tint, Native text carries no tint. See [Regions](#regions).
 - Roman input: type `salam`, pick سلام, keep writing. See
   [Roman input](#roman-input).

@@ -98,7 +98,7 @@ class TextRegion:
 #: the kinds that carry a tint; :attr:`RegionType.Native` is colourless and
 #: stays out of the map.
 RegionColors: dict[RegionType, QColor] = {
-    RegionType.RomanUrdu: QColor(0xF5, 0x9E, 0x0B, 30),
+    RegionType.RomanUrdu: QColor(0x3B, 0x82, 0xF6, 30),
 }
 
 

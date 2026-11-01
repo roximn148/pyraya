@@ -463,7 +463,7 @@ def testSetRegionColorRecolours(app: QApplication) -> None:
     newColor = QColor("#34D399")
     assert widget.setRegionColor(RegionType.RomanUrdu, newColor) is True
     assert widget.regionColors()[RegionType.RomanUrdu].name() == "#34d399"
-    assert RegionColors[RegionType.RomanUrdu].name() == "#f59e0b"
+    assert RegionColors[RegionType.RomanUrdu].name() == "#3b82f6"
     assert widget.regions() == [TextRegion(0, 4, RegionType.RomanUrdu)]
 
 
@@ -482,7 +482,7 @@ def testRegionColorPaletteIsPerWidget(app: QApplication) -> None:
 
     assert w1.setRegionColor(RegionType.RomanUrdu, QColor("#34D399")) is True
 
-    assert w2.regionColors()[RegionType.RomanUrdu].name() == "#f59e0b"
+    assert w2.regionColors()[RegionType.RomanUrdu].name() == "#3b82f6"
     assert w2.regions() == [TextRegion(0, 4, RegionType.RomanUrdu)]
 
 
