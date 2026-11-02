@@ -203,3 +203,43 @@ def testHighlightingNotUndoable(app: QApplication) -> None:
     widget.setPlainText("کتاب خلمق")
     assert _underlinedRanges(widget)
     assert widget.document().availableUndoSteps() == 0
+
+
+# ******************************************************************************
+def testUnderlinesAreExactlyTheUnknownWidgetWordRuns(app: QApplication) -> None:
+    """The spell pass segments with the widget's one word-run mechanism.
+
+    The underlined spans must be exactly ``wordRuns()`` filtered by the
+    RomanUrdu resolution at both ends and by the dictionary. A word the walk
+    reports and the pass misses (or the reverse) fails here, so the pass
+    cannot drift onto a private scan of its own.
+    """
+    widget = PyRaya()
+    text = "\u06a9\u062a\u0627\u0628 \u062e\u0644\u0645\u0642 \u062e\u0644\u0645\u0642"
+    widget.setPlainText(text)
+    # The first خلمق (5..9) is an unknown word tagged Native, so the
+    # exemption is exercised by a word that would otherwise be underlined;
+    # the second (10..14) stays RomanUrdu and must be underlined.
+    widget.setRegionType(RegionType.Native, 5, 9)
+
+    engine = widget.romanEngine()
+    assert engine is not None
+    assert engine.hasWord("\u062e\u0644\u0645\u0642") is False
+
+    kinds: dict[int, RegionType] = {}
+    for region in widget.regions():
+        for position in range(region.start, region.end):
+            kinds[position] = region.kind
+
+    seed = widget.seedRegionKind()
+    expected = [
+        (start, end)
+        for start, end in widget.wordRuns()
+        if kinds.get(start, seed) is RegionType.RomanUrdu
+        and kinds.get(end - 1, seed) is RegionType.RomanUrdu
+        and not engine.hasWord(text[start:end])
+    ]
+    actual = [(start, end) for start, end, _, _ in _underlinedRanges(widget)]
+    assert actual == expected
+    assert (5, 9) not in actual
+    assert expected, "fixture must contain at least one unknown RomanUrdu word"

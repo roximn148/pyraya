@@ -479,9 +479,10 @@ class PyRayaHighlighter(QSyntaxHighlighter):
     def _underlineUnknownWords(self, block: str) -> None:
         """Paint the wavy spell-check underline under unknown RomanUrdu words.
 
-        The maximal Arabic-script runs whose ends both belong to RomanUrdu
-        (by the two-step resolution) are collected as candidate words
-        first; with no candidates the pass returns without touching the
+        The block's word runs (``wordRuns`` — the widget's one word-run
+        mechanism, shared with ``PyRaya.wordRuns``) whose ends both belong to
+        RomanUrdu (by the two-step resolution) are collected as candidate
+        words first; with no candidates the pass returns without touching the
         engine provider, so the
         engine (and its dictionary cold load) is created only the first
         time a block containing a candidate word is re-highlighted. The
@@ -501,22 +502,11 @@ class PyRayaHighlighter(QSyntaxHighlighter):
         """
         if not self._spellCheckEnabled:
             return
-        limit = len(block)
         candidates: list[tuple[int, int]] = []
-        position = 0
         kindRuns: list[tuple[int, int, RegionType]] = []
-        while position < limit:
-            run = _wordRunAround(block, position)
-            if run is None or run[1] <= position:
-                # No run starts at this position (a non-Arabic character,
-                # or a run that only ended here): the next candidate
-                # begins with the following character.
-                position += 1
-                continue
-            start, end = run
-            position = end
+        for start, end in wordRuns(block):
             if not kindRuns:
-                kindRuns = self._blockRegionRuns(limit)
+                kindRuns = self._blockRegionRuns(len(block))
             if (
                 self._kindInRuns(kindRuns, start) is not RegionType.RomanUrdu
                 or self._kindInRuns(kindRuns, end - 1) is not RegionType.RomanUrdu
