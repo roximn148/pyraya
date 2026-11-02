@@ -26,6 +26,7 @@ and :meth:`RomanInputEngine.learnRomanWord` still works.
 """
 
 import string
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -62,7 +63,9 @@ __all__ = [
     "RomanInputEngine",
     "RomanOverlay",
     "AddWordDialog",
+    "ArabicScriptRanges",
     "ArabicScriptSeparators",
+    "ArabicScriptWordChars",
     "OverlayLayoutSpacing",
     "SuggestionListMargin",
     "SuggestionList",
@@ -92,22 +95,56 @@ OverlayLayoutSpacing = 4
 SuggestionListMargin = 6
 
 
-#: The punctuation marks of the Arabic script itself (U+0600-U+06FF): the
-#: Arabic comma, semicolon, question mark, and the Urdu full stop, plus the
-#: Arabic date, decimal, and thousands separators. They terminate a word run
-#: exactly like the Latin marks do, and a separator-key commit on one of
-#: them writes it out together with the committed word.
-ArabicScriptSeparators: frozenset[str] = frozenset(
-    {
-        "\u060c",  # ، Arabic comma
-        "\u060d",  # ؜ Arabic date separator
-        "\u061b",  # ؛ Arabic semicolon
-        "\u061f",  # ؟ Arabic question mark
-        "\u066b",  # ٫ Arabic decimal separator
-        "\u066c",  # ٬ Arabic thousands separator
-        "\u06d4",  # ۔ full stop
-    }
+#: The Arabic-script code point ranges: the script's own block and its
+#: supplement, Extended-A, and presentation-form ranges. They are the domain
+#: of the word-matter and separator classification below. The classification
+#: is derived from Unicode general categories over these ranges rather than
+#: hand-listed, so a character a hand list missed — a per-mille sign, a
+#: presentation form pasted from a PDF, a supplementary-range letter — cannot
+#: fall through the gap between the two tables.
+ArabicScriptRanges: tuple[tuple[str, str], ...] = (
+    ("\u0600", "\u06ff"),  # Arabic
+    ("\u0750", "\u077f"),  # Arabic Supplement
+    ("\u08a0", "\u08ff"),  # Arabic Extended-A
+    ("\ufb50", "\ufdff"),  # Arabic Presentation Forms-A
+    ("\ufe70", "\ufeff"),  # Arabic Presentation Forms-B
 )
+
+
+def _arabicScriptChars(*categories: str) -> frozenset[str]:
+    """The Arabic-script characters in one of the given general categories.
+
+    Args:
+        categories: One-character general-category prefixes (``"L"`` for
+            letters, ``"M"`` for marks, ``"P"`` for punctuation).
+
+    Returns:
+        Every character of :data:`ArabicScriptRanges` whose Unicode general
+        category starts with one of ``categories``.
+    """
+    return frozenset(
+        chr(codePoint)
+        for start, end in ArabicScriptRanges
+        for codePoint in range(ord(start), ord(end) + 1)
+        if unicodedata.category(chr(codePoint))[0] in categories
+    )
+
+
+#: Arabic-script word matter: every letter (``L*``) and combining mark
+#: (``M*``) in :data:`ArabicScriptRanges`. Digits (``Nd``), punctuation
+#: (``P*``), symbols (``S*``), and format characters (``Cf``) in the same
+#: ranges are boundaries: they never join a word run. The widget's
+#: ``_isArabicChar`` is membership in this one derived set.
+ArabicScriptWordChars: frozenset[str] = _arabicScriptChars("L", "M")
+
+#: The punctuation marks of the Arabic script: every ``P*`` character in
+#: :data:`ArabicScriptRanges` — the Arabic comma, semicolon, question mark,
+#: and the Urdu full stop, plus the date, decimal, and thousands separators,
+#: the per-mille and per-ten-thousand signs, the triple dot, the percent
+#: sign, the five pointed star, and the ornate parentheses. They terminate a
+#: word run exactly like the Latin marks do, and a separator-key commit on
+#: one of them writes it out together with the committed word.
+ArabicScriptSeparators: frozenset[str] = _arabicScriptChars("P")
 
 #: Characters that trigger a separator-key commit: every punctuation mark
 #: of the keyboard, every digit, space, newline, and the Arabic script's own

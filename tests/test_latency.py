@@ -349,9 +349,9 @@ def testRegionsAndContextMenu(app) -> None:  # noqa: ARG001
 
 # ******************************************************************************
 def _firstArabicPosition(text: str) -> int:
-    """The first Arabic-script character position in ``text``."""
+    """The first Arabic-script word-matter position in ``text``."""
     for index, char in enumerate(text):
-        if "\u0600" <= char <= "\u06ff":
+        if _isArabicChar(char):
             return index
     raise AssertionError("fixture has no Arabic-script word runs")
 

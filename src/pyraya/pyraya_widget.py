@@ -65,7 +65,8 @@ from .regions import (
 )
 from .roman_input import (
     AddWordDialog,
-    ArabicScriptSeparators,
+    ArabicScriptRanges,
+    ArabicScriptWordChars,
     OverlayLayoutSpacing,
     RomanInputEngine,
     RomanOverlay,
@@ -101,27 +102,55 @@ SpellCheckUnderlineColor: QColor = QColor("#B22222")
 EscDoubleTapInterval: float = 0.3
 
 
+#: Format characters that may sit inside an Arabic-script word: ZWNJ, ZWJ,
+#: LRM, RLM, and the Arabic letter mark. They are transparent — they
+#: continue a run but never start or end one — so ``ک‌ام`` is one word while
+#: ``‏کام`` is the word ``کام``, and a run of only joiners is no word at all.
+_WordJoiners: frozenset[str] = frozenset({"\u200c", "\u200d", "\u200e", "\u200f", "\u061c"})
+
+#: The character class covering every Arabic-script range, for the
+#: highlighter's default ink rule. Built from :data:`ArabicScriptRanges`, so
+#: the formatting rule and the word-matter classification share one domain.
+_ArabicScriptPattern: str = (
+    "["
+    + "".join(f"\\x{{{ord(start):04x}}}-\\x{{{ord(end):04x}}}" for start, end in ArabicScriptRanges)
+    + "]+"
+)
+
+
 def _isArabicChar(char: str) -> bool:
     """Whether a character is Arabic-script word matter.
 
-    The Arabic script block (U+0600-U+06FF) minus the Arabic script's own
-    separator marks (:data:`ArabicScriptSeparators`): the marks terminate
-    a word run exactly like the Latin marks do, so ``کام۔`` is the word
-    ``کام`` followed by the separator ``۔`` — the separator commits as a
-    separator key and is never scanned as part of a word.
+    A letter or combining mark in one of :data:`ArabicScriptRanges` — the
+    derived table (:data:`ArabicScriptWordChars`) that every word-run
+    consumer shares. Digits, punctuation, symbols, and format characters
+    inside the same ranges are boundaries, so ``کام۔`` is the word ``کام``
+    followed by the separator ``۔`` and ``دوست۵`` is ``دوست`` followed by
+    the digit.
     """
-    return "\u0600" <= char <= "\u06ff" and char not in ArabicScriptSeparators
+    return char in ArabicScriptWordChars
+
+
+def _continuesWordRun(char: str) -> bool:
+    """Whether a character can sit inside a word run.
+
+    Word matter, or one of the invisible :data:`_WordJoiners` a copied word
+    may carry. Joiners never start or end a run: :func:`_wordRunAround`
+    trims them from both edges.
+    """
+    return char in ArabicScriptWordChars or char in _WordJoiners
 
 
 def _wordRunAround(text: str, local: int) -> tuple[int, int] | None:
     """The maximal block-local Arabic-script run containing or ending at ``local``.
 
     The one executable owner of the word-run scan (B2): a run is a
-    maximal substring whose characters all pass :func:`_isArabicChar`,
-    which also encodes the Arabic-separator boundary rule (؟ ، ؛ ۔ ٫ ٬ ؜
-    terminate a word like the Latin marks do). A word run cannot cross a
-    block — the block separator is not Arabic — so ``text`` is a
-    block's text and the scan stops at its edges.
+    maximal substring whose characters all pass :func:`_continuesWordRun`,
+    trimmed of joiners at both edges — a joiner never forms a word, though
+    it may sit inside one. The scan also encodes the Arabic-separator
+    boundary rule (؟ ، ؛ ۔ ٫ ٬ ؜ terminate a word like the Latin marks do).
+    A word run cannot cross a block — the block separator is not Arabic —
+    so ``text`` is a block's text and the scan stops at its edges.
 
     ``local`` may sit at the run's start, inside it, or at its end
     (``start <= local <= end``): the end is a position past the last
@@ -140,11 +169,15 @@ def _wordRunAround(text: str, local: int) -> tuple[int, int] | None:
     if local < 0 or local > len(text):
         return None
     start = local
-    while start > 0 and _isArabicChar(text[start - 1]):
+    while start > 0 and _continuesWordRun(text[start - 1]):
         start -= 1
     end = local
-    while end < len(text) and _isArabicChar(text[end]):
+    while end < len(text) and _continuesWordRun(text[end]):
         end += 1
+    while start < end and text[start] in _WordJoiners:
+        start += 1
+    while end > start and text[end - 1] in _WordJoiners:
+        end -= 1
     if start >= end:
         return None
     return (start, end)
@@ -483,9 +516,10 @@ class PyRayaHighlighter(QSyntaxHighlighter):
         lightGray = self._charFormat(QColor("#e0e3ff"))
         self.setRules(
             [
-                (QRegularExpression("[\u0600-\u06ff]+"), ink),
+                (QRegularExpression(_ArabicScriptPattern), ink),
                 (QRegularExpression("[\u064b-\u065f]"), rose),
                 (QRegularExpression("[\u0660-\u0669]+"), amber),
+                (QRegularExpression("[\u06f0-\u06f9]+"), amber),
                 (QRegularExpression("[\u0000-\u007f]+"), blue),
                 (QRegularExpression("[0-9]+"), purple),
                 (QRegularExpression(r"\p{P}+"), gray),
@@ -2061,11 +2095,12 @@ class PyRaya(QPlainTextEdit):
         ):
             # A digit commits like punctuation (its ``keyText`` is the
             # separator, substituted in :meth:`_writeCommit`), but
-            # suppresses the resync: the committed digit is Arabic-script
-            # matter that extends the run, so the resync would re-activate
-            # the overlay over the whole run — the cursor rests at the
-            # run's end, over the word, exactly like a plain ``Key_Return``
-            # commit, whose resync is likewise suppressed.
+            # suppresses the resync: the digit is a boundary, not word
+            # matter, so the cursor comes to rest just past the word's run
+            # on the digit itself. A resync would find no word there and
+            # deactivate the overlay anyway; suppressing it keeps the
+            # commit quiet, exactly like a plain ``Key_Return`` commit,
+            # whose resync is likewise suppressed.
             return keyText, False
         return keyText, True
 

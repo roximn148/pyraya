@@ -32,7 +32,9 @@ from .regions import (
 )
 from .roman_input import (
     AddWordDialog,
+    ArabicScriptRanges,
     ArabicScriptSeparators,
+    ArabicScriptWordChars,
     MaxVisibleRows,
     OverlayLayoutSpacing,
     RomanInputEngine,
@@ -59,7 +61,9 @@ __all__ = [
     "substituteText",
     "RomanInputEngine",
     "RomanOverlay",
+    "ArabicScriptRanges",
     "ArabicScriptSeparators",
+    "ArabicScriptWordChars",
     "SpellCheckUnderlineColor",
     "Suggestion",
     "SuggestionList",

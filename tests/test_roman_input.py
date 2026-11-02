@@ -3043,11 +3043,11 @@ def testArabicSeparatorsCommitAsSeparatorKeys(app: QApplication) -> None:
 def testArabicSeparatorsAreWordBoundaries(app: QApplication) -> None:
     """The Arabic separator marks terminate a word run like Latin ones.
 
-    ``_isArabicChar`` spans the whole U+0600-U+06FF block, so the scan
-    today treats the Arabic script's own punctuation as word matter —
-    ``کام۔`` is scanned as the single word ``کام۔``. The separator ends
-    the run instead: the word under the cursor inside ``کام`` is ``کام``
-    alone, and the word after the separator starts behind it.
+    ``ArabicScriptSeparators`` is every Arabic-script punctuation mark
+    (``P*`` in the script's ranges) and ``_isArabicChar`` excludes them, so
+    ``کام۔`` is the word ``کام`` followed by the separator ``۔``, never one
+    word. The word under the cursor inside ``کام`` is ``کام`` alone, and the
+    word after the separator starts behind it.
     """
     widget = PyRaya()
     widget.show()

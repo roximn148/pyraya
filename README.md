@@ -154,8 +154,13 @@ The underline is on by default. Any Arabic-script word inside a Roman Urdu
 region that the romanalfaz dictionary does not know gets a wavy brick-red
 underline, so unknown words are visible without interrupting the flow. It is
 display only: nothing corrects, nothing suggests, nothing enters the undo
-stack, and Native-region text is never underlined. The switch is independent
-of roman input, so you can run the underline alone:
+stack, and Native-region text is never underlined. A *word* is a maximal run
+of Arabic-script letters and combining marks: digits (`دوست۵` ends at
+`دوست`), punctuation, and symbols are boundaries, and the invisible joiners
+a copied word may carry (ZWNJ, ZWJ, LRM, RLM, ALM) neither split a word nor
+form one. The ranges cover the Arabic block, its supplement, Extended-A, and
+the presentation forms, so a word pasted from a PDF is still one word. The
+switch is independent of roman input, so you can run the underline alone:
 
 ```python
 editor.setSpellCheckEnabled(False)  # hide the underlines
