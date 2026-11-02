@@ -23,10 +23,13 @@ from PySide6.QtGui import QColor, QTextCharFormat, QTextFormat
 __all__ = [
     "RegionColors",
     "RegionKindProperty",
+    "RegionSubstitutions",
     "RegionType",
     "SeedRegionKind",
     "TextRegion",
     "resolveRegionKind",
+    "substituteChar",
+    "substituteText",
 ]
 
 
@@ -123,3 +126,70 @@ def resolveRegionKind(charFormat: QTextCharFormat, seed: RegionType) -> RegionTy
         return RegionType(stored)
     except ValueError:
         return seed
+
+
+# ******************************************************************************
+#: The fixed per-region-kind 1:1 character substitution table.
+#:
+#: A region kind's entry maps typed Latin characters to their Urdu /
+#: Arabic-script equivalents — the four punctuation marks (full stop, comma,
+#: question mark, semicolon) and the ten Eastern Arabic-Indic digits — so a
+#: character typed in that region's span lands in the document in its Urdu
+#: form. :attr:`RegionType.Native` is empty: its characters pass through
+#: untouched. The table is fixed (no host API) — part of the region model,
+#: not a per-widget setting. The colon is deliberately absent: Urdu has no
+#: dedicated colon codepoint and conventionally keeps the Latin ``:``.
+RegionSubstitutions: dict[RegionType, dict[str, str]] = {
+    RegionType.RomanUrdu: {
+        ".": "\u06d4",  # ۔ Arabic full stop
+        ",": "\u060c",  # ، Arabic comma
+        "?": "\u061f",  # ؟ Arabic question mark
+        ";": "\u061b",  # ؛ Arabic semicolon
+        "0": "\u06f0",  # ۰
+        "1": "\u06f1",  # ۱
+        "2": "\u06f2",  # ۲
+        "3": "\u06f3",  # ۳
+        "4": "\u06f4",  # ۴
+        "5": "\u06f5",  # ۵
+        "6": "\u06f6",  # ۶
+        "7": "\u06f7",  # ۷
+        "8": "\u06f8",  # ۸
+        "9": "\u06f9",  # ۹
+    },
+    RegionType.Native: {},
+}
+
+
+# ******************************************************************************
+def substituteChar(char: str, kind: RegionType) -> str | None:
+    """The ``kind``'s substitution for ``char``, or ``None`` when unmapped.
+
+    Args:
+        char: The single character to substitute.
+        kind: The region kind whose :data:`RegionSubstitutions` entry is
+            consulted.
+
+    Returns:
+        The substituted character when ``char`` is in ``kind``'s table, else
+        ``None`` — the character passes through unchanged.
+    """
+    table = RegionSubstitutions.get(kind)
+    return table.get(char) if table is not None else None
+
+
+# ******************************************************************************
+def substituteText(text: str, kind: RegionType) -> str:
+    """Apply ``kind``'s substitution to every character of ``text``.
+
+    Each character is looked up in ``kind``'s :data:`RegionSubstitutions`
+    entry; a mapped character is replaced by its substitution, an unmapped
+    character passes through unchanged.
+
+    Args:
+        text: The text to substitute.
+        kind: The region kind whose table is applied.
+
+    Returns:
+        ``text`` with every mapped character replaced by its substitution.
+    """
+    return "".join(substituteChar(char, kind) or char for char in text)

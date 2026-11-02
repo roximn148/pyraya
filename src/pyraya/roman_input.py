@@ -110,9 +110,11 @@ ArabicScriptSeparators: frozenset[str] = frozenset(
 )
 
 #: Characters that trigger a separator-key commit: every punctuation mark
-#: of the keyboard, plus space, newline, and the Arabic script's own
-#: separator marks (:data:`ArabicScriptSeparators`).
-_Separators = set(string.punctuation) | {" ", "\n"} | ArabicScriptSeparators
+#: of the keyboard, every digit, space, newline, and the Arabic script's own
+#: separator marks (:data:`ArabicScriptSeparators`). Digits are committing
+#: keys too: a digit typed over an active overlay terminates the word and
+#: commits, with the digit as the separator, exactly like the punctuation.
+_Separators = set(string.punctuation) | set(string.digits) | {" ", "\n"} | ArabicScriptSeparators
 
 #: Subtle tier tints: green = exact, orange = edit distance 1, red = distance 2.
 _TierColors = {

@@ -51,6 +51,9 @@ selected Urdu word lands in the document, in Urdu script.
 - Spaces and tabs drawn as visible marks.
 - Spans tagged Native or Roman Urdu; Roman-Urdu text gets a faint
   tint, Native text carries no tint. See [Regions](#regions).
+- Typed Latin marks and digits land in their Urdu forms inside a
+  Roman-Urdu span; digits commit a roman-input word like punctuation.
+  See [Character substitution](#character-substitution).
 - Roman input: type `salam`, pick سلام, keep writing. See
   [Roman input](#roman-input).
 - A wavy underline under words the dictionary does not know. See
@@ -87,6 +90,34 @@ read-only. `setRegionColor(kind, color)` recolors one kind's tint, inside
 this widget only — it touches no document state and repaints the tint
 immediately.
 
+## Character substitution
+
+A fixed per-region table rewrites typed Latin characters to their Urdu
+equivalents the moment they enter the document, inside a Roman Urdu span:
+the full stop, comma, question mark, and semicolon become their
+Arabic-script forms, and the digits 0–9 become the Eastern Arabic-Indic
+digits. The colon is deliberately untouched — Urdu has no dedicated colon
+codepoint and conventionally keeps the Latin one. Native spans pass every
+character through, and the table is fixed (no host API): it is part of the
+region model, not a per-widget setting.
+
+The substitution is region-scoped, not feature-scoped: it holds whether or
+not the roman-input overlay is on, and whether or not the overlay is
+active. A typed mark or digit with no overlay active lands directly in the
+document in its Urdu form, tagged with the region kind. With the overlay
+active, a digit is a committing key like punctuation: it terminates the
+word and commits, landing in its Urdu form as the separator. The four
+mapped marks and the ten digits are the whole table; Latin letters are not
+in it, so they still seed the overlay as before.
+
+```python
+from pyraya import RegionType, substituteChar
+
+substituteChar(".", RegionType.RomanUrdu)  # "۔"
+substituteChar("5", RegionType.RomanUrdu)  # "۵"
+substituteChar("5", RegionType.Native)  # None — passes through
+```
+
 ## Roman input
 
 The overlay is on by default. Type a roman letter inside a Roman Urdu region
@@ -99,9 +130,12 @@ The lookup is capped to the dictionary's longest word, so a long typed word
 stays fast; the cap affects only the lookup, so the full word still commits.
 
 Space or any punctuation key commits the selected word, and a typed
-Urdu mark such as ۔ or ، goes with it. Enter does not start a new
-line; `Ctrl+Enter` does. `Ctrl+Up` and `Ctrl+Down` commit the selected
-word without any separator and move the cursor one line up or down.
+Urdu mark such as ۔ or ، goes with it. A digit commits too, landing in
+its Eastern Arabic-Indic form as the separator (see
+[Character substitution](#character-substitution)). Enter does not start
+a new line; `Ctrl+Enter` does. `Ctrl+Up` and `Ctrl+Down` commit the
+selected word without any separator and move the cursor one line up or
+down.
 Esc closes the overlay, and `Ctrl+Esc` closes it and turns assist mode
 off, so typing and clicking stop opening it until `Ctrl+Space` brings it
 back, over the word under the cursor or empty at the cursor. Two quick
@@ -172,6 +206,7 @@ if editor.localDictionary().isModified():
 | `Enter` | Commit the selected word, no newline |
 | `Ctrl+Enter` | Commit the selected word and a newline |
 | Typed punctuation | Commit the word and the mark — ASCII punctuation and the Urdu separator marks (؟ ، ؛ ۔ ٫ ٬ ؜) |
+| Typed digit | Commit the word and the digit, in its Eastern Arabic-Indic form (0–9 → ۰–۹) |
 | `Left` at the left edge / `Right` at the right edge | Move to the adjacent word without writing |
 | `Ctrl+Up` / `Ctrl+Down` | Commit the selected word without a separator, and move the cursor one line up or down |
 | `Esc` | Close the overlay; assist mode stays on |

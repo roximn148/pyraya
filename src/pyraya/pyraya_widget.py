@@ -60,6 +60,8 @@ from .regions import (
     SeedRegionKind,
     TextRegion,
     resolveRegionKind,
+    substituteChar,
+    substituteText,
 )
 from .roman_input import (
     AddWordDialog,
@@ -2045,6 +2047,26 @@ class PyRaya(QPlainTextEdit):
             return "", False
         if key in (Qt.Key.Key_Up, Qt.Key.Key_Down):
             return "", False
+        if key in (
+            Qt.Key.Key_0,
+            Qt.Key.Key_1,
+            Qt.Key.Key_2,
+            Qt.Key.Key_3,
+            Qt.Key.Key_4,
+            Qt.Key.Key_5,
+            Qt.Key.Key_6,
+            Qt.Key.Key_7,
+            Qt.Key.Key_8,
+            Qt.Key.Key_9,
+        ):
+            # A digit commits like punctuation (its ``keyText`` is the
+            # separator, substituted in :meth:`_writeCommit`), but
+            # suppresses the resync: the committed digit is Arabic-script
+            # matter that extends the run, so the resync would re-activate
+            # the overlay over the whole run — the cursor rests at the
+            # run's end, over the word, exactly like a plain ``Key_Return``
+            # commit, whose resync is likewise suppressed.
+            return keyText, False
         return keyText, True
 
     # ==========================================================================
@@ -2130,12 +2152,50 @@ class PyRaya(QPlainTextEdit):
             cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
         else:
             cursor.setPosition(self._anchorPosition or 0)
-        cursor.insertText(word + separator, fmt)
+        # The committed string is run through the region-scoped substitution
+        # before the write: the separator (punctuation or digit) and any
+        # digit in an undefined-word commit land in their Urdu form; the
+        # dictionary word is already Arabic and passes through.
+        cursor.insertText(substituteText(word + separator, RegionType.RomanUrdu), fmt)
         self.regionsChanged.emit()
         if word:
             self.romanWordCommitted.emit(word, typedRoman)
         self.setTextCursor(cursor)
         self._deactivateOverlay()
+
+    # ==========================================================================
+    def _insertSubstitutedChar(self, char: str, kind: RegionType) -> None:
+        """Insert a substituted character at the cursor, tagged with ``kind``.
+
+        The region-scoped substitution's direct-write site: the character
+        lands in the document in its Urdu form, carrying the stored
+        :attr:`RegionKindProperty <pyraya.regions.RegionKindProperty>`
+        (the text edit re-highlights the block for the tint). It is a plain
+        document edit — not a roman-input commit — so it emits neither
+        ``regionsChanged`` nor ``romanWordCommitted`` (the contract keeps the
+        signal cost-free during typing). The widget cursor follows the edit.
+
+        The write runs with :attr:`_committing` set, so the ``contentsChanged``
+        and ``cursorPositionChanged`` signals it fires funnel into
+        :meth:`_syncOverlay`'s early exit: the freshly written character is
+        now Arabic-script matter with the cursor resting at its end, which is
+        over the word, so without the guard the sync would re-activate the
+        overlay over the digit itself, contradicting the "direct write, no
+        overlay" contract.
+
+        Args:
+            char: The substituted character to insert.
+            kind: The region kind the character is tagged with.
+        """
+        self._committing = True
+        try:
+            cursor = self.textCursor()
+            fmt = QTextCharFormat()
+            fmt.setProperty(RegionKindProperty, int(kind))
+            cursor.insertText(char, fmt)
+            self.setTextCursor(cursor)
+        finally:
+            self._committing = False
 
     # ==========================================================================
     def _adjacentWord(self, reference: int, backwards: bool) -> tuple[int, int] | None:
@@ -2297,17 +2357,34 @@ class PyRaya(QPlainTextEdit):
         Args:
             event: The key-press event.
         """
-        if (
-            self._romanInputEnabled
-            and self._assistMode
-            and not self._overlayActive()
-            and not (event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+        if not self._overlayActive() and not (
+            event.modifiers() & Qt.KeyboardModifier.ControlModifier
         ):
             text = event.text()
-            if len(text) == 1 and text.isascii() and text.isalnum():
-                if self._regionKindForTyping() is RegionType.RomanUrdu:
-                    self._activateOverlayAt(text, self.textCursor().position())
-                    return
+            if len(text) == 1 and text.isascii():
+                kind = self._regionKindForTyping()
+                if kind is not None:
+                    substituted = substituteChar(text, kind)
+                    if substituted is not None:
+                        # A mapped character (punctuation or digit) lands in
+                        # the document in its Urdu form, tagged with the
+                        # region kind, written directly with no overlay. This
+                        # is region-scoped: it holds regardless of the
+                        # roman-input feature or assist mode.
+                        self._insertSubstitutedChar(substituted, kind)
+                        event.accept()
+                        return
+                    if (
+                        self._romanInputEnabled
+                        and self._assistMode
+                        and text.isalpha()
+                        and kind is RegionType.RomanUrdu
+                    ):
+                        # A letter seeds the overlay (scenario 1); the
+                        # character never reaches the document. Digits no
+                        # longer seed — they take the substitution path.
+                        self._activateOverlayAt(text, self.textCursor().position())
+                        return
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             if event.key() == Qt.Key.Key_Space:
                 self._assistMode = True

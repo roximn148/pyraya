@@ -22,10 +22,13 @@ from .pyraya_widget import (
 from .regions import (
     RegionColors,
     RegionKindProperty,
+    RegionSubstitutions,
     RegionType,
     SeedRegionKind,
     TextRegion,
     resolveRegionKind,
+    substituteChar,
+    substituteText,
 )
 from .roman_input import (
     AddWordDialog,
@@ -50,7 +53,10 @@ __all__ = [
     "TextRegion",
     "SeedRegionKind",
     "RegionKindProperty",
+    "RegionSubstitutions",
     "resolveRegionKind",
+    "substituteChar",
+    "substituteText",
     "RomanInputEngine",
     "RomanOverlay",
     "ArabicScriptSeparators",

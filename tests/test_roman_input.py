@@ -2605,11 +2605,13 @@ def testLatinKeystrokeNotIntercepted(app: QApplication) -> None:
     _sendKey(widget2, Qt.Key.Key_K, "k")
     assert widget2.toPlainText() == "hello خوشk world"
     _assertNoOverlay(widget2)
-    # punctuation is never intercepted, even inside the span with feature on
+    # punctuation is never intercepted by the overlay, even inside the span
+    # with the feature on — but the region-scoped substitution rewrites the
+    # typed Latin mark to its Urdu form before it lands in the document.
     widget2.setRomanInputEnabled(True)
     _moveCursor(widget2, 10)  # the space inside the span, after the "k"
     _sendKey(widget2, Qt.Key.Key_Comma, ",")
-    assert widget2.toPlainText() == "hello خوشk, world"
+    assert widget2.toPlainText() == "hello خوشk\u060c world"
     _assertNoOverlay(widget2)
 
 
@@ -2978,10 +2980,11 @@ def testSeparatorCommits(app: QApplication) -> None:
     assert widget._regionKindAt(8) == RegionType.RomanUrdu
     assert not overlay.isVisible()
 
-    # Comma
+    # Comma: the typed Latin mark lands as its Urdu form (region-scoped
+    # substitution), tagged RomanUrdu with the word.
     widget, overlay = setup()
     _sendKey(overlay.lineEdit(), Qt.Key.Key_Comma, ",")
-    assert widget.toPlainText() == "hello خوش, world"
+    assert widget.toPlainText() == "hello خوش\u060c world"
     assert widget.textCursor().position() == 10
     assert widget._regionKindAt(9) == RegionType.RomanUrdu
     assert not overlay.isVisible()
