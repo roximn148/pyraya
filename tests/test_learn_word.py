@@ -272,6 +272,26 @@ def testLearnDialogBuiltInEmptyAcceptIsCancel(
 
 
 # ******************************************************************************
+def testDialogOkButtonAcceptsAndCancelButtonRejects(app: QApplication) -> None:
+    """Clicking OK accepts the dialog; clicking Cancel rejects it.
+
+    Exercises the real ``clicked`` signal path (``clicked(QAbstractButton*)``
+    — one argument), which the ``exec``-monkeypatched tests never touch.
+    """
+    dialog = AddWordDialog(prefill="قلم")
+    okButton = dialog._buttons.button(QDialogButtonBox.StandardButton.Ok)
+    assert okButton is not None
+    okButton.click()
+    assert dialog.result() == QDialog.DialogCode.Accepted
+
+    second = AddWordDialog()
+    cancelButton = second._buttons.button(QDialogButtonBox.StandardButton.Cancel)
+    assert cancelButton is not None
+    cancelButton.click()
+    assert second.result() == QDialog.DialogCode.Rejected
+
+
+# ******************************************************************************
 def testLearnWordEmitsWordAddedOnce(app: QApplication) -> None:
     """_learnWord emits wordAdded exactly once and touches no document state."""
     widget = PyRaya()

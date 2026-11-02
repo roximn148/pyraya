@@ -438,13 +438,16 @@ class AddWordDialog(QDialog):
         return self._field.text()
 
     # ==========================================================================
-    def _onButtonClicked(
-        self, button: QAbstractButton, standardButton: QDialogButtonBox.StandardButton
-    ) -> None:
-        """OK accepts the dialog; Cancel rejects it."""
-        if standardButton == QDialogButtonBox.StandardButton.Ok:
+    def _onButtonClicked(self, button: QAbstractButton) -> None:
+        """OK accepts the dialog; Cancel rejects it.
+
+        ``QDialogButtonBox.clicked`` emits ``clicked(QAbstractButton*)`` —
+        one argument, no ``StandardButton`` overload — so the button is
+        matched by identity against the box's standard buttons.
+        """
+        if button is self._buttons.button(QDialogButtonBox.StandardButton.Ok):
             self.accept()
-        elif standardButton == QDialogButtonBox.StandardButton.Cancel:
+        elif button is self._buttons.button(QDialogButtonBox.StandardButton.Cancel):
             self.reject()
 
     # ==========================================================================
