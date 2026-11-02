@@ -61,6 +61,8 @@ selected Urdu word lands in the document, in Urdu script.
 - Unknown words can be learned into the shared dictionary, from the
   right-click menu or the `+ [..]` suggestion row. See
   [Learn a word](#learn-a-word).
+- Word offsets for analysis: `wordRuns(text)` and `editor.wordRuns()`.
+  See [Word runs](#word-runs).
 
 ## Regions
 
@@ -165,6 +167,29 @@ switch is independent of roman input, so you can run the underline alone:
 ```python
 editor.setSpellCheckEnabled(False)  # hide the underlines
 ```
+
+## Word runs
+
+The words in a text can be enumerated without touching the document:
+
+```python
+from pyraya import wordRuns
+
+text = "کام دوست، ٹھیک"
+for start, end in wordRuns(text):
+    print(start, end, text[start:end])
+
+for start, end in editor.wordRuns():  # absolute document offsets
+    ...
+```
+
+Each run is a pair of offsets, not a substring — the caller slices. A run is
+a maximal stretch of Arabic-script letters and combining marks: digits,
+punctuation, and symbols end it, and the invisible joiners a copied word may
+carry (ZWNJ, ZWJ, LRM, RLM, ALM) neither split a word nor form one.
+`wordRuns(text)` takes a plain string, so a long text is one linear pass with
+no document or `QApplication`; `editor.wordRuns()` adds each block's position
+to give document offsets. Both only read: no edit, no undo step.
 
 ## Learn a word
 

@@ -18,6 +18,7 @@ from .pyraya_widget import (
     PyRayaFonts,
     PyRayaHighlighter,
     SpellCheckUnderlineColor,
+    wordRuns,
 )
 from .regions import (
     RegionColors,
@@ -59,6 +60,7 @@ __all__ = [
     "resolveRegionKind",
     "substituteChar",
     "substituteText",
+    "wordRuns",
     "RomanInputEngine",
     "RomanOverlay",
     "ArabicScriptRanges",

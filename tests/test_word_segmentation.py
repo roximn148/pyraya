@@ -24,11 +24,27 @@ from pyraya import (
     ArabicScriptSeparators,
     ArabicScriptWordChars,
     PyRaya,
+    wordRuns,
 )
 from pyraya.pyraya_widget import _isArabicChar, _wordRunAround
 
 #: A presentation-form spelling of ``کام`` (initial kaf, final alef, final meem).
 PresentationFormWord = "\ufedb\ufe8e\ufee2"
+
+#: A mixed document exercising every boundary the walk must honour: a plain
+#: word, a word stopped by a digit, an Arabic comma, a presentation form, an
+#: interior ZWNJ, a run wrapped in RLM/LRM, and wordless digits and Latin.
+MixedText = "".join(
+    [
+        "\u06a9\u0627\u0645",  # کام
+        " \u062f\u0648\u0633\u062a\u06f5",  # دوست۵
+        "\u060c",  # ،
+        " " + PresentationFormWord,
+        " \u06a9\u200c\u0627\u0645",  # ک‌ام
+        " \u200f\u0679\u06be\u06cc\u06a9\u200e",  # ‏ٹھیک‎
+        " 123 abc",  # wordless
+    ]
+)
 
 
 # ******************************************************************************
@@ -159,3 +175,62 @@ def testPresentationFormWordDoesNotBreakTheSuggestionPath(app: QApplication) -> 
     assert engine is not None
     roman = engine.romanizeArabic(PresentationFormWord)
     assert isinstance(engine.suggestTiers(roman), list)
+
+
+# ******************************************************************************
+def testWordRunsWalksEveryWordInOrder() -> None:
+    """Every word is yielded once, in order, with its offsets."""
+    text = "\u06a9\u0627\u0645 \u062f\u0648\u0633\u062a\u06f5\u060c \u0679\u06be\u06cc\u06a9"
+    assert list(wordRuns(text)) == [(0, 3), (4, 8), (11, 15)]
+
+
+# ******************************************************************************
+def testWordRunsAgreesWithThePointQuery() -> None:
+    """Every yielded run is what the point query reports at both of its ends.
+
+    The walk must not define its own word boundaries: it is the forward
+    counterpart of ``_wordRunAround``, never a second scan.
+    """
+    runs = list(wordRuns(MixedText))
+    assert len(runs) == 5
+    for start, end in runs:
+        assert _wordRunAround(MixedText, start) == (start, end)
+        assert _wordRunAround(MixedText, end - 1) == (start, end)
+
+
+# ******************************************************************************
+def testWordRunsSkipsWordlessText() -> None:
+    """Digits, whitespace, Latin, joiners alone, and empty text yield no run."""
+    assert list(wordRuns("")) == []
+    assert list(wordRuns("123 456")) == []
+    assert list(wordRuns(" \u200c\u200d ")) == []
+    assert list(wordRuns("abc def")) == []
+
+
+# ******************************************************************************
+def testWordRunsKeepsAnInteriorJoinerAndTrimsTheEdges() -> None:
+    """A joiner inside the span stays in it; edge joiners fall outside it."""
+    text = "\u200f\u06a9\u200c\u0627\u0645\u200e"
+    assert list(wordRuns(text)) == [(1, 5)]
+
+
+# ******************************************************************************
+def testWidgetWordRunsGivesAbsoluteDocumentOffsets(app: QApplication) -> None:
+    """The widget method reports document offsets across the block separator."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("\u06a9\u0627\u0645\n\u062f\u0648\u0633\u062a")
+    assert list(widget.wordRuns()) == [(0, 3), (4, 8)]
+
+
+# ******************************************************************************
+def testWidgetWordRunsDoesNotMutateTheDocument(app: QApplication) -> None:
+    """The walk only reads: no edit, no undo step, no document revision bump."""
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("\u06a9\u0627\u0645 \u062f\u0648\u0633\u062a")
+    revision = widget.document().revision()
+    assert list(widget.wordRuns()) == [(0, 3), (4, 8)]
+    assert widget.document().availableUndoSteps() == 0
+    assert widget.document().revision() == revision
+    assert widget.toPlainText() == "\u06a9\u0627\u0645 \u062f\u0648\u0633\u062a"

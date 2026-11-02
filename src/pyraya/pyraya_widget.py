@@ -17,7 +17,7 @@ view-only: it tints the resolved kinds in the text layout and never feeds
 back into identity.
 """
 
-from collections.abc import Callable, Generator, Iterable, Sequence
+from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
 from time import monotonic
 from typing import cast
 
@@ -141,6 +141,29 @@ def _continuesWordRun(char: str) -> bool:
     return char in ArabicScriptWordChars or char in _WordJoiners
 
 
+def _trimJoiners(text: str, start: int, end: int) -> tuple[int, int]:
+    """Shrink a joiner-bearing span down to its word matter.
+
+    Joiners are transparent inside a run but never form one, so both edges
+    are walked inward past them. This is the single edge rule shared by the
+    point query and the whole-text walk — keeping it in one place is what
+    stops the two from disagreeing about where a word starts or ends.
+
+    Args:
+        text: The text the span indexes into.
+        start: The span's left edge.
+        end: The span's right edge (exclusive).
+
+    Returns:
+        The span with any leading and trailing joiners removed.
+    """
+    while start < end and text[start] in _WordJoiners:
+        start += 1
+    while end > start and text[end - 1] in _WordJoiners:
+        end -= 1
+    return (start, end)
+
+
 def _wordRunAround(text: str, local: int) -> tuple[int, int] | None:
     """The maximal block-local Arabic-script run containing or ending at ``local``.
 
@@ -174,13 +197,51 @@ def _wordRunAround(text: str, local: int) -> tuple[int, int] | None:
     end = local
     while end < len(text) and _continuesWordRun(text[end]):
         end += 1
-    while start < end and text[start] in _WordJoiners:
-        start += 1
-    while end > start and text[end - 1] in _WordJoiners:
-        end -= 1
+    start, end = _trimJoiners(text, start, end)
     if start >= end:
         return None
     return (start, end)
+
+
+def wordRuns(text: str) -> Iterator[tuple[int, int]]:
+    """Yield the offset span of every word in ``text``, in document order.
+
+    The forward counterpart of the widget's word-under-cursor query. It is
+    one left-to-right pass that takes the same word class
+    (:func:`_continuesWordRun`) and the same edge rule
+    (:func:`_trimJoiners`), so a run found here is exactly the run the point
+    query reports at either of its ends — the walk never defines a second
+    notion of where a word begins.
+
+    The pairs are **offsets, not substrings**: ``text[start:end]`` is the
+    word, and the caller slices. An interior joiner stays inside the span; a
+    joiner on either edge does not.
+
+    The pass is linear, with one set lookup per character and no allocation
+    beyond the yielded tuples, so a long text costs the same per character
+    as a short one. It reads ``text`` as it was when the call was made and is
+    not a snapshot: do not hold the iterator across a change to the
+    underlying string or document.
+
+    Args:
+        text: The text to scan. A document's blocks are separate texts, so
+            the widget method joins them by adding each block's position.
+
+    Yields:
+        ``(start, end)`` offsets, ascending, one pair per word run.
+    """
+    index = 0
+    length = len(text)
+    while index < length:
+        if not _continuesWordRun(text[index]):
+            index += 1
+            continue
+        start = index
+        while index < length and _continuesWordRun(text[index]):
+            index += 1
+        start, end = _trimJoiners(text, start, index)
+        if start < end:
+            yield (start, end)
 
 
 def _charFormatAt(document: QTextDocument, position: int) -> QTextCharFormat:
@@ -856,6 +917,30 @@ class PyRaya(QPlainTextEdit):
             start offset.
         """
         return self._regionSpans()
+
+    # ==========================================================================
+    def wordRuns(self) -> Iterator[tuple[int, int]]:
+        """Yield the offset span of every word in the document, in order.
+
+        Walks the document's blocks and adds each block's position, so the
+        pairs are absolute document offsets and no full-text copy is made. A
+        word run cannot cross a block: the block separator is not Arabic, and
+        the module-level scan stops at the edges of the text it is given.
+
+        Reading only — no edit, no undo step, and no document revision bump.
+        Like the module-level :func:`wordRuns`, the iterator reflects the
+        document as it is at iteration time, so an edit during the walk
+        invalidates it.
+
+        Yields:
+            ``(start, end)`` document offsets, ascending, one pair per word.
+        """
+        block = self.document().begin()
+        while block.isValid():
+            base = block.position()
+            for start, end in wordRuns(block.text()):
+                yield (base + start, base + end)
+            block = block.next()
 
     # ==========================================================================
     def seedRegionKind(self) -> RegionType:
