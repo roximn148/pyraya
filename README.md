@@ -18,6 +18,10 @@ stack that carries Nastaliq beside English, and a way to turn `salam` into
 سلام. PyRaya does that work. Type a roman word, choose the Urdu spelling from
 a list, and the page stays in Urdu the whole time.
 
+![Typing a Roman-Urdu sentence; each word converts to Arabic script from a live suggestion list](./docs/demo-roman-input.gif)
+
+*Interacitve realtime conversion of each typed Urdu word from Roman-script input to Arabic-script.*
+
 ## Install
 
 No package is published yet. In a clone of this repository, `uv sync` builds a
