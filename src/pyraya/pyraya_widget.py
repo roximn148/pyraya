@@ -1309,6 +1309,23 @@ class PyRaya(QPlainTextEdit):
         self.wordAdded.emit(word)
 
     # ==========================================================================
+    def _wordTextAtCursor(self) -> str | None:
+        """The document text of the RomanUrdu word run under the cursor.
+
+        The run :meth:`_wordUnderCursor` reports, sliced out of its own
+        block — it never re-scans, so the text is exactly the span the
+        overlay, the spell-check pass, and the learn actions agree on.
+        ``None`` when the cursor rests on no word.
+        """
+        word = self._wordUnderCursor()
+        if word is None:
+            return None
+        start, end = word
+        block = self.document().findBlock(start)
+        base = block.position()
+        return block.text()[start - base : end - base]
+
+    # ==========================================================================
     def _learnCandidate(self) -> str | None:
         """The "Add to dictionary" candidate: the word under the cursor.
 
@@ -1318,16 +1335,10 @@ class PyRaya(QPlainTextEdit):
         RomanUrdu-resolved, so the same candidate logic the spell-check
         pass computes.
         """
-        cursor = self.textCursor()
-        if cursor.hasSelection():
+        if self.textCursor().hasSelection():
             return None
-        word = self._wordUnderCursor()
-        if word is None:
-            return None
-        start, end = word
-        block = self.document().findBlock(start)
-        text = block.text()[start - block.position() : end - block.position()]
-        if self._ensureEngine().hasWord(text):
+        text = self._wordTextAtCursor()
+        if text is None or self._ensureEngine().hasWord(text):
             return None
         return text
 
@@ -2060,10 +2071,12 @@ class PyRaya(QPlainTextEdit):
                 # The undefined-word (Learn) row: the dialog decides the
                 # committed word (accept: the chosen Arabic word, learned
                 # inside ``_learnDialog``; cancel: the session no-op, the
-                # typed roman as-is). Edge commits (Left/Right) write
-                # nothing and move in visual order, so they stay
-                # dialog-free.
-                arabic = self._learnDialog(typedRoman)
+                # typed roman as-is). The dialog is seeded with the word
+                # under the cursor — the row is reached while romanizing an
+                # existing Arabic word, so that word is the one to learn.
+                # Edge commits (Left/Right) write nothing and move in
+                # visual order, so they stay dialog-free.
+                arabic = self._learnDialog(typedRoman, prefill=self._wordTextAtCursor() or "")
                 if arabic is not None:
                     word = arabic
                 else:

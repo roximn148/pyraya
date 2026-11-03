@@ -195,9 +195,11 @@ to give document offsets. Both only read: no edit, no undo step.
 
 Words the dictionary does not know can be added to it. Right-click an
 unknown word in a Roman Urdu region and choose "Add to dictionary", or
-commit the `+ [..]` row in the suggestion list. A dialog shows the
-Arabic word with a live roman preview: OK is enabled only while the
-field holds a mappable word. Accepting adds the word to the dictionary
+commit the `+ [..]` row in the suggestion list. Either way the dialog's
+field opens holding the word under the cursor — the word you clicked, or
+the one you are romanizing — so OK is live at once. A live roman preview
+sits under it, and OK is enabled only while the field holds a mappable
+word. Accepting adds the word to the dictionary
 — its underline clears, and it becomes suggestable from roman input;
 cancelling adds nothing, and in the `+ [..]` row the typed roman stays
 as-is.

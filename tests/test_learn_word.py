@@ -546,3 +546,55 @@ def testIsModifiedLifecycle(app: QApplication, tmp_path) -> None:
     engine = widget.romanEngine()
     assert isinstance(engine, RomanInputEngine)
     assert engine.hasWord("خلمق") is True
+
+
+# ******************************************************************************
+def testLearnRowDialogIsSeededWithTheWordUnderTheCursor(
+    app: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The ``+ [..]`` row opens the dialog seeded with the cursor's word.
+
+    The row is reached while romanizing an existing Arabic word — often one
+    the spell checker flagged — so the word to learn is already in the
+    document under the cursor. The dialog must arrive holding it, with OK
+    live, instead of an empty field the user has to retype.
+    """
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello خلمق world")
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    overlay.setText("xqwzrty")  # zero matches -> undefined-word row
+    row = overlay.suggestionList().selectedRow()
+    assert row is not None and row.suggestion.isUndefined()
+    seen: list[str] = []
+
+    def rejectSeeded(dialog: AddWordDialog) -> QDialog.DialogCode:
+        seen.append(dialog.word())
+        return QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(AddWordDialog, "exec", rejectSeeded)
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Return, "")
+    assert seen == ["خلمق"]
+
+
+# ******************************************************************************
+def testRightClickLearnDialogIsSeededWithTheCandidateWord(
+    app: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The "Add to dictionary" action opens the dialog holding the candidate."""
+    widget = PyRaya()
+    widget.setPlainText("کتاب خلمق")
+    _moveCursor(widget, 6)
+    seen: list[str] = []
+
+    def rejectSeeded(dialog: AddWordDialog) -> QDialog.DialogCode:
+        seen.append(dialog.word())
+        return QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(AddWordDialog, "exec", rejectSeeded)
+    menu = widget.createPopupMenu()
+    action = next(a for a in menu.actions() if a.text() == "Add to dictionary")
+    action.trigger()
+    assert seen == ["خلمق"]
