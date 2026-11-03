@@ -6,7 +6,7 @@ A PySide6 text editor for Urdu. Drop the widget into your app and it handles
 right-to-left paragraphs, a Nastaliq font stack, and typing Urdu from a roman
 keyboard.
 
-⚠️ **Alpha** · `0.1.0-alpha.9` · Python 3.14+ · PySide6
+⚠️ **Alpha** · `0.1.0a9` · Python 3.14+ · PySide6
 
 ---
 

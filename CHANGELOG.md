@@ -5,13 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-This file records changes starting from the baseline version `0.1.0-alpha.8` onward;
-earlier releases (`0.1.0-alpha.1` through `0.1.0-alpha.7`) are all incorporated
+This file records changes starting from the baseline version `0.1.0a8` onward;
+earlier releases (`0.1.0a1` through `0.1.0a7`) are all incorporated
 into this release version.
 
 ## [Unreleased]
 
-## [0.1.0-alpha.9] - 2026-11-03
+## [0.1.0a9] - 2026-11-03
 
 ### Added
 
@@ -66,7 +66,7 @@ into this release version.
 - The `+ Learn` dialog seeds its field with the word under the cursor.
 - The spell-check pass is routed through `wordRuns`.
 
-## [0.1.0-alpha.8] - 2026-10-23
+## [0.1.0a8] - 2026-10-23
 
 ### Added
 
