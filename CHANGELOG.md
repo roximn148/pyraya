@@ -17,6 +17,10 @@ into this release version.
   `target-version = "py313"`, pyrefly `python-version = "3.13"`.
 - `romanalfaz >= 0.1.0a11`: the engine pins `DistanceAlgorithm.DAMERAU_OSA_FAST`
   via `symspellpy[editdistpy]` (symspellpy >= 6.10.1); no API change.
+- PySide6 6.12.0: the floor is raised from `>=6.11.2` to `>=6.12.0`. The
+  offscreen suite, the latency harness, `ruff`, and `pyrefly` all pass on
+  6.12.0; the 6.11.2 `QDialogButtonBox` wiring gotcha (the explicit handler
+  is load-bearing) was re-verified on 6.12.0 and is unchanged.
 
 ### Removed
 
