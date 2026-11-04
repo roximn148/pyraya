@@ -21,6 +21,15 @@ into this release version.
   offscreen suite, the latency harness, `ruff`, and `pyrefly` all pass on
   6.12.0; the 6.11.2 `QDialogButtonBox` wiring gotcha (the explicit handler
   is load-bearing) was re-verified on 6.12.0 and is unchanged.
+- `pyside6` metapackage → `pyside6-essentials`: the direct dependency is now
+  `pyside6-essentials>=6.12.0` instead of `pyside6>=6.12.0`. pyraya imports
+  only `PySide6.QtCore`, `PySide6.QtGui`, and `PySide6.QtWidgets`, all of
+  which `pyside6-essentials` provides (byte-identical `PySide6/__init__.py`
+  and `.pyi` stubs, and the `.pyd` binaries), so the metapackage's
+  transitive `pyside6-webengine` (Windows wheel ~250 MB), `pyside6-pdf`
+  (~9 MB), and `pyside6-addons` (~90 MB) no longer install. The offscreen
+  suite, the latency harness, `ruff`, and `pyrefly` all pass with
+  essentials alone.
 
 ### Removed
 
