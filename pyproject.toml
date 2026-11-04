@@ -1,24 +1,33 @@
 [project]
 name = "pyraya"
 version = "0.1.0a10"
-license = "MIT"
-license-files = ["LICENSE"]
-description = "PyRaya is a reusable, self-contained Qt text editor widget written in Python (PySide6)"
+description = "PyRaya is a reusable, self-contained Urdu-first QPlainTextEdit widget written in Python (PySide6)"
+
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE.txt"]
 authors = [
     { name = "RoXimn", email = "roximn148@gmail.com" }
 ]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3 :: Only",
+]
+
 requires-python = ">=3.13"
 dependencies = [
     "pyside6-essentials>=6.12.0",
-    "romanalfaz>=0.1.0a11",
+    "romanalfaz>=0.1.0a12",
 ]
 
 [project.scripts]
 pyraya = "pyraya:main"
 
 [build-system]
-requires = ["uv_build>=0.12.6,<0.13.0"]
+requires = ["uv_build>=0.13.7,<0.14.0"]
 build-backend = "uv_build"
 
 [dependency-groups]

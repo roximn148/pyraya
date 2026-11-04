@@ -11,6 +11,17 @@ into this release version.
 
 ## [Unreleased]
 
+### Changed
+
+- `romanalfaz >= 0.1.0a12`: a surface release — copyright-header and
+  docstring reformatting, a comment moved inside `LIGATURE_MAP`, an
+  explicit `strict=False` on a `zip` call, and `raise ... from e`
+  exception chaining; no API or behavioural change (every fact
+  documented for a11 holds).
+- `[build-system] requires` raised from `uv_build>=0.12.6,<0.13.0` to
+  `uv_build>=0.13.7,<0.14.0`, matching romanalfaz 0.1.0a12's own
+  build pin.
+
 ## [0.1.0a10] - 2026-11-04
 
 ### Changed
