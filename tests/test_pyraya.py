@@ -84,7 +84,7 @@ def testSetAlignmentLeavesTheCursorAlone(app: QApplication) -> None:
     widget = PyRaya()
     widget.setPlainText("سلام دنیا")
     cursor = widget.textCursor()
-    cursor.setPosition(int(len("سلام دنیا")))
+    cursor.setPosition(len("سلام دنیا"))
     widget.setTextCursor(cursor)
     widget.setAlignment(Qt.AlignmentFlag.AlignRight)
     after = widget.textCursor()
@@ -624,6 +624,7 @@ def testCustomContextMenuRequestedShowsPopup(app: QApplication) -> None:
     move = QMouseEvent(
         QEvent.Type.MouseMove,
         QPoint(5, 5),
+        widget.mapToGlobal(QPoint(5, 5)),
         Qt.MouseButton.NoButton,
         Qt.MouseButton.NoButton,
         Qt.KeyboardModifier.NoModifier,

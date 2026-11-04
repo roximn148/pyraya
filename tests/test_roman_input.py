@@ -1159,6 +1159,7 @@ def _sendMouse(
         QMouseEvent(
             etype,
             QPointF(local.x(), local.y()),
+            globalPos,
             button,
             Qt.MouseButton.LeftButton,
             modifiers,
