@@ -1,6 +1,6 @@
 [project]
 name = "pyraya"
-version = "0.1.0a10"
+version = "0.1.0a11"
 description = "PyRaya is a reusable, self-contained Urdu-first QPlainTextEdit widget written in Python (PySide6)"
 
 readme = "README.md"
