@@ -11,6 +11,8 @@ into this release version.
 
 ## [Unreleased]
 
+## [0.1.0a10] - 2026-11-04
+
 ### Changed
 
 - Python 3.13: `requires-python = ">=3.13"`, pinned interpreter 3.13, ruff
