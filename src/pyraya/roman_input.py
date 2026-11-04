@@ -262,7 +262,7 @@ class RomanInputEngine:
                 alfaz.addVocabulary(localVocabulary)
             self._alfaz = alfaz
             self.available = True
-        except DictionaryNotFoundError, OSError, ValueError:
+        except (DictionaryNotFoundError, OSError, ValueError):
             self._alfaz = None
             self.available = False
 
@@ -836,7 +836,7 @@ class RomanLineEdit(QLineEdit):
     still calls ``setFocus`` to put the keys there.
     """
 
-    def __init__(self, overlay: RomanOverlay, parent: QWidget | None = None) -> None:
+    def __init__(self, overlay: "RomanOverlay", parent: QWidget | None = None) -> None:
         """Create the line edit bound to its overlay.
 
         Args:

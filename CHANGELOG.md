@@ -11,6 +11,18 @@ into this release version.
 
 ## [Unreleased]
 
+### Changed
+
+- Python 3.13: `requires-python = ">=3.13"`, pinned interpreter 3.13, ruff
+  `target-version = "py313"`, pyrefly `python-version = "3.13"`.
+- `romanalfaz >= 0.1.0a11`: the engine pins `DistanceAlgorithm.DAMERAU_OSA_FAST`
+  via `symspellpy[editdistpy]` (symspellpy >= 6.10.1); no API change.
+
+### Removed
+
+- `pydantic` dependency: declared in the initial skeleton but never imported;
+  re-add it when the roadmap work that reserved it lands.
+
 ## [0.1.0a9] - 2026-11-03
 
 ### Added

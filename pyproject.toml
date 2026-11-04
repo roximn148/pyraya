@@ -8,11 +8,10 @@ readme = "README.md"
 authors = [
     { name = "RoXimn", email = "roximn148@gmail.com" }
 ]
-requires-python = ">=3.14"
+requires-python = ">=3.13"
 dependencies = [
-    "pydantic==2.13.5",
     "pyside6>=6.11.2",
-    "romanalfaz>=0.1.0a10",
+    "romanalfaz>=0.1.0a11",
 ]
 
 [project.scripts]
@@ -31,7 +30,7 @@ dev = [
 
 [tool.ruff]
 line-length = 100
-target-version = "py314"
+target-version = "py313"
 src = ["src"]
 
 [tool.ruff.lint]
@@ -46,4 +45,4 @@ pythonpath = ["src"]
 
 [tool.pyrefly]
 project-includes = ["src", "tests"]
-python-version = "3.14"
+python-version = "3.13"
