@@ -9,6 +9,24 @@ This file records changes starting from the baseline version `0.1.0a8` onward;
 earlier releases (`0.1.0a1` through `0.1.0a7`) are all incorporated
 into this release version.
 
+## [Unreleased]
+
+### Fixed
+
+- Cancelling the learn dialog from the `+ [..]` row no longer replaces the
+  Arabic word under the cursor with the typed roman. A cancel is now no
+  edit at all: the word stays, no separator is written, the word is not
+  re-tagged, no undo step is added, and no signal fires — the overlay is
+  dismissed exactly like a plain Esc.
+
+### Changed
+
+- Cancelling the `+ [..]` row at a bare cursor no longer commits the typed
+  roman. The suggestion overlay produces Arabic only; the typed roman is
+  discarded with the overlay, as it already was on a plain Esc. Hosts that
+  relied on the roman-as-is fallback should type roman with the feature
+  off (`setRomanInputEnabled(False)`) or in a `Native` region instead.
+
 ## [0.1.0a11] - 2026-11-04
 
 ### Changed

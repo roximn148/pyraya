@@ -3672,11 +3672,11 @@ def testUndefinedWordCommitScenario1And2(app: QApplication) -> None:
     """Committing the + [..] row goes through the dialog decision.
 
     The dialog decision happens in ``_onOverlayCommitted``: a canceling
-    handler (``None``) commits the typed roman as-is — the session no-op:
-    the word is written, nothing is learned — and an accepting handler
-    (the chosen Arabic word) commits the learned word and emits
-    ``wordAdded`` once (the handler path learns internally, so the counter
-    lands at one, never two).
+    handler (``None``) writes nothing at all — neither the typed roman nor
+    the separator, so the document is untouched and nothing is learned —
+    and an accepting handler (the chosen Arabic word) commits the learned
+    word and emits ``wordAdded`` once (the handler path learns internally,
+    so the counter lands at one, never two).
     """
     # scenario 1: typed at a bare cursor position past the span
     widget = PyRaya()
@@ -3697,9 +3697,11 @@ def testUndefinedWordCommitScenario1And2(app: QApplication) -> None:
     row = overlay.suggestionList().selectedRow()
     assert row is not None and row.suggestion.isUndefined()
     _sendKey(overlay.lineEdit(), Qt.Key.Key_Space, " ")
-    # The canceling handler: the typed roman commits as-is, nothing learned
-    assert widget.toPlainText() == "hello خوش xqwzrty world"
-    assert committed == [("xqwzrty", "xqwzrty")]
+    # The canceling handler: nothing lands at a bare cursor either. The box
+    # exists to produce Arabic, so its cancel writes no roman text and no
+    # separator (there is no word under the cursor to keep).
+    assert widget.toPlainText() == "hello خوش world"
+    assert committed == []
     assert emitted == []
     # localDictionary is unchanged (the handler canceled)
     assert list(widget.localDictionary().counter) == []
@@ -3734,6 +3736,80 @@ def testUndefinedWordCommitScenario1And2(app: QApplication) -> None:
     assert widget2.localDictionary().counter["خلمق"] == 1
     assert widget2.localDictionary().isModified() is True
     widget2.setAddWordHandler(None)  # restore the built-in dialog
+
+
+# ******************************************************************************
+def testUndefinedWordCancelLeavesTheDocumentUntouched(app: QApplication) -> None:
+    """Cancelling the learn row over a word writes nothing at all.
+
+    The row is reached while romanizing an existing Arabic word; cancelling
+    must leave the document exactly as it was — the word kept, no separator,
+    no re-tag, no undo step, no signal — and learn nothing, instead of
+    writing the typed roman over the word.
+    """
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("hello خوش world")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    committed: list[tuple[str, str]] = []
+    emitted: list[str] = []
+    changed: list[int] = []
+    widget.romanWordCommitted.connect(lambda w, r: committed.append((w, r)))
+    widget.wordAdded.connect(lambda word: emitted.append(word))
+    widget.regionsChanged.connect(lambda: changed.append(1))
+    widget.setAddWordHandler(lambda _trigger: None)  # cancel
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    overlay.setText("xqwzrty")  # zero matches -> undefined-word row
+    row = overlay.suggestionList().selectedRow()
+    assert row is not None and row.suggestion.isUndefined()
+    baseline = widget.document().availableUndoSteps()
+
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Space, " ")
+
+    # Cancel is no edit: the word stays, no separator, no signal, no undo step.
+    assert widget.toPlainText() == "hello خوش world"
+    assert committed == []
+    assert emitted == []
+    assert changed == []
+    assert dict(widget.localDictionary().counter) == {}
+    assert widget.localDictionary().isModified() is False
+    assert widget.document().availableUndoSteps() == baseline
+    # The overlay closes and assist mode stays on, exactly like a plain Esc
+    # on the active overlay (the resync must not re-open it over the word).
+    _assertNoOverlay(widget)
+    assert widget.isAssistEnabled() is True
+    widget.setAddWordHandler(None)  # restore the built-in dialog
+
+
+# ******************************************************************************
+def testCancelledLearnCommitDoesNotMoveTheCursor(app: QApplication) -> None:
+    """A cancelled Ctrl+Up learn commit aborts both halves: no write, no move.
+
+    Ctrl+Up is a commit-and-navigate gesture; when its commit is cancelled
+    the whole gesture is cancelled, so the caret stays where it was.
+    """
+    widget = PyRaya()
+    widget.show()
+    widget.setPlainText("line one\nhello خوش world")
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 15, 18)
+    widget.setAddWordHandler(lambda _trigger: None)  # cancel
+    _moveCursor(widget, 16)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    overlay.setText("xqwzrty")  # zero matches -> undefined-word row
+    row = overlay.suggestionList().selectedRow()
+    assert row is not None and row.suggestion.isUndefined()
+
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Up, "", Qt.KeyboardModifier.ControlModifier)
+
+    assert widget.toPlainText() == "line one\nhello خوش world"
+    assert widget.textCursor().position() == 16
+    _assertNoOverlay(widget)
+    widget.setAddWordHandler(None)  # restore the built-in dialog
 
 
 # ******************************************************************************

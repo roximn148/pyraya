@@ -2024,22 +2024,24 @@ class PyRaya(QPlainTextEdit):
 
         Everything is derived from the signal arguments (B6): the committed
         word from the dialog decision for the undefined-word (Learn) row —
-        ``_learnDialog`` decides the committed word for every writing
-        commit (accept: the chosen Arabic word, learned inside it;
-        cancel: the session no-op, the typed roman as-is), and edge
-        commits (Left/Right) stay dialog-free —, else from the selected row
-        (:meth:`_committedWord`); the separator and resync decision from
-        the committing keystroke (:meth:`_commitSeparator`), and then one of
-        the two commit decisions — the edge commit (:meth:`_edgeCommit`,
-        writes nothing and moves in visual order) or the write
-        (:meth:`_writeCommit`). One
-        post-commit resync runs unless the decision suppressed it.
+        ``_learnDialog`` decides whether anything is written at all
+        (accept: the chosen Arabic word, learned inside it; cancel: no edit
+        — the commit aborts, the overlay is dismissed, nothing is written,
+        no signal fires, and a Ctrl+Up / Ctrl+Down gesture does not move
+        the caret either), and edge commits (Left/Right) stay dialog-free
+        —, else from the selected row (:meth:`_committedWord`); the
+        separator and resync decision from the committing keystroke
+        (:meth:`_commitSeparator`), and then one of the three commit
+        decisions — the cancel (nothing at all), the edge commit
+        (:meth:`_edgeCommit`, writes nothing and moves in visual order) or
+        the write (:meth:`_writeCommit`). One post-commit resync runs
+        unless the decision suppressed it.
 
         ``romanWordCommitted`` is emitted for a non-empty committed word,
         and ``regionsChanged`` once for every writing commit (per the Q-2
         contract: :attr:`regionsChanged` means "a region-touching operation
-        invoked through the widget has completed"). An edge commit writes
-        nothing and emits neither.
+        invoked through the widget has completed"). An edge commit and a
+        cancelled learn commit write nothing and emit neither.
 
         A Ctrl+Up / Ctrl+Down commit (``Key_Up`` / ``Key_Down``) additionally
         moves the document cursor one line up or down, in the ``finally``
@@ -2058,6 +2060,7 @@ class PyRaya(QPlainTextEdit):
             return
         self._committing = True
         resync = True
+        cancelled = False
         try:
             if (
                 isinstance(selected, Suggestion)
@@ -2068,19 +2071,27 @@ class PyRaya(QPlainTextEdit):
                     Qt.Key.Key_Right,
                 )
             ):
-                # The undefined-word (Learn) row: the dialog decides the
-                # committed word (accept: the chosen Arabic word, learned
-                # inside ``_learnDialog``; cancel: the session no-op, the
-                # typed roman as-is). The dialog is seeded with the word
-                # under the cursor — the row is reached while romanizing an
-                # existing Arabic word, so that word is the one to learn.
-                # Edge commits (Left/Right) write nothing and move in
-                # visual order, so they stay dialog-free.
+                # The undefined-word (Learn) row: the dialog decides whether
+                # anything is written at all. Accept commits the chosen
+                # Arabic word (learned inside ``_learnDialog``); cancel is
+                # no edit — the same outcome as a plain Esc on the overlay
+                # (dismiss only, assist stays on): nothing is written, not
+                # even the separator, because the box exists to produce
+                # Arabic and the document must stay exactly as it was. The
+                # resync is suppressed so the overlay does not re-open over
+                # the word the user declined to teach. The dialog is seeded
+                # with the word under the cursor — the row is reached while
+                # romanizing an existing Arabic word, so that word is the
+                # one to keep or learn. Edge commits (Left/Right) write
+                # nothing and move in visual order, so they stay
+                # dialog-free.
                 arabic = self._learnDialog(typedRoman, prefill=self._wordTextAtCursor() or "")
-                if arabic is not None:
-                    word = arabic
-                else:
-                    word = typedRoman
+                if arabic is None:
+                    self._deactivateOverlay()
+                    resync = False
+                    cancelled = True
+                    return
+                word = arabic
             else:
                 word = self._committedWord(typedRoman, selected)
             if key in (Qt.Key.Key_Left, Qt.Key.Key_Right):
@@ -2095,12 +2106,13 @@ class PyRaya(QPlainTextEdit):
                 # reconciliation still runs even if a button happens to be
                 # held down (see ``_syncOverlay``).
                 self._syncOverlay(bypassMouse=True)
-            if key in (Qt.Key.Key_Up, Qt.Key.Key_Down):
+            if key in (Qt.Key.Key_Up, Qt.Key.Key_Down) and not cancelled:
                 # The Ctrl+Up / Ctrl+Down line move, after ``_committing``
                 # clears and the resync runs: ``setTextCursor`` is the
                 # funnel's only chance to observe the move, and the
                 # document must behave exactly as if Up/Down had been
-                # pressed in it.
+                # pressed in it. A cancelled learn commit aborts the
+                # navigation half as well (``cancelled``).
                 cursor = self.textCursor()
                 cursor.movePosition(
                     QTextCursor.MoveOperation.Up
@@ -2116,8 +2128,8 @@ class PyRaya(QPlainTextEdit):
         ``""`` when no row is selected, the typed roman for the
         undefined-word row's blank :class:`Suggestion` (``isUndefined()``
         true — the dialog decision happens in :meth:`_onOverlayCommitted`,
-        and its write commits the typed roman as the session no-op), the
-        row's ``arabic`` otherwise.
+        so this value only ever reaches an edge commit, which writes
+        nothing), the row's ``arabic`` otherwise.
 
         Args:
             typedRoman: The roman text typed into the overlay line edit.

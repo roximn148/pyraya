@@ -205,8 +205,9 @@ the one you are romanizing — so OK is live at once. A live roman preview
 sits under it, and OK is enabled only while the field holds a mappable
 word. Accepting adds the word to the dictionary
 — its underline clears, and it becomes suggestable from roman input;
-cancelling adds nothing, and in the `+ [..]` row the typed roman stays
-as-is.
+cancelling writes nothing at all and adds nothing, so the word under the
+cursor stays exactly as it was. The `+ [..]` row produces Arabic only:
+cancelling it never inserts the typed roman, in any position.
 
 The dictionary is shared by every widget in the process, so a word
 learned in one editor is known to all of them. Saving it to disk is the
