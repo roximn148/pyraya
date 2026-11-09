@@ -597,6 +597,136 @@ def testContextMenuPolicyIsCustom(app: QApplication) -> None:
 
 
 # ******************************************************************************
+class _MenuProbe(PyRaya):
+    """A widget that records the popups its context-menu path builds."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.menus: list[QMenu] = []
+        self.positions: list[QPoint] = []
+
+    def _showPopup(self, menu: QMenu, position: QPoint) -> None:
+        self.menus.append(menu)
+        self.positions.append(position)
+
+
+# ******************************************************************************
+def _menuRequestPoint(widget: PyRaya, position: int) -> QPoint:
+    """A viewport point on the character boundary pair around ``position``."""
+    cursor = widget.textCursor()
+    cursor.setPosition(position)
+    first = widget.cursorRect(cursor)
+    cursor.setPosition(position + 1)
+    second = widget.cursorRect(cursor)
+    return QPoint((first.center().x() + second.center().x()) // 2, first.center().y())
+
+
+# ******************************************************************************
+def _requestContextMenu(widget: PyRaya, point: QPoint) -> None:
+    """Deliver a context-menu request at a viewport point."""
+    QCoreApplication.sendEvent(
+        widget.viewport(),
+        QContextMenuEvent(
+            QContextMenuEvent.Reason.Mouse, point, widget.viewport().mapToGlobal(point)
+        ),
+    )
+
+
+# ******************************************************************************
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")
+def testContextMenuRequestMovesCaretToTheClick(app: QApplication) -> None:
+    """A context-menu request places the caret where the user pointed.
+
+    The menu resolves everything from the caret, so the request must move
+    the caret to the clicked position first — otherwise the menu describes
+    wherever the caret happened to be left.
+    """
+    widget = _MenuProbe()
+    widget.resize(400, 120)
+    widget.show()
+    widget.setPlainText("abcdefghij")
+    cursor = widget.textCursor()
+    cursor.setPosition(1)
+    widget.setTextCursor(cursor)
+    point = _menuRequestPoint(widget, 7)
+    expected = widget.cursorForPosition(point).position()
+    assert expected != 1
+
+    _requestContextMenu(widget, point)
+
+    assert len(widget.menus) == 1
+    assert widget.textCursor().position() == expected
+    assert widget.textCursor().hasSelection() is False
+
+
+# ******************************************************************************
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")
+def testContextMenuRequestInsideSelectionKeepsIt(app: QApplication) -> None:
+    """A click inside the selection keeps the selection and the caret.
+
+    The Windows pattern: right-clicking within a selection leaves it intact
+    so the menu acts on the selection the user made.
+    """
+    widget = _MenuProbe()
+    widget.resize(400, 120)
+    widget.show()
+    widget.setPlainText("abcdefghij")
+    cursor = widget.textCursor()
+    cursor.setPosition(2)
+    cursor.setPosition(6, QTextCursor.MoveMode.KeepAnchor)
+    widget.setTextCursor(cursor)
+
+    _requestContextMenu(widget, _menuRequestPoint(widget, 4))
+
+    assert len(widget.menus) == 1
+    after = widget.textCursor()
+    assert after.hasSelection()
+    assert (after.selectionStart(), after.selectionEnd()) == (2, 6)
+    assert after.position() == 6
+
+
+# ******************************************************************************
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")
+def testContextMenuRequestOutsideSelectionCollapsesIt(app: QApplication) -> None:
+    """A click outside the selection collapses it and moves the caret there."""
+    widget = _MenuProbe()
+    widget.resize(400, 120)
+    widget.show()
+    widget.setPlainText("abcdefghij")
+    cursor = widget.textCursor()
+    cursor.setPosition(2)
+    cursor.setPosition(6, QTextCursor.MoveMode.KeepAnchor)
+    widget.setTextCursor(cursor)
+    point = _menuRequestPoint(widget, 8)
+    expected = widget.cursorForPosition(point).position()
+    assert not 2 <= expected <= 6
+
+    _requestContextMenu(widget, point)
+
+    assert len(widget.menus) == 1
+    after = widget.textCursor()
+    assert after.hasSelection() is False
+    assert after.position() == expected
+
+
+# ******************************************************************************
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")
+def testContextMenuRequestPastTheTextEndClampsTheCaret(app: QApplication, capfd) -> None:
+    """A request past the last character lands on the document's last slot."""
+    widget = _MenuProbe()
+    widget.resize(400, 120)
+    widget.show()
+    widget.setPlainText("abc")
+
+    viewport = widget.viewport().rect()
+    _requestContextMenu(widget, QPoint(2, viewport.height() - 2))
+
+    assert len(widget.menus) == 1
+    assert 0 <= widget.textCursor().position() < widget.document().characterCount()
+    assert "out of range" not in capfd.readouterr().err.lower()
+
+
+# ******************************************************************************
 @pytest.mark.filterwarnings("ignore::DeprecationWarning")
 def testCustomContextMenuRequestedShowsPopup(app: QApplication) -> None:
     """A context menu request received by the widget shows the popup menu.

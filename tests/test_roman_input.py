@@ -3813,6 +3813,47 @@ def testCancelledLearnCommitDoesNotMoveTheCursor(app: QApplication) -> None:
 
 
 # ******************************************************************************
+def testRightButtonReleaseDoesNotReactivateTheOverlay(app: QApplication) -> None:
+    """A right-click's release leaves the dismissed overlay closed.
+
+    Only the left button's release reconciles the overlay. A right-click is
+    a menu gesture, and re-opening the overlay over the caret's word while
+    the menu is being requested for a different word is what made the menu
+    look anchored to the caret.
+    """
+    widget = PyRaya()
+    widget.resize(400, 120)
+    widget.show()
+    widget.setPlainText("کتاب خلمق")
+    widget.setRomanInputEnabled(True)
+    widget.setAssistEnabled(True)
+    _moveCursor(widget, 6)  # over خلمق: the overlay activates
+    assert widget._overlay is not None and widget._overlay.isVisible()
+    widget._deactivateOverlay()
+    cursor = widget.textCursor()
+    cursor.setPosition(1)
+    point = widget.cursorRect(cursor).center()
+    globalPos = widget.viewport().mapToGlobal(point)
+    for etype, buttons in (
+        (QEvent.Type.MouseButtonPress, Qt.MouseButton.RightButton),
+        (QEvent.Type.MouseButtonRelease, Qt.MouseButton.NoButton),
+    ):
+        QCoreApplication.sendEvent(
+            widget.viewport(),
+            QMouseEvent(
+                etype,
+                QPointF(point.x(), point.y()),
+                globalPos,
+                Qt.MouseButton.RightButton,
+                buttons,
+                Qt.KeyboardModifier.NoModifier,
+            ),
+        )
+    assert widget._overlay is not None and not widget._overlay.isVisible()
+    assert widget._mouseActive is False
+
+
+# ******************************************************************************
 def testUnavailableEngineCommitIsNoOp(app: QApplication) -> None:
     """With an unavailable engine, committing does not touch the document."""
     widget = PyRaya()

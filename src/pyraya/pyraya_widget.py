@@ -683,6 +683,7 @@ class PyRaya(QPlainTextEdit):
         # is not a typing or cursor decision.
         self._replacingText = False
         self._mouseActive = False
+        self._menuOpening = False
         # The ``(cursor position, document revision)`` pair the last sync
         # ran for: both ``cursorPositionChanged`` and ``contentsChanged``
         # funnel into :meth:`_syncOverlay` per keystroke, and the second
@@ -1359,7 +1360,9 @@ class PyRaya(QPlainTextEdit):
 
         Returns early while the feature is disabled, assist mode is off
         (the user is left alone until Ctrl+Space), a commit is in
-        progress, or — unless ``bypassMouse`` — a mouse button is held
+        progress, the context menu is placing the cursor at a click (that
+        move must not open the overlay as the menu appears), or — unless
+        ``bypassMouse`` — a mouse button is held
         down: a drag is moving the document cursor, and the overlay would
         reposition mid-drag, and, when it crosses the word boundary,
         deactivate and refocus the document. The explicit resync after a
@@ -1392,6 +1395,7 @@ class PyRaya(QPlainTextEdit):
             or not self._assistMode
             or self._committing
             or self._replacingText
+            or self._menuOpening
             or (self._mouseActive and not bypassMouse)
         ):
             return
@@ -2451,10 +2455,46 @@ class PyRaya(QPlainTextEdit):
     def _onCustomContextMenuRequested(self, position: QPoint) -> None:
         """Show the context menu where it was requested.
 
+        The menu resolves every positional decision — the word for "Add to
+        dictionary", the region actions, the selection state — from the
+        document cursor, and Qt does not move the cursor on a right-click.
+        The request therefore places the cursor at the clicked position
+        first (:meth:`_moveCursorToPoint`), so the menu describes what the
+        user pointed at rather than wherever the cursor was last left.
+
         Args:
             position: The request position in viewport coordinates.
         """
+        self._moveCursorToPoint(position)
         self._showPopup(self.createPopupMenu(), self.viewport().mapToGlobal(position))
+
+    # ==========================================================================
+    def _moveCursorToPoint(self, position: QPoint) -> None:
+        """Place the document cursor at a viewport point for the context menu.
+
+        A click inside the current selection keeps both the selection and the
+        cursor (the Windows pattern), so the menu acts on what the user
+        selected; any other click moves the cursor to the point, collapsing
+        the selection.
+
+        The overlay sync is suppressed while the move runs: the caret move is
+        not a user decision to open the overlay, and activating it as the
+        menu opens would steal the focus the menu needs.
+
+        Args:
+            position: The request position in viewport coordinates.
+        """
+        cursor = self.cursorForPosition(position)
+        current = self.textCursor()
+        if current.hasSelection() and (
+            current.selectionStart() <= cursor.position() <= current.selectionEnd()
+        ):
+            return
+        self._menuOpening = True
+        try:
+            self.setTextCursor(cursor)
+        finally:
+            self._menuOpening = False
 
     # ==========================================================================
     def _showPopup(self, menu: QMenu, position: QPoint) -> None:
@@ -2624,7 +2664,12 @@ class PyRaya(QPlainTextEdit):
         super().mouseReleaseEvent(event)
         if self._mouseActive:
             self._mouseActive = False
-            self._syncOverlay()
+            # Only the left button reconciles the overlay: a right-click is a
+            # menu gesture, and reactivating the overlay over the cursor's
+            # word while the menu is requested for a different word would
+            # contradict the menu's own placement.
+            if event.button() == Qt.MouseButton.LeftButton:
+                self._syncOverlay()
 
     # ==========================================================================
     def resizeEvent(self, event: QResizeEvent) -> None:

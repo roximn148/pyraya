@@ -11,9 +11,9 @@ from collections.abc import Generator
 from typing import cast
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QEvent, Qt
-from PySide6.QtGui import QKeyEvent, QTextCharFormat, QTextCursor
-from PySide6.QtWidgets import QApplication, QDialog, QDialogButtonBox, QWidget
+from PySide6.QtCore import QCoreApplication, QEvent, QPoint, Qt
+from PySide6.QtGui import QContextMenuEvent, QKeyEvent, QTextCharFormat, QTextCursor
+from PySide6.QtWidgets import QApplication, QDialog, QDialogButtonBox, QMenu, QWidget
 from romanalfaz.algorithm import tafseerUrduAr2Rm
 from romanalfaz.engine import Vocabulary
 
@@ -440,6 +440,61 @@ def testAddToDictionaryActionHiddenWithSelection(app: QApplication) -> None:
     widget.setTextCursor(cursor)
     menu = widget.createPopupMenu()
     assert "Add to dictionary" not in {action.text() for action in menu.actions()}
+
+
+# ******************************************************************************
+def _menuRequestPoint(widget: PyRaya, position: int) -> QPoint:
+    """A viewport point on the character boundary pair around ``position``."""
+    cursor = widget.textCursor()
+    cursor.setPosition(position)
+    first = widget.cursorRect(cursor)
+    cursor.setPosition(position + 1)
+    second = widget.cursorRect(cursor)
+    return QPoint((first.center().x() + second.center().x()) // 2, first.center().y())
+
+
+# ******************************************************************************
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")
+def testAddToDictionaryFollowsTheClickNotTheCaret(app: QApplication) -> None:
+    """The learn action describes the word clicked, not the word under the caret.
+
+    A right-click moves the caret to the clicked position first, so a click
+    over an unknown word offers the action even when the caret sat on a
+    known word — and a click over a known word offers none even when the
+    caret sat on the unknown one.
+    """
+    shown: list[QMenu] = []
+
+    class Probe(PyRaya):
+        def _showPopup(self, menu: QMenu, position: QPoint) -> None:
+            shown.append(menu)
+
+    widget = Probe()
+    widget.setSpellCheckEnabled(False)
+    widget.resize(400, 120)
+    widget.show()
+    widget.setPlainText("کتاب خلمق")
+    assert widget._ensureEngine().hasWord("کتاب") is True
+    assert widget._ensureEngine().hasWord("خلمق") is False
+
+    def request(point: QPoint) -> set[str]:
+        QCoreApplication.sendEvent(
+            widget.viewport(),
+            QContextMenuEvent(
+                QContextMenuEvent.Reason.Mouse, point, widget.viewport().mapToGlobal(point)
+            ),
+        )
+        return {action.text() for action in shown[-1].actions()}
+
+    # The caret sits on the known word; the click is over the unknown one.
+    _moveCursor(widget, 1)
+    labels = request(_menuRequestPoint(widget, 6))
+    assert "Add to dictionary" in labels
+
+    # The caret sits on the unknown word; the click is over the known one.
+    _moveCursor(widget, 6)
+    labels = request(_menuRequestPoint(widget, 1))
+    assert "Add to dictionary" not in labels
 
 
 # ******************************************************************************

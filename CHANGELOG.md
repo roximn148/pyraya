@@ -13,6 +13,15 @@ into this release version.
 
 ### Fixed
 
+- The context menu now describes what was right-clicked. The menu resolves
+  the "Add to dictionary" candidate, the region actions and the selection
+  state from the document cursor, and Qt never moves the cursor on a
+  right-click, so the menu reported wherever the cursor had last been left.
+  A context-menu request now places the cursor at the clicked point first —
+  Windows pattern: a click inside the selection keeps the selection and the
+  cursor, any other click collapses the selection and moves the cursor.
+- A right-click no longer re-opens the roman-input overlay over the cursor's
+  word: only a left-button release reconciles the overlay now.
 - Cancelling the learn dialog from the `+ [..]` row no longer replaces the
   Arabic word under the cursor with the typed roman. A cancel is now no
   edit at all: the word stays, no separator is written, the word is not
