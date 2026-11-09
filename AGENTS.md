@@ -77,7 +77,9 @@ Bare `pyraya` only works with the `.venv` activated; `uv run pyraya` always work
 - Keep `ruff check`, `ruff format`, and `pyrefly check` clean before considering work done.
 - Keep imports sorted and minimal (ruff `I`).
 - Do not add third-party dependencies without updating `pyproject.toml` and re-locking (`uv lock` / `uv sync`).
-- Commit titles: single line with a short conventional prefix (for example, `feat:`, `fix:`, `ref:`, `chore:`, `docs:`, `ver:`) and a concise summary.
+- Commit messages follow Conventional Commits — `<type>(<scope>): <summary>`. Types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `chore`, `revert`, plus this project's `deps` (dependency bumps and pins) and `ver` (a release's version bump and bookkeeping, kept as `ver: <version>`).
+- `<scope>` names the module or subsystem: `widget` (the `PyRaya` widget — input handling, context menu, commit path, demo entry point), `regions` (region model, stored tags, kind colours, the substitution table), `roman` (roman-input overlay, engine wrapper, `AddWordDialog`), `highlight` (formatting highlighter and kind tint), `spellcheck` (unknown-word underline), `learn` (shared vocabulary, learn actions, host persistence), `tests`, `docs` (README, AGENTS.md, CHANGELOG, plans and specs), `deps`, `build` (packaging, `pyproject.toml`, `uv.lock`, wheel data).
+- A change to a public API contract (exported names or signal signatures), the stored region-tag format (`RegionKindProperty` values or resolution rules), the substitution table, or the shipped dictionary data takes `!` after the type/scope plus a `BREAKING CHANGE:` footer.
 - Version bumps (`CHANGELOG.md` follows Keep a Changelog + SemVer): change `version` in `pyproject.toml`, run `uv lock`, update the version string in `README.md`, and move the Unreleased changes into a new version section dated that day (ISO 8601).
 
 ## Testing
