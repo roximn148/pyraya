@@ -25,6 +25,17 @@ into this release version.
   only, so a host echoing a value back into the setter cannot loop, and
   each is local to the emitting widget: the dictionary is process-wide,
   but forwarding a change to other instances is the host's job.
+- A roman-input commit whose word is the one already standing under the
+  overlay no longer rewrites it: the word is left exactly as it is — same
+  text, same tags — the cursor moves to its end, and only the typed
+  separator is written (a bare commit — Enter, Ctrl+Up/Down — writes
+  nothing at all: no undo step, no modification flag, no
+  `regionsChanged`). Re-committing an existing word is the normal
+  "learn the word that is already here" path, and rewriting the word over
+  itself cost two undo steps and dirtied the document for no visible
+  change. The comparison covers the word only, so a separator commit
+  still lands — one undo step, beside the document's own whitespace — and
+  a commit whose word differs from the span replaces it as before.
 - `PyRaya.setLocalDictionary(vocabulary)`: install a host's persisted
   dictionary in one pass. A `romanalfaz` Vocabulary recompiles the whole
   lookup index on every mutation once it is attached, so the previous

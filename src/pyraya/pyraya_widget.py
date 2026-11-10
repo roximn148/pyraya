@@ -2345,23 +2345,44 @@ class PyRaya(QPlainTextEdit):
         the cursor had a selection, that selection is replaced. The word
         and the separator both carry the stored
         :attr:`RegionType.RomanUrdu <pyraya.regions.RegionType>` tag (the
-        text edit re-highlights the blocks for the tint). The writing
-        commit signals :attr:`regionsChanged` once — every writing commit
-        changes region state (word and separator land tagged RomanUrdu,
-        replacing whatever tags the destination carried), and the emission
-        is unconditional (no per-commit comparison, so the signal costs
-        nothing per keystroke)
-        — and a non-empty committed word also signals
-        ``romanWordCommitted``. The widget cursor follows the
-        document-cursor edit, and the overlay is deactivated.
+        text edit re-highlights the blocks for the tint).
+
+        A commit whose word is the one already standing under the overlay
+        is not a replacement: the word is the same text the document holds,
+        so writing it back would cost an undo step and dirty the document
+        for no visible change (the "learn the word that is already here"
+        path). The word is then left exactly as it is — same text, same
+        tags — the cursor moves to its end, and only the separator is
+        written, if the committing key carried one. A bare commit over the
+        identical word therefore writes nothing at all: no undo step, no
+        revision change, and no :attr:`regionsChanged` (nothing
+        region-touching happened). The comparison covers the word only, so
+        a typed separator always lands — beside the document's own
+        whitespace, not in place of it.
+
+        A commit that writes signals :attr:`regionsChanged` once (word and
+        separator land tagged RomanUrdu, replacing whatever tags the
+        destination carried); a bare no-op commit emits none. A non-empty
+        committed word also signals ``romanWordCommitted`` either way: it
+        reports the gesture and its word, not the bytes written. The widget
+        cursor follows the document-cursor edit, and the overlay is
+        deactivated.
         """
         cursor = self.textCursor()
         fmt = QTextCharFormat()
         fmt.setProperty(RegionKindProperty, int(RegionType.RomanUrdu))
+        identical = self._activeWord is not None and (
+            self._activeSpanText(*self._activeWord) == word
+        )
         if self._activeWord is not None:
             start, end = self._activeWord
-            cursor.setPosition(start)
-            cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+            if identical:
+                # The commit stands on the word it would write: keep the
+                # word untouched and write only the separator.
+                cursor.setPosition(end)
+            else:
+                cursor.setPosition(start)
+                cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
         elif self._selectionRange is not None:
             # Scenario 1 over a selection: replace the selection,
             # plain QPlainTextEdit typing semantics.
@@ -2374,12 +2395,43 @@ class PyRaya(QPlainTextEdit):
         # before the write: the separator (punctuation or digit) and any
         # digit in an undefined-word commit land in their Urdu form; the
         # dictionary word is already Arabic and passes through.
-        cursor.insertText(substituteText(word + separator, RegionType.RomanUrdu), fmt)
-        self.regionsChanged.emit()
+        if identical:
+            written = substituteText(separator, RegionType.RomanUrdu)
+            if written:
+                cursor.insertText(written, fmt)
+                self.regionsChanged.emit()
+        else:
+            # A non-identical commit always edits — even a payload of ""
+            # is the span-deleting write (an empty word replaces its span).
+            cursor.insertText(substituteText(word + separator, RegionType.RomanUrdu), fmt)
+            self.regionsChanged.emit()
         if word:
             self.romanWordCommitted.emit(word, typedRoman)
         self.setTextCursor(cursor)
         self._deactivateOverlay()
+
+    # ==========================================================================
+    def _activeSpanText(self, start: int, end: int) -> str:
+        """The document text of the overlay's word span, read at commit time.
+
+        Read fresh instead of trusting a remembered string: the document may
+        have changed under the overlay, and a span that no longer holds what
+        the overlay shows must fall through to the ordinary replacement. The
+        slice is block-local (a word run cannot cross a block, A3); a stale
+        or invalid span yields text that cannot equal the committed word, so
+        the caller writes as usual.
+
+        Args:
+            start: The span's document start.
+            end: The span's document end (exclusive).
+
+        Returns:
+            The span's current text, or ``""`` for a span the document no
+            longer holds.
+        """
+        block = self.document().findBlock(start)
+        base = block.position()
+        return block.text()[start - base : end - base]
 
     # ==========================================================================
     def _insertSubstitutedChar(self, char: str, kind: RegionType) -> None:

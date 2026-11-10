@@ -30,7 +30,7 @@ from romanalfaz.algorithm import tafseerUrduAr2Rm
 from romanalfaz.engine import Suggestion, Vocabulary
 
 from pyraya import PyRaya
-from pyraya.regions import RegionType, TextRegion
+from pyraya.regions import RegionKindProperty, RegionType, TextRegion
 from pyraya.roman_input import (
     RomanInputEngine,
     RomanOverlay,
@@ -2638,8 +2638,16 @@ def testReactivationAfterCommit(app: QApplication) -> None:
 
 
 # ******************************************************************************
-def testScenario2ReplacementCommit(app: QApplication) -> None:
-    """Committing over an existing word replaces the span; one undo reverts it."""
+def testIdenticalWordCommitWritesOnlyTheSeparator(app: QApplication) -> None:
+    """Committing the word the overlay already stands on writes the separator only.
+
+    The word is left exactly as it is — no replacement, no re-tag — so the
+    edit is the one character the user typed: a single undo step instead
+    of the two a span replacement costs, and a single undo removes only the
+    separator. The separator is never part of the comparison, so the typed
+    space still lands beside the word's own trailing space (the existing
+    double space, now made by an insert rather than a replacement).
+    """
     widget = PyRaya()
     widget.show()
     original = "hello خوش world"
@@ -2651,28 +2659,134 @@ def testScenario2ReplacementCommit(app: QApplication) -> None:
     assert overlay is not None and overlay.isVisible()
 
     committed: list[tuple[str, str]] = []
+    changed: list[int] = []
     widget.romanWordCommitted.connect(lambda w, r: committed.append((w, r)))
+    widget.regionsChanged.connect(lambda: changed.append(1))
     baseline = widget.document().availableUndoSteps()
     _sendKey(overlay.lineEdit(), Qt.Key.Key_Space, " ")
-    # the top suggestion for "khosh" is the exact word خوش; the span is
-    # replaced by the word plus the separator (the surrounding space stays)
+    # the top suggestion for "khosh" is the exact word خوش: the word stays,
+    # the separator is inserted after it (the surrounding space stays)
     assert widget.toPlainText() == "hello خوش  world"
+    assert widget.textCursor().position() == 10  # past the inserted separator
     assert committed == [("خوش", "khosh")]
+    assert changed == [1]  # the separator is a region-touching write
     assert not overlay.isVisible()
     # the word span is still RomanUrdu
     assert widget._regionKindAt(6) == RegionType.RomanUrdu
     assert widget._regionKindAt(8) == RegionType.RomanUrdu
-    # the span replacement is counted as two undo steps (delete + insert),
-    # but a single undo reverts the whole commit to the original text
-    assert widget.document().availableUndoSteps() == baseline + 2
+    # one undo step: the separator, not the word
+    assert widget.document().availableUndoSteps() == baseline + 1
     widget.undo()
     assert widget.toPlainText() == original
     assert widget.document().availableUndoSteps() == baseline
-    # redoing takes the tag step and the commit step, no ping-pong
-    widget.redo()
     widget.redo()
     assert widget.toPlainText() == "hello خوش  world"
-    assert widget.document().isUndoAvailable()
+
+
+# ******************************************************************************
+def testBareIdenticalCommitIsNoEdit(app: QApplication) -> None:
+    """A bare commit over the identical word changes nothing at all.
+
+    The overlay stands over خوش with the prefilled romanization selected;
+    Enter commits that word bare. Since the document already holds it, the
+    commit writes no text: no undo step, no modification flag, no
+    ``regionsChanged`` — and the word keeps its untagged (seed-resolved)
+    state instead of being re-tagged.
+    """
+    widget = PyRaya()
+    widget.show()
+    original = "hello خوش world"
+    widget.setPlainText(original)
+    widget.setRomanInputEnabled(True)
+    _moveCursor(widget, 7)  # the seed already resolves untagged text to RomanUrdu
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+
+    committed: list[tuple[str, str]] = []
+    changed: list[int] = []
+    widget.romanWordCommitted.connect(lambda w, r: committed.append((w, r)))
+    widget.regionsChanged.connect(lambda: changed.append(1))
+    baseline = widget.document().availableUndoSteps()
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Return, "\n")
+    assert widget.toPlainText() == original
+    assert widget.textCursor().position() == 9  # the word's end
+    assert committed == [("خوش", "khosh")]  # the gesture is still reported
+    assert changed == []  # nothing region-touching was written
+    assert widget.document().availableUndoSteps() == baseline
+    assert widget.document().isModified() is False
+    probe = QTextCursor(widget.document())
+    probe.setPosition(8)
+    probe.movePosition(QTextCursor.MoveOperation.NextCharacter, QTextCursor.MoveMode.KeepAnchor)
+    assert probe.charFormat().hasProperty(RegionKindProperty) is False
+    _assertNoOverlay(widget)
+
+
+# ******************************************************************************
+def testIdenticalLearnCommitWritesOnlyTheSeparator(app: QApplication) -> None:
+    """The reported path: learning the word already under the cursor is no rewrite.
+
+    The undefined-word dialog is prefilled with the word under the cursor;
+    accepting it learn the word and commits the same word back. The
+    document must gain only the separator — not a re-written word and not
+    an undo entry for one.
+    """
+    widget = PyRaya()
+    widget.show()
+    original = "hello خوش world"
+    widget.setPlainText(original)
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    committed: list[tuple[str, str]] = []
+    emitted: list[str] = []
+    widget.romanWordCommitted.connect(lambda w, r: committed.append((w, r)))
+    widget.wordAdded.connect(lambda word: emitted.append(word))
+    widget.setAddWordHandler(lambda _trigger: "خوش")  # the word under the cursor
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    overlay.setText("xqwzrty")  # zero matches -> undefined-word row
+    row = overlay.suggestionList().selectedRow()
+    assert row is not None and row.suggestion.isUndefined()
+    baseline = widget.document().availableUndoSteps()
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Space, " ")
+    assert widget.toPlainText() == "hello خوش  world"  # the separator only
+    assert widget.textCursor().position() == 10
+    assert committed == [("خوش", "xqwzrty")]
+    assert emitted == ["خوش"]
+    assert widget.localDictionary().counter["خوش"] == 1
+    assert widget.document().availableUndoSteps() == baseline + 1
+    widget.undo()
+    assert widget.toPlainText() == original
+    widget.setAddWordHandler(None)  # restore the built-in dialog
+
+
+# ******************************************************************************
+def testDifferentWordCommitStillReplacesTheSpan(app: QApplication) -> None:
+    """A commit whose word differs from the span replaces it, as before.
+
+    The comparison covers only the word, so a different word is a real
+    edit: the span is replaced (two undo steps, delete + insert) and the
+    typed separator lands after the new word.
+    """
+    widget = PyRaya()
+    widget.show()
+    original = "hello خوش world"
+    widget.setPlainText(original)
+    widget.setRomanInputEnabled(True)
+    widget.setRegionType(RegionType.RomanUrdu, 6, 9)
+    widget.setAddWordHandler(lambda _trigger: "دوست")
+    _moveCursor(widget, 7)
+    overlay = widget._overlay
+    assert overlay is not None and overlay.isVisible()
+    overlay.setText("xqwzrty")  # zero matches -> undefined-word row
+    row = overlay.suggestionList().selectedRow()
+    assert row is not None and row.suggestion.isUndefined()
+    baseline = widget.document().availableUndoSteps()
+    _sendKey(overlay.lineEdit(), Qt.Key.Key_Space, " ")
+    assert widget.toPlainText() == "hello دوست  world"
+    assert widget._regionKindAt(6) == RegionType.RomanUrdu
+    assert widget.document().availableUndoSteps() == baseline + 2
+    widget.setAddWordHandler(None)  # restore the built-in dialog
 
 
 # ******************************************************************************
@@ -3130,11 +3244,13 @@ def testCtrlReturnCommitsWithNewline(app: QApplication) -> None:
 def testCtrlUpCommitsBareAndMovesOneLineUp(app: QApplication) -> None:
     """Ctrl+Up commits the selected word bare and moves the cursor up one line.
 
-    The commit runs through the normal write path (RomanUrdu tag,
-    ``regionsChanged`` and ``romanWordCommitted`` emitted, one logical undo
-    step), the overlay is closed, assist mode stays on, and the line move
-    lands exactly one line up: the document behaves as if Up had been pressed
-    in it.
+    The commit runs through the normal write path — but the word it commits
+    is the one already in the document, so the write is a no-op: the text,
+    the undo stack and the modification flag all stay as they were, and
+    ``regionsChanged`` stays silent (nothing region-touching was written).
+    ``romanWordCommitted`` still reports the gesture. The overlay is
+    closed, assist mode stays on, and the line move lands exactly one line
+    up: the document behaves as if Up had been pressed in it.
     """
     widget = PyRaya()
     widget.show()
@@ -3156,27 +3272,18 @@ def testCtrlUpCommitsBareAndMovesOneLineUp(app: QApplication) -> None:
         "",
         Qt.KeyboardModifier.ControlModifier,
     )
-    # the word commits bare: no separator character, the text is unchanged
+    # the word commits bare over itself: no text is written at all
     assert widget.toPlainText() == original
     # the cursor moved exactly one line up: from block 1 to block 0, over
     # the last character of the Latin word hello (position 4)
     assert widget.textCursor().blockNumber() == 0
     assert widget.textCursor().position() == 4
     assert committed == [("خوش", "khosh")]
-    assert changed == [1]
+    assert changed == []
     _assertNoOverlay(widget)
     assert widget.isAssistEnabled() is True
-    # the span replacement is counted as two undo steps (delete + insert),
-    # but a single undo reverts the whole commit
-    assert widget.document().availableUndoSteps() == baseline + 2
-    widget.undo()
-    assert widget.toPlainText() == original
+    # no edit: no undo step, and the document is not marked modified
     assert widget.document().availableUndoSteps() == baseline
-    # redoing takes the tag step and the commit step, no ping-pong
-    widget.redo()
-    widget.redo()
-    assert widget.toPlainText() == original
-    assert widget.document().isUndoAvailable()
 
 
 # ******************************************************************************
