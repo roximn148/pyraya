@@ -635,7 +635,7 @@ class PyRaya(QPlainTextEdit):
     #: document, Ctrl+Esc on the overlay, the double-Esc tap, and
     #: :meth:`setRomanInputEnabled`'s reset to on when the feature is
     #: re-enabled. A call that leaves the mode as it was emits nothing.
-    assistChanged = Signal(bool)
+    assistModeChanged = Signal(bool)
 
     #: Emitted when the spell-check underline switch actually changes, with
     #: the new value. A repeated :meth:`setSpellCheckEnabled` call emits
@@ -1177,7 +1177,7 @@ class PyRaya(QPlainTextEdit):
         Every write to the mode goes through here — :meth:`setAssistEnabled`,
         Ctrl+Space (on) and Ctrl+Esc (off) in the document, Ctrl+Esc on the
         overlay, the double-Esc tap, and :meth:`setRomanInputEnabled`'s reset
-        to on — so :attr:`assistChanged` cannot miss a flip path. Turning the
+        to on — so :attr:`assistModeChanged` cannot miss a flip path. Turning the
         mode off hides a shown overlay first; a call that leaves the mode as
         it was still enforces the off state but emits nothing.
 
@@ -1189,7 +1189,7 @@ class PyRaya(QPlainTextEdit):
         if not enabled:
             self._deactivateOverlay()
         if changed:
-            self.assistChanged.emit(enabled)
+            self.assistModeChanged.emit(enabled)
 
     # ==========================================================================
     def isAssistEnabled(self) -> bool:

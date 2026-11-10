@@ -13,7 +13,7 @@ into this release version.
 
 ### Added
 
-- `PyRaya.assistChanged(bool)`, `PyRaya.spellCheckChanged(bool)`, and
+- `PyRaya.assistModeChanged(bool)`, `PyRaya.spellCheckChanged(bool)`, and
   `PyRaya.dictionaryChanged(vocabulary)`: the widget now reports its own
   state changes to its host instead of leaving it to poll. Assist mode
   announces every real flip — `setAssistEnabled`, `Ctrl+Space`, `Ctrl+Esc`

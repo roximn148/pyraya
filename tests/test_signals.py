@@ -3,7 +3,7 @@
 # ******************************************************************************
 """Tests for the widget's public state-change signals.
 
-``assistChanged``, ``spellCheckChanged`` and ``dictionaryChanged`` tell a
+``assistModeChanged``, ``spellCheckChanged`` and ``dictionaryChanged`` tell a
 host about *this* widget's own state changes — the dictionary is
 process-wide, but notifying other instances is the host's job. Every
 signal fires on an actual change only: a call that leaves the state as it
@@ -73,11 +73,11 @@ def _sendKey(
 
 
 # ******************************************************************************
-def testAssistChangedFiresOnSetterFlip(app: QApplication) -> None:
+def testAssistModeChangedFiresOnSetterFlip(app: QApplication) -> None:
     """Each real assist-mode flip through the setter emits its new value once."""
     widget = PyRaya()
     events: list[Any] = []
-    widget.assistChanged.connect(events.append)
+    widget.assistModeChanged.connect(events.append)
     widget.setAssistEnabled(False)
     assert events == [False]
     widget.setAssistEnabled(True)
@@ -85,7 +85,7 @@ def testAssistChangedFiresOnSetterFlip(app: QApplication) -> None:
 
 
 # ******************************************************************************
-def testAssistChangedSilentOnUnchangedSetter(app: QApplication) -> None:
+def testAssistModeChangedSilentOnUnchangedSetter(app: QApplication) -> None:
     """A setter call that leaves the mode as it was emits nothing.
 
     Assist mode starts on, so ``True`` is a no-op; the second ``False``
@@ -93,7 +93,7 @@ def testAssistChangedSilentOnUnchangedSetter(app: QApplication) -> None:
     """
     widget = PyRaya()
     events: list[Any] = []
-    widget.assistChanged.connect(events.append)
+    widget.assistModeChanged.connect(events.append)
     widget.setAssistEnabled(True)
     widget.setAssistEnabled(False)
     widget.setAssistEnabled(False)
@@ -106,7 +106,7 @@ def testEnablingRomanInputResetsAssistAndNotifies(app: QApplication) -> None:
     widget = PyRaya()
     widget.setAssistEnabled(False)
     events: list[Any] = []
-    widget.assistChanged.connect(events.append)
+    widget.assistModeChanged.connect(events.append)
     widget.setRomanInputEnabled(True)
     assert widget.isAssistEnabled() is True
     assert events == [True]
@@ -117,28 +117,28 @@ def testDisablingRomanInputLeavesAssistSilent(app: QApplication) -> None:
     """Disabling the feature writes only the feature flag, not the mode."""
     widget = PyRaya()
     events: list[Any] = []
-    widget.assistChanged.connect(events.append)
+    widget.assistModeChanged.connect(events.append)
     widget.setRomanInputEnabled(False)
     assert widget.isAssistEnabled() is True
     assert events == []
 
 
 # ******************************************************************************
-def testCtrlEscInDocumentFiresAssistChanged(app: QApplication) -> None:
+def testCtrlEscInDocumentFiresAssistModeChanged(app: QApplication) -> None:
     """Ctrl+Esc in the document turns assist mode off and announces it."""
     widget = PyRaya()
     widget.show()
     widget.setPlainText("hello world")
     _moveCursor(widget, 1)
     events: list[Any] = []
-    widget.assistChanged.connect(events.append)
+    widget.assistModeChanged.connect(events.append)
     _sendKey(widget, Qt.Key.Key_Escape, modifiers=Qt.KeyboardModifier.ControlModifier)
     assert widget.isAssistEnabled() is False
     assert events == [False]
 
 
 # ******************************************************************************
-def testCtrlSpaceFiresAssistChanged(app: QApplication) -> None:
+def testCtrlSpaceFiresAssistModeChanged(app: QApplication) -> None:
     """Ctrl+Space re-enters assist mode from off and announces the flip."""
     widget = PyRaya()
     widget.show()
@@ -146,7 +146,7 @@ def testCtrlSpaceFiresAssistChanged(app: QApplication) -> None:
     _moveCursor(widget, 1)
     widget.setAssistEnabled(False)
     events: list[Any] = []
-    widget.assistChanged.connect(events.append)
+    widget.assistModeChanged.connect(events.append)
     _sendKey(widget, Qt.Key.Key_Space, modifiers=Qt.KeyboardModifier.ControlModifier)
     assert widget.isAssistEnabled() is True
     assert events == [True]
@@ -160,14 +160,14 @@ def testCtrlSpaceOnActiveAssistModeStaysSilent(app: QApplication) -> None:
     widget.setPlainText("hello world")
     _moveCursor(widget, 1)
     events: list[Any] = []
-    widget.assistChanged.connect(events.append)
+    widget.assistModeChanged.connect(events.append)
     _sendKey(widget, Qt.Key.Key_Space, modifiers=Qt.KeyboardModifier.ControlModifier)
     assert widget.isAssistEnabled() is True
     assert events == []
 
 
 # ******************************************************************************
-def testDoubleEscFiresAssistChangedOnce(app: QApplication, monkeypatch) -> None:
+def testDoubleEscFiresAssistModeChangedOnce(app: QApplication, monkeypatch) -> None:
     """The double tap emits once, on the second Esc; the first stays silent."""
     widget = PyRaya()
     widget.show()
@@ -176,7 +176,7 @@ def testDoubleEscFiresAssistChangedOnce(app: QApplication, monkeypatch) -> None:
     clock = _FakeMonotonic()
     monkeypatch.setattr("pyraya.pyraya_widget.monotonic", clock)
     events: list[Any] = []
-    widget.assistChanged.connect(events.append)
+    widget.assistModeChanged.connect(events.append)
     _sendKey(widget, Qt.Key.Key_Escape)  # first tap, at t=0.0
     assert events == []
     clock.advance(0.1)  # within the 0.3 s interval
@@ -186,7 +186,7 @@ def testDoubleEscFiresAssistChangedOnce(app: QApplication, monkeypatch) -> None:
 
 
 # ******************************************************************************
-def testOverlayCtrlEscFiresAssistChanged(app: QApplication) -> None:
+def testOverlayCtrlEscFiresAssistModeChanged(app: QApplication) -> None:
     """Ctrl+Esc on the active overlay turns assist mode off and announces it."""
     widget = PyRaya()
     widget.show()
@@ -196,7 +196,7 @@ def testOverlayCtrlEscFiresAssistChanged(app: QApplication) -> None:
     overlay = widget._overlay
     assert overlay is not None and overlay.isVisible()
     events: list[Any] = []
-    widget.assistChanged.connect(events.append)
+    widget.assistModeChanged.connect(events.append)
     _sendKey(overlay.lineEdit(), Qt.Key.Key_Escape, modifiers=Qt.KeyboardModifier.ControlModifier)
     assert widget.isAssistEnabled() is False
     assert events == [False]

@@ -243,7 +243,7 @@ the new underlines on their next re-highlight.
 ## Watching state changes
 
 Three signals report this editor's own state to its host, so a UI can
-follow without polling: `assistChanged(bool)` whenever assist mode
+follow without polling: `assistModeChanged(bool)` whenever assist mode
 actually flips — the setter, `Ctrl+Space`, `Ctrl+Esc`, the double `Esc`,
 and re-enabling roman input, which resets the mode to on —
 `spellCheckChanged(bool)` when the underline switch flips, and
@@ -257,7 +257,7 @@ that emitted it: a host running several editors forwards
 `dictionaryChanged` (or `wordAdded`) to the others itself.
 
 ```python
-editor.assistChanged.connect(assistAction.setChecked)
+editor.assistModeChanged.connect(assistAction.setChecked)
 editor.spellCheckChanged.connect(spellAction.setChecked)
 editor.dictionaryChanged.connect(lambda vocabulary: vocabulary.save("dictionary.sym"))
 ```
