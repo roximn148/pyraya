@@ -240,6 +240,28 @@ lazily, and the editor you called it on re-highlights immediately so its
 spell-check underlines follow the new dictionary. Other editors pick up
 the new underlines on their next re-highlight.
 
+## Watching state changes
+
+Three signals report this editor's own state to its host, so a UI can
+follow without polling: `assistChanged(bool)` whenever assist mode
+actually flips — the setter, `Ctrl+Space`, `Ctrl+Esc`, the double `Esc`,
+and re-enabling roman input, which resets the mode to on —
+`spellCheckChanged(bool)` when the underline switch flips, and
+`dictionaryChanged(vocabulary)` when `setLocalDictionary` installs a
+dictionary or a learned word changes the shared one, carrying the
+Vocabulary now in effect. All three fire on an actual change only, so
+echoing a value back into the setter never loops.
+
+The dictionary is process-wide but each signal is local to the editor
+that emitted it: a host running several editors forwards
+`dictionaryChanged` (or `wordAdded`) to the others itself.
+
+```python
+editor.assistChanged.connect(assistAction.setChecked)
+editor.spellCheckChanged.connect(spellAction.setChecked)
+editor.dictionaryChanged.connect(lambda vocabulary: vocabulary.save("dictionary.sym"))
+```
+
 ## Keyboard shortcuts
 
 **In the document:**

@@ -13,6 +13,18 @@ into this release version.
 
 ### Added
 
+- `PyRaya.assistChanged(bool)`, `PyRaya.spellCheckChanged(bool)`, and
+  `PyRaya.dictionaryChanged(vocabulary)`: the widget now reports its own
+  state changes to its host instead of leaving it to poll. Assist mode
+  announces every real flip — `setAssistEnabled`, `Ctrl+Space`, `Ctrl+Esc`
+  in the document and on the overlay, the double-Esc tap, and
+  `setRomanInputEnabled(True)` resetting the mode to on; the spell-check
+  switch announces its new value; the dictionary signal carries the
+  `Vocabulary` now in effect and fires from `setLocalDictionary` and from
+  a learned word (before `wordAdded`). All three fire on an actual change
+  only, so a host echoing a value back into the setter cannot loop, and
+  each is local to the emitting widget: the dictionary is process-wide,
+  but forwarding a change to other instances is the host's job.
 - `PyRaya.setLocalDictionary(vocabulary)`: install a host's persisted
   dictionary in one pass. A `romanalfaz` Vocabulary recompiles the whole
   lookup index on every mutation once it is attached, so the previous

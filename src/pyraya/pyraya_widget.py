@@ -630,6 +630,27 @@ class PyRaya(QPlainTextEdit):
 
     wordAdded = Signal(str)
 
+    #: Emitted when assist mode actually changes, with the new value:
+    #: :meth:`setAssistEnabled`, Ctrl+Space (on) and Ctrl+Esc (off) in the
+    #: document, Ctrl+Esc on the overlay, the double-Esc tap, and
+    #: :meth:`setRomanInputEnabled`'s reset to on when the feature is
+    #: re-enabled. A call that leaves the mode as it was emits nothing.
+    assistChanged = Signal(bool)
+
+    #: Emitted when the spell-check underline switch actually changes, with
+    #: the new value. A repeated :meth:`setSpellCheckEnabled` call emits
+    #: nothing.
+    spellCheckChanged = Signal(bool)
+
+    #: Emitted when this widget's dictionary is replaced
+    #: (:meth:`setLocalDictionary`) or learns a word, carrying the
+    #: :class:`romanalfaz.Vocabulary` now in effect — the same instance
+    #: :meth:`localDictionary` returns. The dictionary is application-wide,
+    #: but the signal notifies this widget's listeners only: other instances
+    #: pick a swap up on their next re-highlight, and announcing the change
+    #: to them is the host's job.
+    dictionaryChanged = Signal(object)
+
     # ==========================================================================
     def __init__(self, parent: QWidget | None = None) -> None:
         """Initialize the widget.
@@ -653,6 +674,9 @@ class PyRaya(QPlainTextEdit):
         # spell-check pass queries the shared engine through the provider
         # passed below.
         self._romanInputEnabled = True
+        # Written directly: the funnel below needs the overlay state that is
+        # initialised right after these fields, and no listener can exist
+        # yet, so construction emits nothing.
         self._assistMode = True
         # The monotonic-clock timestamp of the last plain-Esc press, or
         # ``None``: a second plain Esc within :data:`EscDoubleTapInterval`
@@ -1122,7 +1146,7 @@ class PyRaya(QPlainTextEdit):
         """
         self._romanInputEnabled = enabled
         if enabled:
-            self._assistMode = True
+            self._setAssistMode(True)
         else:
             self._deactivateOverlay()
 
@@ -1144,9 +1168,28 @@ class PyRaya(QPlainTextEdit):
         Args:
             enabled: Whether assist mode is active.
         """
+        self._setAssistMode(enabled)
+
+    # ==========================================================================
+    def _setAssistMode(self, enabled: bool) -> None:
+        """Apply an assist-mode value through one funnel and notify listeners.
+
+        Every write to the mode goes through here — :meth:`setAssistEnabled`,
+        Ctrl+Space (on) and Ctrl+Esc (off) in the document, Ctrl+Esc on the
+        overlay, the double-Esc tap, and :meth:`setRomanInputEnabled`'s reset
+        to on — so :attr:`assistChanged` cannot miss a flip path. Turning the
+        mode off hides a shown overlay first; a call that leaves the mode as
+        it was still enforces the off state but emits nothing.
+
+        Args:
+            enabled: Whether assist mode should be active.
+        """
+        changed = self._assistMode != enabled
         self._assistMode = enabled
         if not enabled:
             self._deactivateOverlay()
+        if changed:
+            self.assistChanged.emit(enabled)
 
     # ==========================================================================
     def isAssistEnabled(self) -> bool:
@@ -1203,6 +1246,7 @@ class PyRaya(QPlainTextEdit):
         """
         _sharedEngine.replaceVocabulary(vocabulary)
         self._highlighter.rehighlight()
+        self.dictionaryChanged.emit(vocabulary)
 
     # ==========================================================================
     def regionColors(self) -> dict[RegionType, QColor]:
@@ -1266,7 +1310,10 @@ class PyRaya(QPlainTextEdit):
         Args:
             enabled: Whether unknown RomanUrdu words are underlined.
         """
+        if self._highlighter.isSpellCheckEnabled() == enabled:
+            return
         self._highlighter.setSpellCheckEnabled(enabled)
+        self.spellCheckChanged.emit(enabled)
 
     # ==========================================================================
     def isSpellCheckEnabled(self) -> bool:
@@ -1333,10 +1380,12 @@ class PyRaya(QPlainTextEdit):
 
         ``RomanInputEngine.learnRomanWord`` (one mutation, one recompile),
         then a whole-document re-highlight so the spell-check underline for
-        the word clears immediately, then ``wordAdded``.
+        the word clears immediately, then ``dictionaryChanged`` (the
+        dictionary now knows the word) and ``wordAdded`` (the word itself).
         """
         self._ensureEngine().learnRomanWord(word)
         self._highlighter.rehighlight()
+        self.dictionaryChanged.emit(self.localDictionary())
         self.wordAdded.emit(word)
 
     # ==========================================================================
@@ -1852,13 +1901,13 @@ class PyRaya(QPlainTextEdit):
             # within the interval turns assist mode off.
             now = monotonic()
             if self._lastEscAt is not None and now - self._lastEscAt <= EscDoubleTapInterval:
-                self._assistMode = False
+                self._setAssistMode(False)
                 self._lastEscAt = None
             else:
                 self._lastEscAt = now
         elif modifiers == Qt.KeyboardModifier.ControlModifier.value:
             # Ctrl+Esc (the exact Ctrl mask) turns assist mode off directly.
-            self._assistMode = False
+            self._setAssistMode(False)
         self._deactivateOverlay()
 
     # ==========================================================================
@@ -2592,7 +2641,7 @@ class PyRaya(QPlainTextEdit):
                         return
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             if event.key() == Qt.Key.Key_Space:
-                self._assistMode = True
+                self._setAssistMode(True)
                 word = self._wordUnderCursor()
                 if word is not None:
                     self._activateOverlay(word)
@@ -2609,8 +2658,7 @@ class PyRaya(QPlainTextEdit):
                 # the line edit, so the document never sees an Esc while
                 # the overlay is active; the deactivation drops any view
                 # suspension, like every other user decision.
-                self._assistMode = False
-                self._deactivateOverlay()
+                self._setAssistMode(False)
                 event.accept()
                 return
             if event.key() == Qt.Key.Key_1 and self.textCursor().hasSelection():
@@ -2647,9 +2695,8 @@ class PyRaya(QPlainTextEdit):
             # balancing Ctrl+Esc and Ctrl+Space.
             now = monotonic()
             if self._lastEscAt is not None and now - self._lastEscAt <= EscDoubleTapInterval:
-                self._assistMode = False
+                self._setAssistMode(False)
                 self._lastEscAt = None
-                self._deactivateOverlay()
                 event.accept()
                 return
             self._lastEscAt = now
