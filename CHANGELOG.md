@@ -9,7 +9,7 @@ This file records changes starting from the baseline version `0.1.0a8` onward;
 earlier releases (`0.1.0a1` through `0.1.0a7`) are all incorporated
 into this release version.
 
-## [Unreleased]
+## [0.1.0a12] - 2026-11-10
 
 ### Fixed
 
@@ -27,6 +27,13 @@ into this release version.
   edit at all: the word stays, no separator is written, the word is not
   re-tagged, no undo step is added, and no signal fires — the overlay is
   dismissed exactly like a plain Esc.
+- The shipped qamoos dictionary counts are corrected: `ملیں` is re-ranked
+  from 998 to 3998, and the misspelling `شائد` (26) is merged into the
+  correct spelling `شاید` (3387 → 3413). The misspelling `شائد` is no
+  longer a known word, so it now gets the spell-check underline and the
+  Add-to-dictionary action, and the frequency ranks of `ملیں` and `شاید`
+  shift, which can change suggestion ordering and learn behavior for
+  these words.
 
 ### Changed
 
