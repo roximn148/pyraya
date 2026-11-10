@@ -9,7 +9,7 @@ This file records changes starting from the baseline version `0.1.0a8` onward;
 earlier releases (`0.1.0a1` through `0.1.0a7`) are all incorporated
 into this release version.
 
-## [Unreleased]
+## [0.1.0a13] - 2026-11-10
 
 ### Added
 
