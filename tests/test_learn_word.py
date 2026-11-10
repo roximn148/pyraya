@@ -14,6 +14,7 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QEvent, QPoint, Qt
 from PySide6.QtGui import QContextMenuEvent, QKeyEvent, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import QApplication, QDialog, QDialogButtonBox, QMenu, QWidget
+from romanalfaz import RomanAlfaz
 from romanalfaz.algorithm import tafseerUrduAr2Rm
 from romanalfaz.engine import Vocabulary
 
@@ -63,6 +64,131 @@ def testSharedVocabularyIsApplicationWide(app: QApplication) -> None:
     word = "خلمق"
     first.localDictionary().add(word, isCompleted=True)
     assert second.localDictionary().counter[word] == 1
+
+
+# ******************************************************************************
+def _underlinedRanges(widget: PyRaya) -> list[tuple[int, int, object, object]]:
+    """Every underlined run of the document layout, in reading order.
+
+    Returns ``(start, end, underlineStyle, underlineColor)`` triples with
+    document character offsets, from the per-block text layouts' format
+    ranges (the authoritative observation point for layout-only formats).
+    The style and color are copied to plain Python values immediately:
+    the ``QTextCharFormat`` a ``FormatRange`` reports borrows its C++
+    object, which PySide6 deletes with the range wrapper, so holding the
+    wrapper itself would use-after-free.
+    """
+    ranges: list[tuple[int, int, object, object]] = []
+    block = widget.document().begin()
+    while block.isValid():
+        base = block.position()
+        for r in block.layout().formats():
+            # The venv stub declares FormatRange's attributes as `...` with
+            # `# type:` comments pyrefly does not read; the runtime types are
+            # the ones the comments name, so cast them here.
+            rformat = cast(QTextCharFormat, r.format)
+            if rformat.underlineStyle() == QTextCharFormat.UnderlineStyle.NoUnderline:
+                continue
+            ranges.append(
+                (
+                    base + cast(int, r.start),
+                    base + cast(int, r.start) + cast(int, r.length),
+                    rformat.underlineStyle(),
+                    rformat.underlineColor(),
+                )
+            )
+        block = block.next()
+    return ranges
+
+
+# ******************************************************************************
+def testSetLocalDictionarySwapsTheSharedDictionary(app: QApplication) -> None:
+    """A host's bulk-loaded Vocabulary replaces the shared one for every widget."""
+    first = PyRaya()
+    second = PyRaya()
+    engine_before = _sharedEngine.engine()
+
+    loaded = Vocabulary()
+    for word, count in {"کتابچہ": 5, "دفتر": 4}.items():
+        loaded.add(word, count=count, isCompleted=True)
+
+    first.setLocalDictionary(loaded)
+
+    assert first.localDictionary() is loaded
+    assert second.localDictionary() is loaded
+    assert _sharedEngine._engine is None
+
+    engine_after = second.romanEngine()
+    assert isinstance(engine_after, RomanInputEngine)
+    assert engine_after is not engine_before
+    assert engine_after.hasWord("کتابچہ")
+    assert engine_after.hasWord("دفتر")
+
+
+# ******************************************************************************
+def testSetLocalDictionaryRebuildsAreConstantNotPerWord(
+    app: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bulk load costs a constant number of rebuilds, never one per word."""
+    widget = PyRaya()
+    _sharedEngine.engine()  # the host creates the engine (opens a file) first
+
+    rebuilds = 0
+    original = RomanAlfaz.recompileLookup
+
+    def spy(self: RomanAlfaz) -> None:
+        nonlocal rebuilds
+        rebuilds += 1
+        original(self)
+
+    monkeypatch.setattr(RomanAlfaz, "recompileLookup", spy)
+
+    loaded = Vocabulary()
+    for word in ("کتاب", "کتابچہ", "دفتر", "میز", "قلم", "دوست", "شہر", "گھر"):
+        loaded.add(word, count=1, isCompleted=True)
+
+    widget.setLocalDictionary(loaded)
+    engine = widget.romanEngine()
+
+    # Engine construction costs two recompiles (the bundled qamoos
+    # vocabulary and the installed one); a per-word loop over these eight
+    # words would cost at least nine. The bound pins the constant cost, not
+    # the exact count, so an upstream engine change does not fail the test.
+    assert rebuilds <= 2
+    assert isinstance(engine, RomanInputEngine)
+    assert engine.hasWord("کتابچہ")
+
+
+# ******************************************************************************
+def testSetLocalDictionaryRefreshesTheSpellCheckUnderline(app: QApplication) -> None:
+    """Words the loaded dictionary knows lose their underline immediately."""
+    widget = PyRaya()
+    word = "کتابچہ"
+    widget.setPlainText(word)
+    assert [(start, end) for start, end, _, _ in _underlinedRanges(widget)] == [(0, len(word))]
+
+    loaded = Vocabulary()
+    loaded.add(word, count=5, isCompleted=True)
+    widget.setLocalDictionary(loaded)
+
+    assert _underlinedRanges(widget) == []
+
+
+# ******************************************************************************
+def testSetLocalDictionaryReplacesRatherThanMerges(app: QApplication) -> None:
+    """The installed Vocabulary replaces the shared one; old words become unknown."""
+    widget = PyRaya()
+    oldWord = "خلمق"
+    widget.localDictionary().add(oldWord, count=1, isCompleted=True)
+    widget.setPlainText(oldWord)
+    assert _underlinedRanges(widget) == []
+
+    loaded = Vocabulary()
+    loaded.add("کتابچہ", count=1, isCompleted=True)
+    widget.setLocalDictionary(loaded)
+
+    assert widget.localDictionary() is loaded
+    assert [(start, end) for start, end, _, _ in _underlinedRanges(widget)] == [(0, len(oldWord))]
 
 
 # ******************************************************************************
@@ -334,41 +460,6 @@ def _sendKey(
         widget,
         QKeyEvent(QEvent.Type.KeyPress, key, modifiers, text),
     )
-
-
-# ******************************************************************************
-def _underlinedRanges(widget: PyRaya) -> list[tuple[int, int, object, object]]:
-    """Every underlined run of the document layout, in reading order.
-
-    Returns ``(start, end, underlineStyle, underlineColor)`` triples with
-    document character offsets, from the per-block text layouts' format
-    ranges (the authoritative observation point for layout-only formats).
-    The style and color are copied to plain Python values immediately:
-    the ``QTextCharFormat`` a ``FormatRange`` reports borrows its C++
-    object, which PySide6 deletes with the range wrapper, so holding the
-    wrapper itself would use-after-free.
-    """
-    ranges: list[tuple[int, int, object, object]] = []
-    block = widget.document().begin()
-    while block.isValid():
-        base = block.position()
-        for r in block.layout().formats():
-            # The venv stub declares FormatRange's attributes as `...` with
-            # `# type:` comments pyrefly does not read; the runtime types are
-            # the ones the comments name, so cast them here.
-            rformat = cast(QTextCharFormat, r.format)
-            if rformat.underlineStyle() == QTextCharFormat.UnderlineStyle.NoUnderline:
-                continue
-            ranges.append(
-                (
-                    base + cast(int, r.start),
-                    base + cast(int, r.start) + cast(int, r.length),
-                    rformat.underlineStyle(),
-                    rformat.underlineColor(),
-                )
-            )
-        block = block.next()
-    return ranges
 
 
 # ******************************************************************************

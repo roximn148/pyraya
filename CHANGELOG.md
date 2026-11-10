@@ -9,6 +9,25 @@ This file records changes starting from the baseline version `0.1.0a8` onward;
 earlier releases (`0.1.0a1` through `0.1.0a7`) are all incorporated
 into this release version.
 
+## [Unreleased]
+
+### Added
+
+- `PyRaya.setLocalDictionary(vocabulary)`: install a host's persisted
+  dictionary in one pass. A `romanalfaz` Vocabulary recompiles the whole
+  lookup index on every mutation once it is attached, so the previous
+  natural host loop — `for word, count in stored.items():
+  localDictionary().add(...)` — paid a full rebuild per word (~0.2 s each;
+  66 stored words froze a host's first file open for ~12 s). Build or
+  `Vocabulary.load` the dictionary standalone, then hand it over: the
+  shared holder swaps it and discards the cached engine, so the next lookup
+  attaches the whole vocabulary at a constant cost, independent of its
+  word count. The swap is application-wide and replaces rather than
+  merges; every widget sees it through `localDictionary()` (which now reads
+  the holder dynamically instead of a construction-time cached reference),
+  and the calling widget is re-highlighted so its spell-check underlines
+  follow immediately.
+
 ## [0.1.0a12] - 2026-11-10
 
 ### Fixed

@@ -659,7 +659,6 @@ class PyRaya(QPlainTextEdit):
         # turns assist mode off, irrespective of whether the overlay is
         # shown.
         self._lastEscAt: float | None = None
-        self._localDictionary = _sharedEngine.vocabulary
         # The host learn dialog handler: receives the trigger word and
         # returns the chosen Arabic word on accept, or ``None`` on cancel.
         # ``None`` restores the built-in :class:`AddWordDialog`.
@@ -1167,12 +1166,43 @@ class PyRaya(QPlainTextEdit):
         widget. It is mutated by :meth:`RomanInputEngine.learnRomanWord`
         (the learn-word path); ``Vocabulary.save``/``Vocabulary.load`` exist
         for host persistence, and ``isModified()`` is the host's mutation
-        flag.
+        flag. The instance always follows the holder, so a replacement
+        installed through :meth:`setLocalDictionary` is visible here at
+        once.
 
         Returns:
-            The same shared :class:`Vocabulary` instance, every time.
+            The currently installed shared :class:`Vocabulary` instance. It
+            is stable until :meth:`setLocalDictionary` installs another.
         """
-        return self._localDictionary
+        return _sharedEngine.vocabulary
+
+    # ==========================================================================
+    def setLocalDictionary(self, vocabulary: Vocabulary) -> None:
+        """Replace the application-wide shared in-memory dictionary.
+
+        The host's startup path for a persisted dictionary: build or load
+        the whole :class:`romanalfaz.Vocabulary` standalone — one
+        :meth:`Vocabulary.load`, or any number of ``add`` calls made before
+        it is attached — then hand it here. The holder swaps the Vocabulary
+        and discards the cached engine, so the next lookup attaches the
+        populated dictionary in one pass — a constant cost that never grows
+        with the number of stored words. Adding the same words one by one
+        to an already-attached Vocabulary would recompile the whole
+        lookup index after every word (about 0.2 s per word here), which is
+        what this method exists to avoid.
+
+        The swap is application-wide and replaces rather than merges: pass a
+        Vocabulary holding every word the session should know. Every widget
+        sees it through :meth:`localDictionary`; this widget's document is
+        re-highlighted so its spell-check underlines follow the new
+        dictionary immediately, and other widgets pick the new dictionary up
+        on their next re-highlight.
+
+        Args:
+            vocabulary: The pre-populated Vocabulary to install.
+        """
+        _sharedEngine.replaceVocabulary(vocabulary)
+        self._highlighter.rehighlight()
 
     # ==========================================================================
     def regionColors(self) -> dict[RegionType, QColor]:

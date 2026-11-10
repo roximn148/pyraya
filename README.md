@@ -221,6 +221,25 @@ if editor.localDictionary().isModified():
     editor.localDictionary().save("dictionary.sym")
 ```
 
+Restoring a saved dictionary at startup is likewise the host's job, and
+it must be handed over in one piece. An attached `Vocabulary` recompiles
+the whole lookup index on every `add`, so loading a stored dictionary one
+word at a time is quadratic — seconds of frozen UI for a few dozen words.
+Load it standalone first, then install it:
+
+```python
+from romanalfaz.engine import Vocabulary
+
+loaded = Vocabulary.load("dictionary.sym")
+editor.setLocalDictionary(loaded)  # one pass; every widget sees it
+```
+
+`setLocalDictionary` replaces rather than merges. Pass a Vocabulary that
+holds every word the session should know; the shared engine is rebuilt
+lazily, and the editor you called it on re-highlights immediately so its
+spell-check underlines follow the new dictionary. Other editors pick up
+the new underlines on their next re-highlight.
+
 ## Keyboard shortcuts
 
 **In the document:**
