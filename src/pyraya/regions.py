@@ -20,6 +20,8 @@ from enum import IntEnum
 
 from PySide6.QtGui import QColor, QTextCharFormat, QTextFormat
 
+from .theme import LightStop
+
 __all__ = [
     "RegionColors",
     "RegionKindProperty",
@@ -99,9 +101,12 @@ class TextRegion:
 #: so one widget's ``PyRaya.setRegionColor`` never touches another's. The
 #: palette is view-only — colours never identify kinds — and contains only
 #: the kinds that carry a tint; :attr:`RegionType.Native` is colourless and
-#: stays out of the map.
+#: stays out of the map. The tint is the light stop's value, from
+#: :mod:`pyraya.theme`: a widget under a dark palette starts from the
+#: dark stop's tint instead, and a palette change repoints it unless
+#: :meth:`PyRaya.setRegionColor` has pinned it.
 RegionColors: dict[RegionType, QColor] = {
-    RegionType.RomanUrdu: QColor(0x3B, 0x82, 0xF6, 30),
+    RegionType.RomanUrdu: QColor(LightStop.regionTint),
 }
 
 

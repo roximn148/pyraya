@@ -18,10 +18,12 @@ back into identity.
 """
 
 from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
+from dataclasses import replace
 from time import monotonic
 from typing import cast
 
 from PySide6.QtCore import (
+    QEvent,
     QPoint,
     QPointF,
     QRect,
@@ -39,6 +41,7 @@ from PySide6.QtGui import (
     QFontMetrics,
     QKeyEvent,
     QMouseEvent,
+    QPalette,
     QResizeEvent,
     QSyntaxHighlighter,
     QTextBlock,
@@ -50,7 +53,14 @@ from PySide6.QtGui import (
     QTextLine,
     QTextOption,
 )
-from PySide6.QtWidgets import QDialog, QLayout, QMenu, QPlainTextEdit, QWidget
+from PySide6.QtWidgets import (
+    QApplication,
+    QDialog,
+    QLayout,
+    QMenu,
+    QPlainTextEdit,
+    QWidget,
+)
 from romanalfaz.engine import Suggestion, Vocabulary
 
 from .regions import (
@@ -72,12 +82,14 @@ from .roman_input import (
     RomanOverlay,
     _sharedEngine,
 )
+from .theme import SpellCheckUnderlineColor, ThemeTokens, resolveTheme
 
 __all__ = [
     "PyRaya",
     "PyRayaHighlighter",
     "PyRayaFonts",
     "DefaultFontSize",
+    "SpellCheckUnderlineColor",
 ]
 
 # ******************************************************************************
@@ -95,8 +107,9 @@ PyRayaFonts: tuple[str, ...] = (
 #: Default point size applied to the default font.
 DefaultFontSize: float = 14.0
 
-#: Muted brick red used for the spell-check underline.
-SpellCheckUnderlineColor: QColor = QColor("#B22222")
+# :data:`SpellCheckUnderlineColor` — the spell-check underline colour —
+# lives in :mod:`pyraya.theme` (the light stop's value) and is re-exported
+# from this module so the spell-check pass and the import path stay put.
 
 #: Maximum interval between two Esc presses that count as a double tap.
 EscDoubleTapInterval: float = 0.3
@@ -267,6 +280,20 @@ def _charFormatAt(document: QTextDocument, position: int) -> QTextCharFormat:
 
 
 # ******************************************************************************
+def _paintableTokens(tokens: ThemeTokens) -> ThemeTokens:
+    """The highlighter's tokens, with ``listBackground`` blanked out.
+
+    :func:`~pyraya.theme.resolveTheme` re-derives only ``listBackground``
+    from the palette's ``Base`` — the suggestion panel's background, which
+    the highlighter never paints — so every other token is fixed by the
+    stop. Blanking ``listBackground`` makes a :meth:`PyRayaHighlighter.retheme`
+    comparison a no-op for a palette change that only moves ``Base`` within
+    the same stop.
+    """
+    return replace(tokens, listBackground=QColor())
+
+
+# ******************************************************************************
 class PyRayaHighlighter(QSyntaxHighlighter):
     """Rule-based formatting highlighter for Urdu and mixed-script text.
 
@@ -300,6 +327,11 @@ class PyRayaHighlighter(QSyntaxHighlighter):
         seed: The kind untagged characters resolve to. A highlighter
             created by ``PyRaya`` shares the widget's seed; omitted, the
             module-level :data:`~pyraya.regions.SeedRegionKind` is used.
+        palette: The palette the :meth:`~pyraya.theme.resolveTheme` tokens
+            are resolved from, seeding the default rules' foregrounds;
+            omitted, the application palette is used. A highlighter
+            created by ``PyRaya`` passes the widget's own palette, so the
+            highlighter and the widget start on the same stop.
     """
 
     # ==========================================================================
@@ -309,6 +341,7 @@ class PyRayaHighlighter(QSyntaxHighlighter):
         engineProvider: Callable[[], RomanInputEngine | None] | None = None,
         colors: dict[RegionType, QColor] | None = None,
         seed: RegionType | None = None,
+        palette: QPalette | None = None,
     ) -> None:
         super().__init__(document)
         self._engineProvider = engineProvider
@@ -319,8 +352,20 @@ class PyRayaHighlighter(QSyntaxHighlighter):
             else colors
         )
         self._seed = SeedRegionKind if seed is None else seed
-        self._rules: list[tuple[QRegularExpression, QTextCharFormat]] = []
-        self._installDefaultRules()
+        # The theme tokens resolved from the palette at construction: the
+        # default rules' foregrounds come from them, and a palette change
+        # re-resolves them through :meth:`retheme`. The highlighter a
+        # ``PyRaya`` creates receives the widget's own palette, so both
+        # resolve the same stop; a standalone highlighter takes the
+        # application palette's.
+        self._tokens = resolveTheme(QApplication.palette() if palette is None else palette)
+        # True while the rule list starts with the default rules: a theme
+        # change then rebuilds them from the new stop and keeps every rule
+        # a host appended after them. ``setRules`` and ``clearRules``
+        # replace the list outright, so they clear the flag.
+        self._defaultsInstalled = True
+        self._rules: list[tuple[QRegularExpression, QTextCharFormat]] = self._defaultRules()
+        self.rehighlight()
 
     # ==========================================================================
     @property
@@ -343,17 +388,64 @@ class PyRayaHighlighter(QSyntaxHighlighter):
     def setRules(self, rules: Sequence[tuple[QRegularExpression, QTextCharFormat]]) -> None:
         """Replace all formatting rules and re-highlight the document.
 
+        The replacement is a host decision: the rule list no longer starts
+        with the default rules, so a later theme change leaves the host's
+        rules alone.
+
         Args:
             rules: An iterable of ``(pattern, charFormat)`` tuples.
         """
+        self._defaultsInstalled = False
         self._rules = list(rules)
         self.rehighlight()
 
     # ==========================================================================
     def clearRules(self) -> None:
-        """Remove all formatting rules and re-highlight the document."""
+        """Remove all formatting rules and re-highlight the document.
+
+        The rule list no longer starts with the default rules, so a later
+        theme change leaves the (empty) list alone.
+        """
+        self._defaultsInstalled = False
         self._rules = []
         self.rehighlight()
+
+    # ==========================================================================
+    @property
+    def tokens(self) -> ThemeTokens:
+        """The theme tokens the default rules' foregrounds were built from."""
+        return self._tokens
+
+    # ==========================================================================
+    def retheme(self, palette: QPalette) -> bool:
+        """Re-resolve the theme tokens from a palette.
+
+        A no-op retheme — one that resolves to the tokens the highlighter
+        already paints — returns ``False`` and re-highlights nothing, so
+        it never bumps the document's revision. The no-op comparison
+        ignores ``listBackground`` (the suggestion panel's background,
+        which the highlighter never paints): a palette change that only
+        moves the ``Base`` within the same stop is a no-op for the
+        document. A real change updates the tokens, rebuilds the default
+        rules from the new stop while every rule a host appended after
+        them stays put, re-highlights the document, and returns ``True``.
+
+        Args:
+            palette: The palette to resolve.
+
+        Returns:
+            Whether the tokens changed (and the document was
+            re-highlighted).
+        """
+        tokens = resolveTheme(palette)
+        if _paintableTokens(tokens) == _paintableTokens(self._tokens):
+            return False
+        self._tokens = tokens
+        if self._defaultsInstalled:
+            defaultRules = self._defaultRules()
+            self._rules = defaultRules + self._rules[len(defaultRules) :]
+        self.rehighlight()
+        return True
 
     # ==========================================================================
     def highlightBlock(self, block: str) -> None:
@@ -457,10 +549,10 @@ class PyRayaHighlighter(QSyntaxHighlighter):
         """Enable or disable the spell-check underline, re-highlighting.
 
         While enabled, RomanUrdu words the dictionary does not know get
-        the wavy :data:`SpellCheckUnderlineColor` underline in the text
-        layout (display only — the document's character formats and the
-        undo stack are never touched). Toggling re-highlights the whole
-        document, so the underline is removed or restored immediately.
+        the wavy spell-check underline in the text layout (display only —
+        the document's character formats and the undo stack are never
+        touched). Toggling re-highlights the whole document, so the
+        underline is removed or restored immediately.
 
         Args:
             enabled: Whether unknown RomanUrdu words are underlined.
@@ -490,12 +582,12 @@ class PyRayaHighlighter(QSyntaxHighlighter):
         document-format read per run, replacing the per-candidate two
         ``QTextCursor`` queries the scan used to pay. Each candidate is
         then consulted against the engine, and a word the dictionary does
-        not know is underlined with :data:`SpellCheckUnderlineColor` in
-        the text layout, merged over the character's other layout
-        formats. The document's character formats are never modified. The
-        pass is also a no-op while spell check is disabled, or when the
-        engine provider returns ``None`` or an unavailable engine (a
-        missing dictionary must never underline every word).
+        not know is underlined with the theme stop's spell-check underline
+        colour in the text layout, merged over the character's other
+        layout formats. The document's character formats are never
+        modified. The pass is also a no-op while spell check is disabled,
+        or when the engine provider returns ``None`` or an unavailable
+        engine (a missing dictionary must never underline every word).
 
         Args:
             block: The text of the block being highlighted.
@@ -524,7 +616,7 @@ class PyRayaHighlighter(QSyntaxHighlighter):
                 continue
             for runStart, runLength, runFormat in self._uniformRuns(start, end):
                 runFormat.setUnderlineStyle(QTextCharFormat.UnderlineStyle.SpellCheckUnderline)
-                runFormat.setUnderlineColor(SpellCheckUnderlineColor)
+                runFormat.setUnderlineColor(self._tokens.spellUnderline)
                 self.setFormat(runStart, runLength, runFormat)
 
     # ==========================================================================
@@ -556,27 +648,31 @@ class PyRayaHighlighter(QSyntaxHighlighter):
         return self._seed
 
     # ==========================================================================
-    def _installDefaultRules(self) -> None:
-        """Install the default formatting rules for Urdu-mixed text."""
-        ink = self._charFormat(QColor("#1F2937"))
-        rose = self._charFormat(QColor("#BE185D"), italic=True)
-        amber = self._charFormat(QColor("#B45309"))
-        blue = self._charFormat(QColor("#1D4ED8"))
-        purple = self._charFormat(QColor("#6D28D9"))
-        gray = self._charFormat(QColor("#6B7280"))
-        lightGray = self._charFormat(QColor("#e0e3ff"))
-        self.setRules(
-            [
-                (QRegularExpression(_ArabicScriptPattern), ink),
-                (QRegularExpression("[\u064b-\u065f]"), rose),
-                (QRegularExpression("[\u0660-\u0669]+"), amber),
-                (QRegularExpression("[\u06f0-\u06f9]+"), amber),
-                (QRegularExpression("[\u0000-\u007f]+"), blue),
-                (QRegularExpression("[0-9]+"), purple),
-                (QRegularExpression(r"\p{P}+"), gray),
-                (QRegularExpression(r"\s+"), lightGray),
-            ]
-        )
+    def _defaultRules(self) -> list[tuple[QRegularExpression, QTextCharFormat]]:
+        """The default formatting rules for Urdu-mixed text.
+
+        Built from the current :data:`tokens`' foregrounds, so a theme
+        change rebuilding them takes the new stop's colours.
+        """
+        return [
+            (QRegularExpression(_ArabicScriptPattern), self._charFormat(self._tokens.ink)),
+            (
+                QRegularExpression("[\u064b-\u065f]"),
+                self._charFormat(self._tokens.diacritics, italic=True),
+            ),
+            (
+                QRegularExpression("[\u0660-\u0669]+"),
+                self._charFormat(self._tokens.arabicDigits),
+            ),
+            (
+                QRegularExpression("[\u06f0-\u06f9]+"),
+                self._charFormat(self._tokens.arabicDigits),
+            ),
+            (QRegularExpression("[\u0000-\u007f]+"), self._charFormat(self._tokens.latin)),
+            (QRegularExpression("[0-9]+"), self._charFormat(self._tokens.asciiDigits)),
+            (QRegularExpression(r"\p{P}+"), self._charFormat(self._tokens.punctuation)),
+            (QRegularExpression(r"\s+"), self._charFormat(self._tokens.whitespace)),
+        ]
 
     # ==========================================================================
     @staticmethod
@@ -717,15 +813,18 @@ class PyRaya(QPlainTextEdit):
         self._syncedOverlayInputs: tuple[int, int] | None = None
         self._minOverlayWidth: int = 0
         self._overlay: RomanOverlay | None = None
-        # Per-widget region palette: the widget copies the module-level
-        # default palette at construction and owns its colors (the palette
-        # is view-only; the highlighter shares the same mapping so
-        # recolours repaint). The seed — copied from the module initial
-        # value — resolves untagged text; it is fixed at construction and
-        # readable, never settable.
+        # Per-widget region palette: the widget seeds the colourable
+        # kind's tint from its own palette's theme stop at construction
+        # and owns its colors (the palette is view-only; the highlighter
+        # shares the same mapping so recolours repaint). A palette change
+        # repoints the tint through :meth:`_applyTheme` unless
+        # :meth:`setRegionColor` has pinned it. The seed — copied from
+        # the module initial value — resolves untagged text; it is fixed
+        # at construction and readable, never settable.
         self._regionColors: dict[RegionType, QColor] = {
-            kind: QColor(color) for kind, color in RegionColors.items()
+            RegionType.RomanUrdu: QColor(resolveTheme(self.palette()).regionTint),
         }
+        self._regionTintPinned = False
         self._seedRegionKind: RegionType = SeedRegionKind
         # Set by every format-only region write (and by a batch tag
         # removal): format-only writes and their undo do not trigger a
@@ -737,6 +836,7 @@ class PyRaya(QPlainTextEdit):
             engineProvider=self._spellEngine,
             colors=self._regionColors,
             seed=self._seedRegionKind,
+            palette=self.palette(),
         )
         # Aligning the initial (empty) document records an undo command;
         # disable undo/redo around it so no phantom command is left behind.
@@ -769,6 +869,48 @@ class PyRaya(QPlainTextEdit):
     def highlighter(self) -> PyRayaHighlighter:
         """The widget's dedicated formatting highlighter."""
         return self._highlighter
+
+    # ==========================================================================
+    def changeEvent(self, event: QEvent) -> None:
+        """Handle palette changes by re-resolving the widget's theme.
+
+        A ``setPalette`` on this widget, or an application palette swap
+        reaching it, arrives as a ``PaletteChange`` (or
+        ``ApplicationPaletteChange``); both re-resolve the theme through
+        :meth:`_applyTheme` — view-only, edit-free — and then fall through
+        to the base handler.
+
+        Args:
+            event: The event to handle.
+        """
+        if event.type() in (
+            QEvent.Type.PaletteChange,
+            QEvent.Type.ApplicationPaletteChange,
+        ):
+            self._applyTheme()
+        super().changeEvent(event)
+
+    # ==========================================================================
+    def _applyTheme(self) -> None:
+        """Re-resolve the widget's colours from its palette.
+
+        The region tint follows the palette's theme stop unless
+        :meth:`setRegionColor` has pinned it: the per-widget palette is
+        repointed, and the highlighter's retheme re-highlights — which
+        repaints the tint along with the rules and the spell-check
+        underline, so no separate tint pass is needed. The highlighter's
+        tokens and default rules re-resolve through its
+        :meth:`~PyRayaHighlighter.retheme` — a no-op retheme
+        re-highlights nothing, so a no-op theme change bumps neither the
+        document's revision nor the undo stack and emits no
+        ``regionsChanged``.
+        """
+        if not self._regionTintPinned:
+            new = QColor(resolveTheme(self.palette()).regionTint)
+            if self._regionColors[RegionType.RomanUrdu] != new:
+                self._regionColors[RegionType.RomanUrdu] = new
+        self._highlighter.retheme(self.palette())
+        self.viewport().update()
 
     # ==========================================================================
     def availableFonts(self) -> list[str]:
@@ -1047,7 +1189,8 @@ class PyRaya(QPlainTextEdit):
         palettes untouched. No document state is touched and
         ``regionsChanged`` is **not** emitted — the palette never feeds
         back into the region identity. Kinds the palette does not colour
-        (Native is colourless) are rejected.
+        (Native is colourless) are rejected. The call pins the tint: a
+        later palette change no longer repoints this kind's tint.
 
         Args:
             kind: The region kind to recolour.
@@ -1059,6 +1202,9 @@ class PyRaya(QPlainTextEdit):
         """
         if kind not in self._regionColors:
             return False
+        # The pin outlives a palette change: a theme change repoints the
+        # tint only while it is unpinned.
+        self._regionTintPinned = True
         color = QColor(color)
         if self._regionColors[kind] == color:
             return True
@@ -1254,17 +1400,19 @@ class PyRaya(QPlainTextEdit):
 
         The palette maps every colourable
         :class:`~pyraya.regions.RegionType` to the view tint the layout
-        paints its stretches with on this widget. It starts as a copy of
-        the module-level :data:`~pyraya.regions.RegionColors` default;
+        paints its stretches with on this widget. It starts from the
+        widget's own palette's theme stop (resolved at construction); a
+        palette change repoints it through :meth:`_applyTheme` unless
+        :meth:`setRegionColor` has pinned the kind, and
         :meth:`setRegionColor` mutates the widget's own palette — never
-        the module default, never another widget's palette, and never any
-        document state (the palette is view-only).
+        another widget's palette, and never any document state (the
+        palette is view-only).
 
         Returns:
             A deep copy of the per-widget ``kind -> color`` mapping: the
             returned colors are independent ``QColor`` values, so mutating
-            a returned color cannot reach the widget's palette, the
-            module default, or any other widget.
+            a returned color cannot reach the widget's palette or any
+            other widget.
         """
         return {kind: QColor(color) for kind, color in self._regionColors.items()}
 

@@ -20,6 +20,7 @@ from PySide6.QtGui import (
     QImage,
     QKeyEvent,
     QMouseEvent,
+    QPalette,
     QPixmap,
     QTextCursor,
     QWheelEvent,
@@ -36,10 +37,10 @@ from pyraya.roman_input import (
     RomanOverlay,
     SuggestionList,
     _DefaultVocabulary,
-    _ListBorder,
     _sharedEngine,
     _SuggestionRow,
 )
+from pyraya.theme import DarkStop, resolveTheme
 
 # Verified zero-match roman strings (no suggestions at distance 0..2).
 ZERO_MATCH_WORDS = ["xqwzrty", "qzxvr", "kzqwxv", "zxqvw", "zxrqvz"]
@@ -711,7 +712,7 @@ def testSuggestionListRendersOpaquePanel(
 
     # The panel border along the left edge and along the top edge past
     # the corner radius.
-    border = _ListBorder
+    border = resolveTheme(listWidget.palette()).listBorder
     left = image.pixelColor(0, hint.height() // 2)
     assert abs(left.red() - border.red()) <= 3
     assert abs(left.green() - border.green()) <= 3
@@ -727,6 +728,55 @@ def testSuggestionListRendersOpaquePanel(
     assert abs(corner.red() - behind.red()) <= 3
     assert abs(corner.green() - behind.green()) <= 3
     assert abs(corner.blue() - behind.blue()) <= 3
+
+
+# ******************************************************************************
+def _composite(tint: QColor, base: QColor) -> QColor:
+    """The tint alpha-composited over the opaque base."""
+    alpha = tint.alpha() / 255.0
+    return QColor(
+        round(base.red() + (tint.red() - base.red()) * alpha),
+        round(base.green() + (tint.green() - base.green()) * alpha),
+        round(base.blue() + (tint.blue() - base.blue()) * alpha),
+    )
+
+
+# ******************************************************************************
+def testSuggestionListFollowsADarkPalette(app: QApplication) -> None:
+    """The list resolves its colours from the palette's dark stop.
+
+    A dark palette repoints the panel border and the tier tints to the
+    dark stop's values; the tier tint composites over the opaque panel
+    background the same way the light theme's does.
+    """
+    font = QFont()
+    listWidget = SuggestionList(font)
+    listWidget.setRows(_stubRows())
+    dark = QPalette()
+    dark.setColor(QPalette.ColorRole.Base, QColor(0x23, 0x23, 0x23))
+    listWidget.setPalette(dark)
+    hint = listWidget.sizeHint()
+    listWidget.resize(hint.width(), hint.height())
+    pixmap = QPixmap(hint.width(), hint.height())
+    pixmap.fill(QColor(0x30, 0x60, 0xA0))
+    listWidget.render(pixmap)
+    image = pixmap.toImage()
+    rowHeight = QFontMetrics(font).height() + 6
+
+    # The panel border along the left edge takes the dark stop's border.
+    border = DarkStop.listBorder
+    left = image.pixelColor(0, hint.height() // 2)
+    assert abs(left.red() - border.red()) <= 3
+    assert abs(left.green() - border.green()) <= 3
+    assert abs(left.blue() - border.blue()) <= 3
+
+    # A text-free point inside row 1 (tier 1, unselected): the tier-1
+    # tint (alpha 30) composites over the opaque dark panel background.
+    color = image.pixelColor(3, rowHeight + rowHeight // 2)
+    expected = _composite(DarkStop.tiers[1], DarkStop.listBackground)
+    assert abs(color.red() - expected.red()) <= 12
+    assert abs(color.green() - expected.green()) <= 12
+    assert abs(color.blue() - expected.blue()) <= 12
 
 
 # ******************************************************************************

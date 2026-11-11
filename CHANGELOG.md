@@ -9,6 +9,36 @@ This file records changes starting from the baseline version `0.1.0a8` onward;
 earlier releases (`0.1.0a1` through `0.1.0a7`) are all incorporated
 into this release version.
 
+## [Unreleased]
+
+### Added
+
+- Palette-driven theming: every colour PyRaya paints — the highlighter's
+  ink rules, the spell-check underline, the region tint, and the
+  roman-input suggestion list's tier tints, selected-row emphasis, and
+  panel — now lives in one module (`pyraya.theme`) as a frozen
+  `ThemeTokens` bundle per stop (`LightStop`, `DarkStop`), resolved from
+  the effective `QPalette` by `resolveTheme`. The stop is picked by the
+  palette's `Base` role's lightness (below 0.5 the dark stop, at or above
+  the light stop); only the suggestion panel's background is re-derived
+  from the palette's own `Base`, so the opaque panel matches the document
+  it floats over. A `setPalette` on the widget, or an application palette
+  swap, repoints the document's ink, the region tint, the spell-check
+  underline, and the suggestion panel — view-only, no document edit, no
+  `regionsChanged`; a no-op retheme bumps neither the document's revision
+  nor the undo stack. `LightStop` is the package's historic palette, so a
+  light theme renders exactly as before; `DarkStop` is a first-guess dark
+  palette, fine-tuned by one table edit. `setRegionColor` pins a kind's
+  tint against a later theme change; host-installed highlighter rules
+  (`setRules`, `addRule`) survive a theme change. No new exported names:
+  `RegionColors` and `SpellCheckUnderlineColor` keep their import paths and
+  light values. Pinned in `test_theme.py` (stop values, `TierCount`,
+  `resolveTheme`) and `test_theming.py` (widget-level retheme, pin, host-
+  rule survival, no-op retheme bumps nothing, dark-start construction,
+  light/dark/light round trip).
+- The demo (`uv run pyraya`) now uses the Fusion style and toggles the
+  light and dark palettes with `Ctrl+D`.
+
 ## [0.1.0a13] - 2026-11-10
 
 ### Added

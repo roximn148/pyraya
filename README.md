@@ -65,6 +65,9 @@ selected Urdu word lands in the document, in Urdu script.
 - Unknown words can be learned into the shared dictionary, from the
   right-click menu or the `+ [..]` suggestion row. See
   [Learn a word](#learn-a-word).
+- Light and dark themes: the document and the suggestion list follow your
+  application's palette, recolouring live on a palette change. See
+  [Theming](#theming).
 - Word offsets for analysis: `wordRuns(text)` and `editor.wordRuns()`.
   See [Word runs](#word-runs).
 
@@ -294,6 +297,30 @@ The standard Qt editing shortcuts (undo, redo, Home/End, ...) work as
 usual, and `Ctrl+Space`, `Ctrl+Esc`, and two quick `Esc` presses work
 whether or not the overlay is open.
 
+## Theming
+
+The document and the roman-input suggestion list resolve their colours from
+the widget's effective `QPalette`, so they follow a light or dark theme with
+no configuration. A `setPalette` on the widget, or an application palette
+swap, repoints the document's ink, the region tint, the spell-check
+underline, and the suggestion panel's tier tints and border — view-only, no
+document edit, no `regionsChanged`.
+
+Two stops are shipped: a light stop (the palette PyRaya has always painted, so
+a light theme renders exactly as before) and a dark stop. The stop is chosen
+by the palette's `Base` role's lightness — below 0.5 the dark stop, at or
+above the light stop. The suggestion panel's background is re-derived from
+the palette's own `Base`, so the opaque panel matches the document it floats
+over under either theme.
+
+`setRegionColor(kind, color)` pins that kind's tint: a later palette change
+no longer repoints it. Host-installed highlighter rules (`setRules`,
+`addRule`) survive a theme change; only the default rules follow the new
+stop.
+
+The demo app uses the Fusion style and toggles between the light and dark
+palettes with `Ctrl+D`.
+
 ## Repository layout
 
 ```text
@@ -307,6 +334,7 @@ pyraya/
 │       ├── pyraya_widget.py  # the PyRaya widget and its highlighter
 │       ├── regions.py        # region model: kinds, spans, seed, stored-tag property
 │       ├── roman_input.py    # roman-input engine and overlay widgets
+│       ├── theme.py          # palette-derived theme tokens
 │       ├── __init__.py       # public API and the demo entry point
 │       └── py.typed          # typing marker
 ├── tests/

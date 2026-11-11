@@ -59,6 +59,8 @@ from romanalfaz import DictionaryNotFoundError, RomanAlfaz
 from romanalfaz.algorithm import tafseerUrduAr2Rm
 from romanalfaz.engine import Suggestion, Vocabulary
 
+from .theme import TierCount, resolveTheme
+
 __all__ = [
     "RomanInputEngine",
     "RomanOverlay",
@@ -153,25 +155,13 @@ ArabicScriptSeparators: frozenset[str] = _arabicScriptChars("P")
 #: commits, with the digit as the separator, exactly like the punctuation.
 _Separators = set(string.punctuation) | set(string.digits) | {" ", "\n"} | ArabicScriptSeparators
 
-#: Subtle tier tints: green = exact, orange = edit distance 1, red = distance 2.
-_TierColors = {
-    0: QColor(0x4F, 0x9D, 0x4F, 30),
-    1: QColor(0xE8, 0x8A, 0x1A, 30),
-    2: QColor(0xC4, 0x3B, 0x3B, 30),
-}
-
-#: The stronger tint and accent border applied to the selected row.
-_SelectedAlpha = 90
-_AccentBorder = QColor(0x1D, 0x4E, 0x89)
-
-#: The dashed gray style of the undefined-word (Learn) row.
-_UndefinedWordColor = QColor(0x8A, 0x8F, 0x98, 30)
-
 #: The suggestion list's panel style: an opaque base, a subtle border, and
 #: the rounded-corner radius. The list floats over the document text, so
-#: the base must be opaque for the rows to stay readable.
-_ListBackground = QColor(0xFF, 0xFF, 0xFF)
-_ListBorder = QColor(0xD0, 0xD5, 0xDD)
+#: the base must be opaque for the rows to stay readable. Every colour of
+#: the panel and the rows — the tier tints, the selected-row highlight,
+#: the undefined-word underline, the panel background, border, and text —
+#: resolves per paint from :mod:`pyraya.theme`'s stop for the list's own
+#: palette.
 _ListRadius = 6
 
 #: The maximum number of suggestion rows shown at once; the list scrolls to
@@ -572,9 +562,12 @@ class SuggestionList(QWidget):
     ``maxVisibleRows`` rows are shown at once; the list scrolls so the
     selected row stays visible while navigating. The preferred width covers
     the widest rendered row with the configurable margin on both sides, so
-    no row's text is clipped. The rows sit on an opaque white panel with a
-    subtle border and rounded corners, so the list stays readable when it
-    overlaps the document text.
+    no row's text is clipped. The rows sit on an opaque panel with a subtle
+    border and rounded corners, so the list stays readable when it overlaps
+    the document text; the panel's colours — tier tints, selected-row
+    emphasis, undefined-word underline, background, border, and text —
+    resolve per paint from :mod:`pyraya.theme`'s stop for the widget's own
+    palette, so the list follows a theme change like the document does.
 
     This widget never takes focus — all key handling lives in the overlay's
     :class:`RomanLineEdit`.
@@ -753,9 +746,13 @@ class SuggestionList(QWidget):
         The rows sit on an opaque panel with a border and rounded corners:
         the list floats over the document, so a transparent base would let
         the document text show through the rows and make them unreadable.
+        Every colour resolves per paint from the theme stop for the widget's
+        own palette, so a theme change repoints the tints and the panel
+        without a paint-event hook.
         """
         if not self._rows:
             return
+        tokens = resolveTheme(self.palette())
         last = min(len(self._rows), self._firstRow + self.visibleRowCount())
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -768,7 +765,7 @@ class SuggestionList(QWidget):
         # The opaque base is painted first, so the translucent tier tints
         # composite over it rather than over the document behind.
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(_ListBackground)
+        painter.setBrush(tokens.listBackground)
         painter.drawPath(path)
         # The rows are clipped to the panel so no tint pokes past the
         # rounded corners.
@@ -782,27 +779,27 @@ class SuggestionList(QWidget):
             y = (i - self._firstRow) * rowHeight
             row = self._rows[i]
             undefined = row.suggestion.isUndefined()
-            color = _UndefinedWordColor if undefined else _TierColors[row.tier]
+            color = tokens.undefinedWord if undefined else tokens.tiers[row.tier]
             if i == self._selectedIndex:
-                color = QColor(color.red(), color.green(), color.blue(), _SelectedAlpha)
+                color = QColor(color.red(), color.green(), color.blue(), tokens.selectedAlpha)
             painter.fillRect(QRect(0, y, self.width(), rowHeight), QBrush(color))
             if i == self._selectedIndex:
-                painter.setPen(QPen(_AccentBorder, 1))
+                painter.setPen(QPen(tokens.accentBorder, 1))
             elif undefined:
-                painter.setPen(QPen(_UndefinedWordColor, 1, Qt.PenStyle.DashLine))
+                painter.setPen(QPen(tokens.undefinedWord, 1, Qt.PenStyle.DashLine))
             else:
                 painter.setPen(Qt.PenStyle.NoPen)
             painter.drawRect(0, y, self.width() - 1, rowHeight - 1)
 
             painter.setFont(self._font)
-            painter.setPen(QPen(Qt.GlobalColor.black))
+            painter.setPen(QPen(tokens.listText))
             arabicWidth = self._metrics.horizontalAdvance(row.arabic)
             x = self.width() - self._margin - arabicWidth
             painter.drawText(x, y + baseline, row.arabic)
         # The border is stroked on top of the rows, after clearing the clip
         # so the outer half of the stroke is not clipped away.
         painter.setClipping(False)
-        painter.setPen(QPen(_ListBorder, 1))
+        painter.setPen(QPen(tokens.listBorder, 1))
         painter.drawPath(path)
         painter.end()
 
@@ -1124,14 +1121,15 @@ class RomanOverlay(QWidget):
         hasExact = any(tier == 0 for _, tier in tiered)
         rows: list[_SuggestionRow] = []
         for suggestion, tier in tiered:
-            # The row palette stops at the deepest tint it defines: an
+            # The row palette stops at the deepest tier it defines: an
             # engine built with a larger ``distance`` yields deeper tiers,
-            # which are clipped to the palette so the paint stays total.
+            # which are clipped to :data:`TierCount` so the paint stays
+            # total.
             rows.append(
                 _SuggestionRow(
                     suggestion=suggestion,
                     arabic=suggestion.arabic,
-                    tier=min(tier, len(_TierColors) - 1),
+                    tier=min(tier, TierCount - 1),
                 ),
             )
         if not hasExact and self._engine.available:
