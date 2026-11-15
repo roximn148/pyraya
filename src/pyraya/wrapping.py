@@ -16,6 +16,12 @@ member envelopes with the whole pair — except the Urdu quote pairs,
 whose keyboard twin is the straight form: ``"`` envelopes in “ ” and
 ``'`` in ‘ ’. When two pairs share a trigger character, the earlier
 table entry wins.
+
+Mirroring: each pair carries a ``mirrored`` flag — True for the
+algorithmic BiDi-mirrored pairs (brackets and guillemets, whose opening
+and closing marks are as listed in every region) and False for the quote
+pairs, which are not BiDi-mirrored and need manual handling per region
+(for now only RomanUrdu swaps their ending assignments).
 """
 
 from dataclasses import dataclass

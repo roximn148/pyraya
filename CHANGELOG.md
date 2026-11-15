@@ -14,18 +14,25 @@ into this release version.
 ### Added
 
 - Selection enveloping (auto-wrap): pressing a trigger key over a selection
-  envelops it with the matching bracket or quote pair — `( ) [ ] { }`
-  each trigger with their own pair, `"` envelopes in “ ”, `'` in ‘ ’
-  (the curly forms pass through as normal typing). On by default
-  (`setAutoWrapEnabled`); the active pair set is a runtime-configurable
-  subset of the new fixed `WrapPairs` table (`pyraya.wrapping`, re-exported
-  as `WrapPair` / `WrapPairs` / `DefaultWrapPairs`) via
-  `setWrapPairs` — ten bracket pairs and five quote pairs, the five
-  keyboard-reachable pairs enabled by default. The selection is never
-  replaced — its text and character formats ride along — each mark is
-  tagged with the region kind resolved at its own landing position, the
-  write is one edit block (one logical undo step), and it emits no
-  signal. Pinned in `tests/test_auto_wrap.py`.
+  whose two ends resolve to the same region kind envelops it with the
+  matching bracket or quote pair — `( ) [ ] { }` each trigger with their
+  own pair, `"` envelopes in " ", `'` in ' ' (the curly forms pass through
+  as normal typing). Enveloping is restricted to same-kind selections
+  (the `_selectionEndsShareKind` gate); a selection straddling a Native /
+  RomanUrdu boundary does not envelope, and the trigger types as its plain
+  character instead. The quote pairs are not BiDi-mirrored, so in a
+  RomanUrdu region their opening and closing marks are swapped (the closing
+  mark at the selection's start, the opening mark at its end), while
+  mirrored pairs and every other region write the marks as listed. On by
+  default (`setAutoWrapEnabled`); the active pair set is a
+  runtime-configurable subset of the new fixed `WrapPairs` table
+  (`pyraya.wrapping`, re-exported as `WrapPair` / `WrapPairs` /
+  `DefaultWrapPairs`) via `setWrapPairs` — ten bracket pairs and five quote
+  pairs, the five keyboard-reachable pairs enabled by default. The selection
+  is never replaced — its text and character formats ride along — each mark
+  is tagged with the region kind resolved at its own landing position, the
+  write is one edit block (one logical undo step), and it emits no signal.
+  Pinned in `tests/test_auto_wrap.py`.
 
 ### Changed
 
