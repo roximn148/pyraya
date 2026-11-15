@@ -242,14 +242,34 @@ def testEnvelopEmitsNoSignals(app: QApplication) -> None:
 
 
 # ******************************************************************************
+def testMismatchedEndsDoNotEnvelop(app: QApplication) -> None:
+    """A selection whose ends resolve to different kinds does not envelope."""
+    widget = PyRaya()
+    widget.setPlainText("abcd")
+    _select(widget, 0, 2)
+    widget.setRegionType(RegionType.Native)  # "ab" Native
+    _select(widget, 2, 4)  # ends: opening kind Native, closing kind RomanUrdu
+    _keyPress(widget, Qt.Key.Key_ParenLeft, "(")
+    # The gate rejects it: the trigger replaces the selection as a plain
+    # keystroke (no selection is consumed by the envelop).
+    assert widget.toPlainText() == "ab("
+    assert widget.textCursor().position() == 3
+
+
+# ******************************************************************************
 def testMarksCarryTheKindOfTheirLandingPosition(app: QApplication) -> None:
-    """Each mark is tagged with the kind resolved at its own landing."""
+    """Each mark is tagged with the kind resolved at its own landing.
+
+    Pinned directly on ``_envelopSelection`` (bypassing the gate), so the
+    per-edge tagging holds even for a mismatched-ends selection that the
+    same-kind gate no longer reaches.
+    """
     widget = PyRaya()
     widget.setPlainText("abcd")
     _select(widget, 0, 2)
     widget.setRegionType(RegionType.Native)
     _select(widget, 2, 4)
-    _keyPress(widget, Qt.Key.Key_ParenLeft, "(")
+    widget._envelopSelection(WrapPairs["parentheses"])
     assert widget.toPlainText() == "ab(cd)"
     # The opening mark lands beside the Native 'b' before the selection.
     assert widget._regionKindAt(2) is RegionType.Native
@@ -260,19 +280,24 @@ def testMarksCarryTheKindOfTheirLandingPosition(app: QApplication) -> None:
 
 # ******************************************************************************
 def testNativeTaggedSelectionIsPreserved(app: QApplication) -> None:
-    """The envelop never replaces the selection: text and tags ride along."""
+    """The envelop never replaces the selection: text and tags ride along.
+
+    The selection spans a RomanUrdu end, so the same-kind gate accepts it
+    even though the inner sub-run is Native: the marks resolve RomanUrdu at
+    both ends and the Native sub-run rides along untouched.
+    """
     widget = PyRaya()
     widget.setPlainText("abcd")
     _select(widget, 1, 3)
-    widget.setRegionType(RegionType.Native)
+    widget.setRegionType(RegionType.Native)  # tag "bc" Native
+    _select(widget, 1, 4)  # select "bcd": ends both resolve RomanUrdu
     _keyPress(widget, Qt.Key.Key_ParenLeft, "(")
-    assert widget.toPlainText() == "a(bc)d"
-    assert widget._regionKindAt(2) is RegionType.Native
-    assert widget._regionKindAt(3) is RegionType.Native
-    # The opening mark lands beside the seed-resolved 'a'.
-    assert widget._regionKindAt(1) is RegionType.RomanUrdu
-    # The closing mark lands after the selection's Native 'c'.
-    assert widget._regionKindAt(4) is RegionType.Native
+    assert widget.toPlainText() == "a(bcd)"
+    assert widget._regionKindAt(1) is RegionType.RomanUrdu  # opening mark
+    assert widget._regionKindAt(2) is RegionType.Native  # 'b'
+    assert widget._regionKindAt(3) is RegionType.Native  # 'c'
+    assert widget._regionKindAt(4) is RegionType.RomanUrdu  # 'd'
+    assert widget._regionKindAt(5) is RegionType.RomanUrdu  # closing mark
 
 
 # ******************************************************************************

@@ -2936,10 +2936,12 @@ class PyRaya(QPlainTextEdit):
         character (scenario 1); the character never reaches the document.
         While selection enveloping (auto-wrap) is enabled, a trigger
         character of an enabled :class:`~pyraya.wrapping.WrapPair` pressed
-        over a selection envelopes the selection with that pair — the key
-        is consumed, the marks land at the selection's edges, and the
-        cursor rests after the closing mark; without a selection every
-        trigger types as usual.
+        over a selection whose two ends resolve to the same region kind
+        envelopes the selection with that pair — the key is consumed, the
+        marks land at the selection's edges, and the cursor rests after the
+        closing mark; a selection straddling a Native / RomanUrdu boundary
+        does not envelope, and the trigger types as its plain character
+        instead; without a selection every trigger types as usual.
         Plain Left/Right (no modifiers) move the cursor in visual (screen)
         order — Left to the next position, Right to the previous one —
         because Qt's default logical movement is flipped in this
@@ -2957,7 +2959,7 @@ class PyRaya(QPlainTextEdit):
                 if (
                     self._autoWrapEnabled
                     and text in self._wrapTriggers
-                    and self.textCursor().hasSelection()
+                    and self._selectionEndsShareKind()
                 ):
                     # Selection enveloping: the trigger key is consumed and
                     # the pair wraps the selection. The check precedes the
@@ -3447,6 +3449,21 @@ class PyRaya(QPlainTextEdit):
         # Inside or right after the block's real text: the character in
         # front of the cursor governs.
         return self._regionKindAt(min(position, block.position() + len(block.text())) - 1)
+
+    # ==========================================================================
+    def _selectionEndsShareKind(self) -> bool:
+        """True iff the selection's two ends resolve to the same region kind.
+
+        False without a selection. The gate for selection enveloping: a
+        selection straddling a Native / RomanUrdu boundary (whose start and
+        end resolve to different kinds) does not envelope.
+        """
+        cursor = self.textCursor()
+        if not cursor.hasSelection():
+            return False
+        return self._typingKindAt(cursor.selectionStart()) == self._typingKindAt(
+            cursor.selectionEnd()
+        )
 
     # ==========================================================================
     def _regionKindForTyping(self) -> RegionType | None:
