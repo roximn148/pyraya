@@ -65,6 +65,8 @@ selected Urdu word lands in the document, in Urdu script.
 - Unknown words can be learned into the shared dictionary, from the
   right-click menu or the `+ [..]` suggestion row. See
   [Learn a word](#learn-a-word).
+- Select text and press a bracket or quote — it is enveloped with its
+  matching pair. See [Auto-wrap](#auto-wrap).
 - Light and dark themes: the document and the suggestion list follow your
   application's palette, recolouring live on a palette change. See
   [Theming](#theming).
@@ -243,6 +245,41 @@ lazily, and the editor you called it on re-highlights immediately so its
 spell-check underlines follow the new dictionary. Other editors pick up
 the new underlines on their next re-highlight.
 
+## Auto-wrap
+
+Select some text and press one of the trigger keys — `( ) [ ] { }`, `"`
+or `'` — and the selection is enveloped with the matching pair: the
+opening mark lands before the first selected character, the closing mark
+after the last, and the cursor rests after the closing mark with no
+selection. The selection itself is never replaced — its text and
+character formats ride along — and each mark is tagged with the region
+kind a character typed at its landing position would carry, so a span
+straddling a Native / Roman Urdu boundary tags each mark at its own
+edge. With no selection every trigger types as its plain character, and
+the curly quote forms (`" "`, `' '`) are never triggers — they pass
+through as ordinary typing.
+
+The feature is on by default; one undo step restores the pre-wrap text
+(the write is one logical edit, though Qt counts its two inserts plus
+compound bookkeeping in `availableUndoSteps`), and it emits no signal —
+it is a typing-like write. The active pair set is configurable at
+runtime:
+
+```python
+editor.setAutoWrapEnabled(False)  # off until asked
+editor.setWrapPairs({"parentheses", "square-brackets"})
+editor.isAutoWrapEnabled()
+```
+
+`setWrapPairs` takes the names from the module table `WrapPairs`
+(`pyraya.wrapping`) — ten bracket pairs (parentheses, square, curly,
+guillemets, single-guillemets, angle brackets, floor brackets, ceiling
+brackets, black brackets, and fullwidth parentheses) and five quote
+pairs (the double and single curly forms, and the low and mixed double
+and single forms) — and raises `ValueError` for an unknown name. The
+default set is the five pairs `DefaultWrapPairs` names: parentheses,
+square, curly, and the straight double and single quotes.
+
 ## Watching state changes
 
 Three signals report this editor's own state to its host, so a UI can
@@ -277,6 +314,7 @@ editor.dictionaryChanged.connect(lambda vocabulary: vocabulary.save("dictionary.
 | `Ctrl+Esc` | Turn assist mode off and close a shown overlay |
 | two quick `Esc` | Turn assist mode off — a single `Esc` in the document does nothing, but two within a short interval turn it off, whether or not the overlay is shown |
 | `Left` / `Right` | Move the cursor in visual (screen) order — the document is right-to-left, so the keys are remapped |
+| `( )` `[ ]` `{ }` `"` `'` with a selection | Envelop the selection with the matching pair — see [Auto-wrap](#auto-wrap) |
 
 **In the roman-input overlay** (open over a word; see [Roman input](#roman-input)):
 
@@ -335,6 +373,7 @@ pyraya/
 │       ├── regions.py        # region model: kinds, spans, seed, stored-tag property
 │       ├── roman_input.py    # roman-input engine and overlay widgets
 │       ├── theme.py          # palette-derived theme tokens
+│       ├── wrapping.py       # bracket and quote pairs for auto-wrap
 │       ├── __init__.py       # public API and the demo entry point
 │       └── py.typed          # typing marker
 ├── tests/

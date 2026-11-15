@@ -45,6 +45,11 @@ from .roman_input import (
     SuggestionList,
     SuggestionListMargin,
 )
+from .wrapping import (
+    DefaultWrapPairs,
+    WrapPair,
+    WrapPairs,
+)
 
 __all__ = [
     "PyRaya",
@@ -61,6 +66,9 @@ __all__ = [
     "resolveRegionKind",
     "substituteChar",
     "substituteText",
+    "WrapPair",
+    "WrapPairs",
+    "DefaultWrapPairs",
     "wordRuns",
     "RomanInputEngine",
     "RomanOverlay",

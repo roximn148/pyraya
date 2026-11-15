@@ -83,6 +83,7 @@ from .roman_input import (
     _sharedEngine,
 )
 from .theme import SpellCheckUnderlineColor, ThemeTokens, resolveTheme
+from .wrapping import DefaultWrapPairs, WrapPair, WrapPairs
 
 __all__ = [
     "PyRaya",
@@ -106,6 +107,13 @@ PyRayaFonts: tuple[str, ...] = (
 
 #: Default point size applied to the default font.
 DefaultFontSize: float = 14.0
+
+#: The trigger-character lookup behind selection enveloping: every pair's
+#: trigger characters mapped to the pair. Two pairs sharing a trigger
+#: resolve to the earlier :data:`~pyraya.wrapping.WrapPairs` entry.
+_PairByTrigger: dict[str, WrapPair] = {
+    trigger: pair for pair in WrapPairs.values() for trigger in pair.triggers
+}
 
 # :data:`SpellCheckUnderlineColor` — the spell-check underline colour —
 # lives in :mod:`pyraya.theme` (the light stop's value) and is re-exported
@@ -770,6 +778,15 @@ class PyRaya(QPlainTextEdit):
         # spell-check pass queries the shared engine through the provider
         # passed below.
         self._romanInputEnabled = True
+        # Selection enveloping (auto-wrap): the feature is on by default and
+        # the enabled pair set is the keyboard-reachable default. The
+        # trigger lookup is derived from the pair set, so a runtime
+        # reconfiguration refreshes both.
+        self._autoWrapEnabled = True
+        self._wrapPairs: frozenset[str] = DefaultWrapPairs
+        self._wrapTriggers = frozenset(
+            char for name in self._wrapPairs for char in WrapPairs[name].triggers
+        )
         # Written directly: the funnel below needs the overlay state that is
         # initialised right after these fields, and no listener can exist
         # yet, so construction emits nothing.
@@ -1300,6 +1317,56 @@ class PyRaya(QPlainTextEdit):
     def isRomanInputEnabled(self) -> bool:
         """Whether the roman-script overlay input feature is enabled."""
         return self._romanInputEnabled
+
+    # ==========================================================================
+    def setAutoWrapEnabled(self, enabled: bool) -> None:
+        """Enable or disable selection enveloping (auto-wrap).
+
+        Enabled by default so a trigger key pressed over a selection
+        envelopes it with the matching bracket or quote pair out of the
+        box. While disabled, every trigger character types into the
+        document as before — over a selection it replaces it, Qt's own
+        typing behavior. The flag changes only through this setter, so it
+        emits no signal (the :meth:`setRomanInputEnabled` precedent).
+
+        Args:
+            enabled: Whether selection enveloping is active.
+        """
+        self._autoWrapEnabled = enabled
+
+    # ==========================================================================
+    def isAutoWrapEnabled(self) -> bool:
+        """Whether selection enveloping (auto-wrap) is enabled."""
+        return self._autoWrapEnabled
+
+    # ==========================================================================
+    def setWrapPairs(self, names: Iterable[str]) -> None:
+        """Reconfigure the bracket and quote pairs that envelope selections.
+
+        Replaces the enabled subset of the fixed
+        :data:`~pyraya.wrapping.WrapPairs` table with the named pairs;
+        the default is
+        :data:`~pyraya.wrapping.DefaultWrapPairs`. A trigger character
+        whose pair is not named types as usual, and a trigger of a newly
+        named pair envelopes from the next keystroke on. The change is
+        local to this widget — the table itself is immutable data — and
+        writes no undo step, so it emits nothing.
+
+        Args:
+            names: The :attr:`WrapPair.name <pyraya.wrapping.WrapPair>`
+                values of the enabled pairs.
+
+        Raises:
+            ValueError: If a name is not in the
+                :data:`~pyraya.wrapping.WrapPairs` table.
+        """
+        unknown = sorted(set(names) - set(WrapPairs))
+        if unknown:
+            raise ValueError(f"Unknown wrap pair(s): {', '.join(unknown)}")
+        self._wrapPairs = frozenset(names)
+        self._wrapTriggers = frozenset(
+            char for name in self._wrapPairs for char in WrapPairs[name].triggers
+        )
 
     # ==========================================================================
     def setAssistEnabled(self, enabled: bool) -> None:
@@ -2616,6 +2683,71 @@ class PyRaya(QPlainTextEdit):
             self._committing = False
 
     # ==========================================================================
+    def _envelopSelection(self, pair: WrapPair) -> None:
+        """Envelop the current selection with ``pair``'s opening/closing marks.
+
+        The selection is never replaced — its text and character formats
+        ride along — and the marks are inserted at its edges: the opening
+        mark at the start, the closing mark at the end. Each mark is
+        tagged with the region kind a character typed at its landing
+        position would carry (:meth:`_typingKindAt`), read before any
+        insertion shifts positions. The whole write runs inside one edit
+        block, so it is one undo step, and it is a typing-like write: no
+        ``regionsChanged`` and no other signal.
+
+        The write runs with :attr:`_committing` set, so the intermediate
+        ``contentsChanged`` signals funnel into :meth:`_syncOverlay`'s
+        early exit; the landing cursor — placed after the closing mark,
+        with no selection — is set after the guard clears, and the
+        explicit resync that follows reproduces the standard sync
+        behavior at that position: the inserts already shifted the
+        widget cursor to the landing (each insert before it bumps the
+        position), so the placement itself may fire no
+        ``cursorPositionChanged`` at all (a forward selection leaves
+        only the anchor to change), and the resync is the landing's only
+        chance to be observed.
+
+        Args:
+            pair: The pair to envelop the selection with.
+        """
+        cursor = self.textCursor()
+        start = cursor.selectionStart()
+        end = cursor.selectionEnd()
+        openKind = self._typingKindAt(start)
+        closeKind = self._typingKindAt(end)
+        document = self.document()
+        self._committing = True
+        # ``beginEditBlock`` lives on the cursor (PySide6 does not map it on
+        # the document): one throwaway cursor owns the edit block, and the
+        # marks are written through their own cursors inside it. The
+        # closing mark is written first, so the opening mark's position is
+        # unaffected by the shift.
+        blocker = QTextCursor(document)
+        blocker.beginEditBlock()
+        try:
+            for position, char, kind in (
+                (end, pair.closing, closeKind),
+                (start, pair.opening, openKind),
+            ):
+                writer = QTextCursor(document)
+                writer.setPosition(position)
+                fmt = QTextCharFormat()
+                fmt.setProperty(RegionKindProperty, int(kind))
+                writer.insertText(char, fmt)
+        finally:
+            blocker.endEditBlock()
+            self._committing = False
+        landing = QTextCursor(document)
+        landing.setPosition(end + 2)
+        self.setTextCursor(landing)
+        # Explicit resync, like the commit path's: the inserts already
+        # shifted the widget cursor to the landing, so a forward
+        # selection's placement changes only the anchor and fires no
+        # ``cursorPositionChanged`` — the resync is the landing's only
+        # chance to activate (or stay closed at a boundary).
+        self._syncOverlay(bypassMouse=True)
+
+    # ==========================================================================
     def _adjacentWord(self, reference: int, backwards: bool) -> tuple[int, int] | None:
         """The nearest Arabic-script word run adjacent to ``reference``.
 
@@ -2802,6 +2934,12 @@ class PyRaya(QPlainTextEdit):
         overlay is inactive, an ASCII alphanumeric key pressed with the
         cursor inside a RomanUrdu region seeds the overlay with that
         character (scenario 1); the character never reaches the document.
+        While selection enveloping (auto-wrap) is enabled, a trigger
+        character of an enabled :class:`~pyraya.wrapping.WrapPair` pressed
+        over a selection envelopes the selection with that pair — the key
+        is consumed, the marks land at the selection's edges, and the
+        cursor rests after the closing mark; without a selection every
+        trigger types as usual.
         Plain Left/Right (no modifiers) move the cursor in visual (screen)
         order — Left to the next position, Right to the previous one —
         because Qt's default logical movement is flipped in this
@@ -2815,30 +2953,44 @@ class PyRaya(QPlainTextEdit):
             event.modifiers() & Qt.KeyboardModifier.ControlModifier
         ):
             text = event.text()
-            if len(text) == 1 and text.isascii():
-                kind = self._regionKindForTyping()
-                if kind is not None:
-                    substituted = substituteChar(text, kind)
-                    if substituted is not None:
-                        # A mapped character (punctuation or digit) lands in
-                        # the document in its Urdu form, tagged with the
-                        # region kind, written directly with no overlay. This
-                        # is region-scoped: it holds regardless of the
-                        # roman-input feature or assist mode.
-                        self._insertSubstitutedChar(substituted, kind)
-                        event.accept()
-                        return
-                    if (
-                        self._romanInputEnabled
-                        and self._assistMode
-                        and text.isalpha()
-                        and kind is RegionType.RomanUrdu
-                    ):
-                        # A letter seeds the overlay (scenario 1); the
-                        # character never reaches the document. Digits no
-                        # longer seed — they take the substitution path.
-                        self._activateOverlayAt(text, self.textCursor().position())
-                        return
+            if len(text) == 1:
+                if (
+                    self._autoWrapEnabled
+                    and text in self._wrapTriggers
+                    and self.textCursor().hasSelection()
+                ):
+                    # Selection enveloping: the trigger key is consumed and
+                    # the pair wraps the selection. The check precedes the
+                    # substitution (brackets and quotes are unmapped, so
+                    # they never collide) and accepts non-ASCII triggers,
+                    # since the enabled pairs may carry typographic marks.
+                    self._envelopSelection(_PairByTrigger[text])
+                    event.accept()
+                    return
+                if text.isascii():
+                    kind = self._regionKindForTyping()
+                    if kind is not None:
+                        substituted = substituteChar(text, kind)
+                        if substituted is not None:
+                            # A mapped character (punctuation or digit) lands in
+                            # the document in its Urdu form, tagged with the
+                            # region kind, written directly with no overlay. This
+                            # is region-scoped: it holds regardless of the
+                            # roman-input feature or assist mode.
+                            self._insertSubstitutedChar(substituted, kind)
+                            event.accept()
+                            return
+                        if (
+                            self._romanInputEnabled
+                            and self._assistMode
+                            and text.isalpha()
+                            and kind is RegionType.RomanUrdu
+                        ):
+                            # A letter seeds the overlay (scenario 1); the
+                            # character never reaches the document. Digits no
+                            # longer seed — they take the substitution path.
+                            self._activateOverlayAt(text, self.textCursor().position())
+                            return
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             if event.key() == Qt.Key.Key_Space:
                 self._setAssistMode(True)

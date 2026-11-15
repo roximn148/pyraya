@@ -11,6 +11,22 @@ into this release version.
 
 ## [Unreleased]
 
+### Added
+
+- Selection enveloping (auto-wrap): pressing a trigger key over a selection
+  envelops it with the matching bracket or quote pair — `( ) [ ] { }`
+  each trigger with their own pair, `"` envelopes in “ ”, `'` in ‘ ’
+  (the curly forms pass through as normal typing). On by default
+  (`setAutoWrapEnabled`); the active pair set is a runtime-configurable
+  subset of the new fixed `WrapPairs` table (`pyraya.wrapping`, re-exported
+  as `WrapPair` / `WrapPairs` / `DefaultWrapPairs`) via
+  `setWrapPairs` — ten bracket pairs and five quote pairs, the five
+  keyboard-reachable pairs enabled by default. The selection is never
+  replaced — its text and character formats ride along — each mark is
+  tagged with the region kind resolved at its own landing position, the
+  write is one edit block (one logical undo step), and it emits no
+  signal. Pinned in `tests/test_auto_wrap.py`.
+
 ### Changed
 
 - `romanalfaz >= 0.2.0a1`: a normalization-data release with no API
