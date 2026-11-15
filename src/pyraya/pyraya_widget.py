@@ -894,6 +894,11 @@ class PyRaya(QPlainTextEdit):
         # every scroll so it stays over the word it edits (argument-free
         # receiver like the cursor sync handler above).
         self.verticalScrollBar().valueChanged.connect(self._onScrollChanged)
+        # The gutter's updateRequest handler: dy != 0 is the fast-path
+        # scroll (shifts the painted pixels); dy == 0 is a partial repaint.
+        # The width recompute runs in the same handler, before the gutter
+        # repaints, so the strip tracks the largest visible line number.
+        self.updateRequest.connect(self._onGutterUpdateRequest)
 
     # ==========================================================================
     @property
@@ -3705,6 +3710,31 @@ class PyRaya(QPlainTextEdit):
             cr.height(),
         )
         gutter.raise_()
+
+    # ==========================================================================
+    def _onGutterUpdateRequest(self, rect: QRect, dy: int) -> None:
+        """Handle the viewport's updateRequest signal.
+
+        ``dy != 0`` is the fast-path scroll (shifts the painted pixels);
+        ``dy == 0`` is a partial repaint. The width recompute runs in the
+        same handler, before the gutter repaints, so the strip tracks the
+        largest visible line number as the view moves.
+
+        Args:
+            rect: The dirty rect in viewport coordinates.
+            dy: The vertical scroll delta (0 for a repaint).
+        """
+        if not self._gutterEnabled:
+            return
+        gutter = self._findGutter()
+        if gutter is None:
+            return
+        # Width recompute runs before the gutter repaints.
+        self._updateGutterWidth()
+        if dy != 0:
+            gutter.scroll(0, dy)
+        else:
+            gutter.update(rect)
 
     # ==========================================================================
     def _syncBlockAlignment(self) -> None:

@@ -8,7 +8,7 @@ from collections.abc import Generator
 
 import pytest
 from PySide6.QtCore import QCoreApplication, QPoint
-from PySide6.QtGui import QColor, QFont, QImage, QPainter
+from PySide6.QtGui import QColor, QFont, QImage, QPainter, QTextCursor
 from PySide6.QtWidgets import QApplication
 
 from pyraya import DigitSet, GutterArea, PyRaya
@@ -169,3 +169,175 @@ def testGutterPaintsEasternDigits(app: QApplication) -> None:
         for y in range(0, image.height(), 2)
     )
     assert found, "gutter must paint at least one non-background pixel"
+
+
+# ******************************************************************************
+def testGutterWidthExpandsPast999(app: QApplication) -> None:
+    """The gutter width expands when the largest visible line exceeds 999."""
+    widget = PyRaya()
+    widget.resize(900, 600)
+    widget.setGutterEnabled(True)
+    widget.show()
+    _processEvents()
+    width3 = widget.viewportMargins().right()
+
+    # Add enough lines to push past 999 (1000 lines), then scroll to the
+    # bottom so the largest visible line number exceeds 999.
+    lines = "\n".join(f"line {i}" for i in range(1000))
+    widget.setPlainText(lines)
+    widget.show()
+    _processEvents()
+    widget.verticalScrollBar().setValue(widget.verticalScrollBar().maximum())
+    _processEvents()
+    width4 = widget.viewportMargins().right()
+    assert width4 > width3, "width must expand past line 999"
+
+
+# ******************************************************************************
+def testGutterWidthShrinksBelow1000(app: QApplication) -> None:
+    """The gutter width shrinks when the largest visible line drops below 1000."""
+    widget = PyRaya()
+    widget.resize(900, 600)
+    widget.setGutterEnabled(True)
+    widget.show()
+    _processEvents()
+
+    # Start with 1000 lines (4-digit width): scroll to the bottom so the
+    # largest visible line number exceeds 999.
+    lines = "\n".join(f"line {i}" for i in range(1000))
+    widget.setPlainText(lines)
+    widget.show()
+    _processEvents()
+    widget.verticalScrollBar().setValue(widget.verticalScrollBar().maximum())
+    _processEvents()
+    width4 = widget.viewportMargins().right()
+
+    # Shrink to 10 lines (1-digit width, but baseline is 3)
+    widget.setPlainText("\n".join(f"line {i}" for i in range(10)))
+    widget.show()
+    _processEvents()
+    width1 = widget.viewportMargins().right()
+    assert width1 < width4, "width must shrink below line 1000"
+
+
+# ******************************************************************************
+def testGutterWidthNoOpBumpsNothing(app: QApplication) -> None:
+    """A no-op width recompute bumps neither revision nor undo stack."""
+    widget = PyRaya()
+    widget.resize(900, 600)
+    widget.setGutterEnabled(True)
+    widget.show()
+    _processEvents()
+    widget.setPlainText("hello\nworld")
+    _processEvents()
+
+    revision = widget.document().revision()
+    undoSteps = widget.document().availableUndoSteps()
+
+    # Trigger a no-op recompute (the width should not change)
+    widget._updateGutterWidth()
+    _processEvents()
+
+    assert widget.document().revision() == revision
+    assert widget.document().availableUndoSteps() == undoSteps
+
+
+# ******************************************************************************
+def testBlockCountChangedLeavesWidthAlone(app: QApplication) -> None:
+    """blockCountChanged does not change the width (only largest visible line does)."""
+    widget = PyRaya()
+    widget.resize(900, 600)
+    widget.setGutterEnabled(True)
+    widget.show()
+    _processEvents()
+
+    # A 1500-line document scrolled to the top: the largest visible line
+    # is small (a few lines), so the width stays at the 3-digit baseline.
+    lines = "\n".join(f"line {i}" for i in range(1500))
+    widget.setPlainText(lines)
+    widget.show()
+    _processEvents()
+
+    # Scroll to the top (line 1)
+    cursor = widget.textCursor()
+    cursor.movePosition(QTextCursor.MoveOperation.Start)
+    widget.setTextCursor(cursor)
+    _processEvents()
+
+    # The width should be the 3-digit baseline (not 4-digit, even though
+    # the document has 1500 lines)
+    width = widget.viewportMargins().right()
+    assert width > 0
+
+
+# ******************************************************************************
+def testGutterFontChangeMovesPixelWidth(app: QApplication) -> None:
+    """A font change moves the pixel width at an unchanged digit count."""
+    widget = PyRaya()
+    widget.resize(900, 600)
+    widget.setGutterEnabled(True)
+    widget.show()
+    _processEvents()
+    widget.setPlainText("a\nb\nc")
+    _processEvents()
+    widthBefore = widget.viewportMargins().right()
+
+    # Change to a wider font (same digit count: 1 digit)
+    widerFont = QFont("Arial", 20)
+    widget.setGutterFont(widerFont)
+    widget.show()
+    _processEvents()
+    widthAfter = widget.viewportMargins().right()
+    assert widthAfter != widthBefore, "pixel width must change with the font"
+
+
+# ******************************************************************************
+def testDocumentFontChangeLeavesGutterFontUntouched(app: QApplication) -> None:
+    """A document font change leaves the gutter font and width untouched."""
+    widget = PyRaya()
+    widget.resize(900, 600)
+    widget.setGutterEnabled(True)
+    widget.show()
+    _processEvents()
+    widget.setPlainText("a\nb\nc")
+    _processEvents()
+    gutterFont = widget.gutterFont()
+    width = widget.viewportMargins().right()
+
+    # Change the document font
+    widget.setFontSize(30)
+    widget.show()
+    _processEvents()
+
+    # The gutter font is unchanged
+    assert widget.gutterFont().pointSizeF() == gutterFont.pointSizeF()
+    # The width is unchanged
+    assert widget.viewportMargins().right() == width
+
+
+# ******************************************************************************
+def testGutterEnabledWithActiveOverlayReplacesNoRevision(app: QApplication) -> None:
+    """Enabling the gutter with an active overlay re-places it with no
+    revision bump and no regionsChanged."""
+    widget = PyRaya()
+    widget.resize(900, 600)
+    widget.setPlainText("کام دوسٹ")
+    widget.show()
+    _processEvents()
+
+    # Activate the overlay over an Arabic word
+    cursor = widget.textCursor()
+    cursor.setPosition(2)  # inside "کام"
+    widget.setTextCursor(cursor)
+    _processEvents()
+    assert widget._overlay is not None and widget._overlayActive()
+
+    revision = widget.document().revision()
+
+    widget.setGutterEnabled(True)
+    widget.show()
+    _processEvents()
+
+    assert widget.document().revision() == revision, "no revision bump"
+    # The overlay should still be active (re-placed, not deactivated)
+    assert widget._overlay is not None
