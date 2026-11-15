@@ -98,7 +98,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "pyside6-essentials", specifier = ">=6.12.0" },
-    { name = "romanalfaz", specifier = ">=0.1.0a12" },
+    { name = "romanalfaz", specifier = ">=0.2.0a1" },
 ]
 
 [package.metadata.requires-dev]
@@ -160,15 +160,15 @@ wheels = [
 
 [[package]]
 name = "romanalfaz"
-version = "0.1.0a12"
+version = "0.2.0a1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "symspellpy", extra = ["editdistpy"] },
     { name = "unicodedataplus" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/99/73/d7b5e4e11fef08885010c254b525027972f57d45cd71548bdb8b1809a93d/romanalfaz-0.1.0a12.tar.gz", hash = "sha256:f6da390594cfe46db394dfb5b7acccb08e7eeba874a9c5de453020a5475fc8d7", size = 71819, upload-time = "2026-11-04T16:21:06.119Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d1/55/d9342332ae7d19e35038711423c3b3a5f4b867275606b8de6e1ca45f51d6/romanalfaz-0.2.0a1.tar.gz", hash = "sha256:33702d2b6163a24911da31d43258844a521d9ae154cc3159b749ab894014ec05", size = 80424, upload-time = "2026-11-15T00:52:11.449Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/21/20/b162a16ae3164b65d3a674bede0b7a46c66527f83407f885fdce13ccded5/romanalfaz-0.1.0a12-py3-none-any.whl", hash = "sha256:2782910fb0733838527eae49f032073a0d8d60e625f46ae9edbc8547bd80af61", size = 73296, upload-time = "2026-11-04T16:21:04.94Z" },
+    { url = "https://files.pythonhosted.org/packages/fe/29/230f05c42c834c3533e172c412a33daaea6c302cd15df434d3043beb5dc5/romanalfaz-0.2.0a1-py3-none-any.whl", hash = "sha256:483c65549185f4ce395c4c8580e62dacf5ddce9f950c4a218c5777c9edbe8588", size = 81752, upload-time = "2026-11-15T00:52:10.324Z" },
 ]
 
 [[package]]

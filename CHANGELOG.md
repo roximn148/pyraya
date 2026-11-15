@@ -9,6 +9,18 @@ This file records changes starting from the baseline version `0.1.0a8` onward;
 earlier releases (`0.1.0a1` through `0.1.0a7`) are all incorporated
 into this release version.
 
+## [Unreleased]
+
+### Changed
+
+- `romanalfaz >= 0.2.0a1`: a normalization-data release with no API
+  change. `LIGATURE_MAP` in `urduspell` now covers the full Arabic
+  presentation-form ligature set — 448 entries decompose to
+  base-character sequences, 57 honorific/phrase ligatures map to `""`
+  and are stripped, and 14 non-Urdu ligatures pass through untouched —
+  and `URDU_VARIANT_MAP` folds bare U+0623/U+0625 to U+0627, so all
+  eight U+FEF5–FEFC lam-alef ligatures normalize to lam-alef.
+
 ## [0.1.0a14] - 2026-11-11
 
 ### Added
