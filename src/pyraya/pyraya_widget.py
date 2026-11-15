@@ -2691,8 +2691,12 @@ class PyRaya(QPlainTextEdit):
         mark at the start, the closing mark at the end. Each mark is
         tagged with the region kind a character typed at its landing
         position would carry (:meth:`_typingKindAt`), read before any
-        insertion shifts positions. The whole write runs inside one edit
-        block, so it is one undo step, and it is a typing-like write: no
+        insertion shifts positions. The quote pairs are not BiDi-mirrored,
+        so in a RomanUrdu region their opening and closing marks are
+        swapped (the closing mark at the selection's start, the opening
+        mark at its end); mirrored pairs and every other region write the
+        marks as listed. The whole write runs inside one edit block, so it
+        is one undo step, and it is a typing-like write: no
         ``regionsChanged`` and no other signal.
 
         The write runs with :attr:`_committing` set, so the intermediate
@@ -2715,6 +2719,13 @@ class PyRaya(QPlainTextEdit):
         end = cursor.selectionEnd()
         openKind = self._typingKindAt(start)
         closeKind = self._typingKindAt(end)
+        # The quote pairs are not BiDi-mirrored, so in a RomanUrdu region
+        # their opening and closing marks are swapped: the closing mark at
+        # the selection's start, the opening mark at its end. Mirrored pairs
+        # and every other region write the marks as listed.
+        opening, closing = pair.opening, pair.closing
+        if not pair.mirrored and openKind is RegionType.RomanUrdu:
+            opening, closing = closing, opening
         document = self.document()
         self._committing = True
         # ``beginEditBlock`` lives on the cursor (PySide6 does not map it on
@@ -2726,8 +2737,8 @@ class PyRaya(QPlainTextEdit):
         blocker.beginEditBlock()
         try:
             for position, char, kind in (
-                (end, pair.closing, closeKind),
-                (start, pair.opening, openKind),
+                (end, closing, closeKind),
+                (start, opening, openKind),
             ):
                 writer = QTextCursor(document)
                 writer.setPosition(position)

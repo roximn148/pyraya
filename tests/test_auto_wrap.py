@@ -170,24 +170,47 @@ def testSquareAndCurlyPairsEnvelop(app: QApplication) -> None:
 
 # ******************************************************************************
 def testStraightDoubleQuoteEnvelopsInCurlyPair(app: QApplication) -> None:
-    """The straight double quote envelops in the Urdu curly pair."""
+    """The straight double quote envelops in the Urdu curly pair.
+
+    The quote pair is not BiDi-mirrored, so in the seed-resolved RomanUrdu
+    region its ending assignments are swapped: the closing mark at the
+    selection's start, the opening mark at its end.
+    """
     widget = PyRaya()
     widget.setPlainText("abcd")
     _select(widget, 1, 3)
     _keyPress(widget, Qt.Key.Key_QuoteDbl, '"')
-    assert widget.toPlainText() == "a\u201cbc\u201dd"
+    assert widget.toPlainText() == "a\u201dbc\u201cd"
     assert '"' not in widget.toPlainText()
 
 
 # ******************************************************************************
 def testStraightApostropheEnvelopsInSinglePair(app: QApplication) -> None:
-    """The straight apostrophe envelops in the Urdu single pair."""
+    """The straight apostrophe envelops in the Urdu single pair.
+
+    As with the double quote, the single-quote pair is not BiDi-mirrored, so
+    the RomanUrdu region swaps its ending assignments: closing mark at the
+    selection's start, opening mark at its end.
+    """
     widget = PyRaya()
     widget.setPlainText("abcd")
     _select(widget, 1, 3)
     _keyPress(widget, Qt.Key.Key_Apostrophe, "'")
-    assert widget.toPlainText() == "a\u2018bc\u2019d"
+    assert widget.toPlainText() == "a\u2019bc\u2018d"
     assert "'" not in widget.toPlainText()
+
+
+# ******************************************************************************
+def testNativeQuotesAreNotSwapped(app: QApplication) -> None:
+    """In a Native region the quote pair writes its marks as listed (no swap)."""
+    widget = PyRaya()
+    widget.setPlainText("abcd")
+    _select(widget, 0, 4)
+    widget.setRegionType(RegionType.Native)
+    _select(widget, 1, 3)
+    _keyPress(widget, Qt.Key.Key_QuoteDbl, '"')
+    assert widget.toPlainText() == "a\u201cbc\u201dd"
+    assert '"' not in widget.toPlainText()
 
 
 # ******************************************************************************
