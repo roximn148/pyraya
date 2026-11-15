@@ -96,6 +96,9 @@ __all__ = [
 # ******************************************************************************
 #: Preferred font stack, in order of preference. The first entry is the default.
 PyRayaFonts: tuple[str, ...] = (
+    "Kawkab Mono",
+    "Mehr Nastaliq Web",
+    "Jameel Noori Nastaleeq",
     "Baloo Bhaijaan 2",
     "Noto Naskh Arabic",
     "Noto Nastaliq Urdu",
@@ -706,8 +709,8 @@ class PyRaya(QPlainTextEdit):
 
     A drop-in ``QPlainTextEdit`` for embedding Urdu text editing in a Qt UI.
     Configures right-to-left layout, right-aligned paragraphs, a configurable
-    font stack (default ``Baloo Bhaijaan 2``, the first installed entry of
-    :data:`PyRayaFonts` — the Naskh and Nastaliq Noto fonts follow it),
+    font stack (default ``Kawkab Mono``, the first installed entry of
+    :data:`PyRayaFonts` — the Nastaliq web/mono fonts follow it),
     visible whitespace, a dedicated rule-based :class:`PyRayaHighlighter`
     for formatting, and text regions: spans tagged with a
     :class:`~pyraya.regions.RegionType` stored as a custom character-format

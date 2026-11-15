@@ -25,6 +25,7 @@ from PySide6.QtWidgets import QApplication, QMenu, QPlainTextEdit
 
 from pyraya import (
     PyRaya,
+    PyRayaFonts,
     PyRayaHighlighter,
     RegionColors,
     RegionKindProperty,
@@ -56,6 +57,16 @@ def testPyrayaIsPlainTextEdit(app: QApplication) -> None:
     """PyRaya derives from QPlainTextEdit."""
     widget = PyRaya()
     assert isinstance(widget, QPlainTextEdit)
+
+
+# ******************************************************************************
+def testFontStackLeadsWithTheNewFamilies(app: QApplication) -> None:
+    """The font stack leads with the three added families, in order."""
+    assert PyRayaFonts[:3] == (
+        "Kawkab Mono",
+        "Mehr Nastaliq Web",
+        "Jameel Noori Nastaleeq",
+    )
 
 
 # ******************************************************************************

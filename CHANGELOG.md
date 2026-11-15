@@ -36,6 +36,9 @@ into this release version.
 
 ### Changed
 
+- The preferred font stack now leads with `Kawkab Mono`, `Mehr Nastaliq
+  Web`, and `Jameel Noori Nastaleeq` (the default is the first installed
+  entry, `Kawkab Mono`).
 - `romanalfaz >= 0.2.0a1`: a normalization-data release with no API
   change. `LIGATURE_MAP` in `urduspell` now covers the full Arabic
   presentation-form ligature set — 448 entries decompose to
