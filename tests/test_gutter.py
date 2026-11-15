@@ -394,7 +394,7 @@ def testGutterReEnableRestoresMargin(app: QApplication) -> None:
 
 # ******************************************************************************
 def testGutterNumbersAlignWithTheirLines(app: QApplication) -> None:
-    """Each line number is vertically centred within its own block's band."""
+    """Each line number is vertically centred on its own block's first line."""
     widget = PyRaya()
     widget.resize(900, 600)
     widget.setGutterEnabled(True)
@@ -414,9 +414,11 @@ def testGutterNumbersAlignWithTheirLines(app: QApplication) -> None:
     painter.end()
     for i in range(5):
         block = widget.document().findBlockByNumber(i)
+        line = block.layout().lineAt(0)
+        assert line.isValid()
+        height = int(line.rect().height())
         geometry = widget.blockBoundingGeometry(block).translated(widget.contentOffset())
         bandTop = int(geometry.top()) - gutter.y()
-        height = int(geometry.height())
         bandCenter = bandTop + height // 2
         ink = []
         for y in range(bandTop, min(bandTop + height, image.height())):
@@ -428,6 +430,47 @@ def testGutterNumbersAlignWithTheirLines(app: QApplication) -> None:
         assert abs(centroid - bandCenter) <= height // 3, (
             f"line {i + 1} ink centroid {centroid} is not centred in its band {bandCenter}"
         )
+
+
+# ******************************************************************************
+def testGutterNumberCentresOnTheFirstLine(app: QApplication) -> None:
+    """A wrapped block's number centres on the block's first line, not its height."""
+    widget = PyRaya()
+    widget.resize(300, 600)
+    widget.setGutterEnabled(True)
+    widget.setGutterFont(QFont("Arial", 10))
+    widget.setPlainText("a" * 500)
+    widget.show()
+    _processEvents()
+    gutter = widget.findChild(GutterArea)
+    assert gutter is not None
+    background = resolveTheme(widget.palette()).gutterBackground
+    block = widget.document().firstBlock()
+    assert block.isValid()
+    line = block.layout().lineAt(0)
+    assert line.isValid()
+    lineHeight = int(line.rect().height())
+    geometry = widget.blockBoundingGeometry(block).translated(widget.contentOffset())
+    assert lineHeight < int(geometry.height()), "the block must wrap to multiple lines"
+    # Render the gutter into a QImage (gutter-local coordinates) and check
+    # that the number's ink is centred on the block's first line.
+    image = QImage(gutter.size(), QImage.Format.Format_ARGB32)
+    image.fill(QColor(0, 0, 0, 0))
+    painter = QPainter(image)
+    gutter.render(painter, QPoint(0, 0))
+    painter.end()
+    bandTop = int(geometry.top()) - gutter.y()
+    bandCenter = bandTop + lineHeight // 2
+    ink = []
+    for y in range(bandTop, min(bandTop + lineHeight, image.height())):
+        for x in range(2, image.width()):
+            if QColor(image.pixel(x, y)) != background:
+                ink.append(y)
+    assert ink, "the number must paint ink in the first line's band"
+    centroid = sum(ink) / len(ink)
+    assert abs(centroid - bandCenter) <= lineHeight // 3, (
+        f"ink centroid {centroid} is not centred on the first line {bandCenter}"
+    )
 
 
 # ******************************************************************************

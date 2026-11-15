@@ -110,9 +110,9 @@ class GutterArea(QWidget):
         Walks visible blocks only (bounded to the dirty rect —
         load-bearing for the 200 k latency budget), draws each 1-based
         number with the converted digit string, physically left-aligned
-        and vertically centred in the block (painter alignment flags are
-        physical, so the widget's RTL layout direction does not flip
-        them), then a 1 px border on the text-facing (left) edge.
+        and vertically centred on the block's first line (painter alignment
+        flags are physical, so the widget's RTL layout direction does not
+        flip them), then a 1 px border on the text-facing (left) edge.
         Colours are resolved **per paint** from
         ``resolveTheme(self.palette())``.
         """
@@ -145,16 +145,24 @@ class GutterArea(QWidget):
 
         painter.setFont(self._gutterFont)
         painter.setPen(tokens.gutterText)
-        for block, top, height in self._iterVisibleBlocks(editor, first, last, dirty):
+        for block, top, _height in self._iterVisibleBlocks(editor, first, last, dirty):
+            line = block.layout().lineAt(0)
+            if not line.isValid():
+                continue
             number = block.blockNumber() + 1  # 1-based
             text = formatLineNumber(number, self._digitSet)
-            # Paint the number into its block's band, physically
-            # left-aligned and vertically centred. The band is in
-            # GutterArea-local coordinates: the geometry is in PyRaya
+            # Paint the number into its block's first-line band, physically
+            # left-aligned and vertically centred on that line. The band is
+            # in GutterArea-local coordinates: the geometry is in PyRaya
             # content coordinates, so shift by the gutter's own y (the
             # gutter sits at the contents rect's top edge).
             painter.drawText(
-                QRectF(1.0, float(top - self.y()), float(self.width()) - 1.0, float(height)),
+                QRectF(
+                    1.0,
+                    float(top - self.y()),
+                    float(self.width()) - 1.0,
+                    float(line.rect().height()),
+                ),
                 int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft),
                 text,
             )
