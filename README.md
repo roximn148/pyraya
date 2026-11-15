@@ -344,8 +344,8 @@ swap, repoints the document's ink, the region tint, the spell-check
 underline, and the suggestion panel's tier tints and border — view-only, no
 document edit, no `regionsChanged`.
 
-Two stops are shipped: a light stop (the palette PyRaya has always painted, so
-a light theme renders exactly as before) and a dark stop. The stop is chosen
+Two stops are shipped: a light stop (the palette PyRaya has always painted,
+retuned in place) and a dark stop. The stop is chosen
 by the palette's `Base` role's lightness — below 0.5 the dark stop, at or
 above the light stop. The suggestion panel's background is re-derived from
 the palette's own `Base`, so the opaque panel matches the document it floats

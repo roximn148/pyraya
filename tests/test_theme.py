@@ -39,20 +39,21 @@ def app() -> Generator[QCoreApplication | QApplication]:
 
 
 # ******************************************************************************
-def testLightStopHoldsTheHistoricPalette(app: QApplication) -> None:
-    """The light stop reproduces every colour the package has always painted.
+def testLightStopHoldsTheLightPalette(app: QApplication) -> None:
+    """The light stop holds the light-theme values.
 
-    The light stop is the package's historic palette — every highlighter
-    rule colour, the spell-check underline, the region tint, and the
-    overlay's tints and panel — so a light theme renders exactly as before.
+    The light stop is the package's historic palette, retuned in place —
+    every highlighter rule colour, the spell-check underline, the region
+    tint, and the overlay's tints and panel — so a light theme renders as
+    the stop defines.
     """
     assert LightStop.ink == QColor("#1F2937")
     assert LightStop.diacritics == QColor("#BE185D")
     assert LightStop.arabicDigits == QColor("#B45309")
     assert LightStop.latin == QColor("#1D4ED8")
     assert LightStop.asciiDigits == QColor("#6D28D9")
-    assert LightStop.punctuation == QColor("#6B7280")
-    assert LightStop.whitespace == QColor("#E0E3FF")
+    assert LightStop.punctuation == QColor("#2E6B2E")
+    assert LightStop.whitespace == QColor("#D9D9D9")
     assert LightStop.spellUnderline == QColor("#B22222")
     assert LightStop.regionTint == QColor(0x3B, 0x82, 0xF6, 30)
     assert LightStop.tiers == (
@@ -76,7 +77,7 @@ def testDarkStopHoldsTheDarkPalette(app: QApplication) -> None:
     assert DarkStop.arabicDigits == QColor("#FBBF24")
     assert DarkStop.latin == QColor("#60A5FA")
     assert DarkStop.asciiDigits == QColor("#A78BFA")
-    assert DarkStop.punctuation == QColor("#9CA3AF")
+    assert DarkStop.punctuation == QColor("#2E6B2E")
     assert DarkStop.whitespace == QColor("#3A4159")
     assert DarkStop.spellUnderline == QColor("#F87171")
     assert DarkStop.regionTint == QColor(0x60, 0xA5, 0xFA, 30)

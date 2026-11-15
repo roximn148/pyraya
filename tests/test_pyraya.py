@@ -204,7 +204,7 @@ def testUntaggedLatinKeepsRuleForegroundUnderKindTint(app: QApplication) -> None
     runs would wipe the rule-set foregrounds: untagged Latin letters
     (which resolve to the seed) fall back to the default black ink
     instead of the Latin rule blue, and with visible whitespace the
-    space's designed light-gray dot (#e0e3ff) renders as a heavy black
+    space's designed light-gray dot (#d9d9d9) renders as a heavy black
     mark at whitespace.
     """
     widget = PyRaya()
@@ -225,13 +225,13 @@ def testUntaggedWhitespaceKeepsDesignedDotColor(app: QApplication) -> None:
     """The visible-space dot keeps its light gray over the seed tint.
 
     Spaces of untagged runs render through the whitespace rule's
-    ``#e0e3ff`` foreground; the seed tint must not erase it —
+    ``#D9D9D9`` foreground; the seed tint must not erase it —
     otherwise the space shows the default (black) ink instead of the
     light gray the widget's visible-whitespace design intends.
     """
     widget = PyRaya()
     widget.setPlainText("ab c")
-    gray = QColor("#e0e3ff")  # the default rules' whitespace foreground
+    gray = QColor("#D9D9D9")  # the default rules' whitespace foreground
     wash = widget.regionColors()[RegionType.RomanUrdu]
     seen = False
     for start, end, fg, bg in _layoutColorRanges(widget):

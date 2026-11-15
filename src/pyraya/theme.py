@@ -10,8 +10,8 @@ panel — lives in this module: one :class:`ThemeTokens` bundle per stop
 components. :func:`resolveTheme` picks the stop from the palette's ``Base``
 role's lightness and re-derives the panel background from that role, so
 the opaque suggestion panel matches the document it floats over under any
-palette. The light stop is the package's historic palette: a light theme
-renders exactly as before.
+palette. The light stop is the package's historic palette, retuned in
+place: a light theme renders as the stop defines.
 """
 
 from dataclasses import dataclass, replace
@@ -68,19 +68,19 @@ class ThemeTokens:
 
 
 # ******************************************************************************
-#: The light stop: the package's historic palette.
+#: The light stop: the package's historic palette, retuned in place.
 #:
 #: Every colour the highlighter rules, the spell-check underline, the
-#: region tint, and the roman-input overlay have always painted, so a light
-#: theme renders exactly as before.
+#: region tint, and the roman-input overlay paint, so a light theme
+#: renders as the stop defines.
 LightStop: ThemeTokens = ThemeTokens(
     ink=QColor("#1F2937"),
     diacritics=QColor("#BE185D"),
     arabicDigits=QColor("#B45309"),
     latin=QColor("#1D4ED8"),
     asciiDigits=QColor("#6D28D9"),
-    punctuation=QColor("#6B7280"),
-    whitespace=QColor("#E0E3FF"),
+    punctuation=QColor("#2E6B2E"),
+    whitespace=QColor("#D9D9D9"),
     spellUnderline=QColor("#B22222"),
     regionTint=QColor(0x3B, 0x82, 0xF6, 30),
     tiers=(
@@ -108,7 +108,7 @@ DarkStop: ThemeTokens = ThemeTokens(
     arabicDigits=QColor("#FBBF24"),
     latin=QColor("#60A5FA"),
     asciiDigits=QColor("#A78BFA"),
-    punctuation=QColor("#9CA3AF"),
+    punctuation=QColor("#2E6B2E"),
     whitespace=QColor("#3A4159"),
     spellUnderline=QColor("#F87171"),
     regionTint=QColor(0x60, 0xA5, 0xFA, 30),
