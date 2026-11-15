@@ -51,7 +51,8 @@ selected Urdu word lands in the document, in Urdu script.
 ## Features at a glance
 
 - Right-to-left paragraphs, right-aligned from the first keystroke.
-- Nastaliq and Latin on one line, from one font stack.
+- Nastaliq and Latin on one line, from one font stack, shaped with the
+  Urdu (Pakistan) locale and the `locl` localized-forms font feature.
 - Spaces and tabs drawn as visible marks.
 - Spans tagged Native or Roman Urdu; Roman-Urdu text gets a faint
   tint, Native text carries no tint. See [Regions](#regions).

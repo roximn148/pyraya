@@ -43,6 +43,13 @@ into this release version.
   conversion reuses `regions.substituteText`; the gutter font is
   independent of the document font (`setGutterFont` / `gutterFont`).
   Off by default; the demo toggles it with `Ctrl+L`.
+- Urdu locale and the 'locl' OpenType localized-forms font feature: the
+  widget is constructed with the Urdu (Pakistan) locale, and the document
+  font enables the 'locl' feature through every font write — so HarfBuzz
+  applies the Urdu letter forms to any font in the stack that carries the
+  localized forms (a font without the feature ignores it). Pinned in
+  `tests/test_pyraya.py` (`testUrduLocaleIsSet`,
+  `testLoclFeatureIsSetOnTheDocumentFont`).
 
 ### Changed
 
