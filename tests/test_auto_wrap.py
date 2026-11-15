@@ -117,6 +117,20 @@ def testDefaultTriggerSetIsTheNineKeyboardCharacters(app: QApplication) -> None:
 
 
 # ******************************************************************************
+def testMirroredFlagMarksQuotePairs(app: QApplication) -> None:
+    """The mirrored flag is False exactly on the five quote pairs."""
+    unmirrored = {name for name, pair in WrapPairs.items() if not pair.mirrored}
+    assert unmirrored == {
+        "double-quote",
+        "single-quote",
+        "low-double-quote",
+        "mixed-double-quote",
+        "low-single-quote",
+    }
+    assert sum(1 for pair in WrapPairs.values() if pair.mirrored) == 10
+
+
+# ******************************************************************************
 def testTriggerOverSelectionEnvelopsIt(app: QApplication) -> None:
     """A trigger key over a selection is consumed and envelops it."""
     widget = PyRaya()
