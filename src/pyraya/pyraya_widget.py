@@ -63,6 +63,7 @@ from PySide6.QtWidgets import (
 )
 from romanalfaz.engine import Suggestion, Vocabulary
 
+from .gutter import DigitSet, GutterArea
 from .regions import (
     RegionColors,
     RegionKindProperty,
@@ -831,6 +832,16 @@ class PyRaya(QPlainTextEdit):
         # state-changing user decision forces the next signal to
         # re-examine. ``bypassMouse`` always proceeds.
         self._syncedOverlayInputs: tuple[int, int] | None = None
+        # Gutter (line-number strip): off by default; the host opts in via
+        # setGutterEnabled. The gutter is a sibling of the viewport, placed
+        # at the right edge of contentsRect, and reserves a right margin via
+        # setViewportMargins. The gutter font defaults to a copy of the
+        # document font; it is a separate variable, independent of later
+        # document font changes.
+        self._gutterEnabled = False
+        self._gutterFormat: DigitSet = DigitSet.Eastern
+        self._gutterWidth: int = 0
+        self._gutterFont = QFont(self.font())
         self._minOverlayWidth: int = 0
         self._overlay: RomanOverlay | None = None
         # Per-widget region palette: the widget seeds the colourable
@@ -998,6 +1009,83 @@ class PyRaya(QPlainTextEdit):
             flags &= ~QTextOption.Flag.ShowTabsAndSpaces
         option.setFlags(flags)
         self.document().setDefaultTextOption(option)
+
+    # ==========================================================================
+    def setGutterEnabled(self, enabled: bool) -> None:
+        """Enable or disable the line-number gutter.
+
+        When enabled, reserves the right margin via
+        ``setViewportMargins(0, 0, width, 0)`` and creates the
+        :class:`GutterArea` child widget (sibling of the viewport).
+        When disabled, removes the margin and hides the gutter.
+
+        Args:
+            enabled: Whether to show the gutter.
+        """
+        self._gutterEnabled = enabled
+        if enabled:
+            self._ensureGutter()
+            self._updateGutterWidth()
+        else:
+            self._removeGutter()
+
+    # ==========================================================================
+    def isGutterEnabled(self) -> bool:
+        """Whether the gutter is enabled.
+
+        Returns:
+            True if the gutter is currently enabled.
+        """
+        return self._gutterEnabled
+
+    # ==========================================================================
+    def setGutterFormat(self, digitSet: DigitSet) -> None:
+        """Set the digit set for line numbers.
+
+        Args:
+            digitSet: The digit set to render in.
+        """
+        self._gutterFormat = digitSet
+        if self._gutterEnabled:
+            gutter = self._findGutter()
+            if gutter is not None:
+                gutter.setDigitSet(digitSet)
+
+    # ==========================================================================
+    def gutterFormat(self) -> DigitSet:
+        """The current digit set for line numbers.
+
+        Returns:
+            The :class:`DigitSet` in effect.
+        """
+        return self._gutterFormat
+
+    # ==========================================================================
+    def setGutterFont(self, font: QFont) -> None:
+        """Set the gutter font (independent of the document font).
+
+        The gutter font is a separate variable on PyRaya: its default is
+        a copy of the document font at construction; document font
+        changes (setFontFamily / setFontSize) never repoint it.
+
+        Args:
+            font: The font to use for line numbers.
+        """
+        self._gutterFont = font
+        if self._gutterEnabled:
+            gutter = self._findGutter()
+            if gutter is not None:
+                gutter.setGutterFont(font)
+            self._updateGutterWidth()
+
+    # ==========================================================================
+    def gutterFont(self) -> QFont:
+        """The current gutter font.
+
+        Returns:
+            The :class:`QFont` in effect for line numbers.
+        """
+        return self._gutterFont
 
     # ==========================================================================
     def setPlainText(self, text: str) -> None:
@@ -3147,6 +3235,8 @@ class PyRaya(QPlainTextEdit):
             event: The resize event.
         """
         super().resizeEvent(event)
+        if self._gutterEnabled:
+            self._updateGutterWidth()
         self._onViewChanged()
 
     # ==========================================================================
@@ -3535,6 +3625,86 @@ class PyRaya(QPlainTextEdit):
         font.setFamilies([self._fontFamily, "Noto Sans"])
         font.setPointSizeF(self._fontSize)
         self.setFont(font)
+
+    # ==========================================================================
+    def _findGutter(self) -> GutterArea | None:
+        """Find the GutterArea child widget, or None if not created."""
+        for child in self.findChildren(QWidget):
+            if isinstance(child, GutterArea):
+                return child
+        return None
+
+    # ==========================================================================
+    def _ensureGutter(self) -> None:
+        """Create the GutterArea if it does not exist and show it."""
+        gutter = self._findGutter()
+        if gutter is None:
+            gutter = GutterArea(self)
+            gutter.setDigitSet(self._gutterFormat)
+            gutter.setGutterFont(self._gutterFont)
+        gutter.show()
+
+    # ==========================================================================
+    def _removeGutter(self) -> None:
+        """Hide the GutterArea and remove the right margin."""
+        gutter = self._findGutter()
+        if gutter is not None:
+            gutter.hide()
+        self.setViewportMargins(0, 0, 0, 0)
+
+    # ==========================================================================
+    def _updateGutterWidth(self) -> None:
+        """Recompute the gutter width from the largest visible line number.
+
+        The width formula: ``max(3, digits of largest visible line number)
+        x digit advance + padding split both sides``. The advance is
+        measured with the gutter font's metrics. The result is applied
+        only when it differs from the current width (no-op guard).
+
+        The largest visible line number is found via
+        ``cursorForPosition(QPoint(vp.width() // 2, vp.height() - 1))`` +
+        ``findBlock(...).blockNumber() + 1`` (1-based).
+        """
+        vp = self.viewport()
+        if vp is None or vp.height() == 0:
+            return
+        cursor = self.cursorForPosition(QPoint(vp.width() // 2, vp.height() - 1))
+        block = self.document().findBlock(cursor.position())
+        if not block.isValid():
+            return
+        largest = block.blockNumber() + 1  # 1-based
+        digits = max(3, len(str(largest)))
+
+        # Measure digit advance with the gutter font's metrics
+        fontMetrics = QFontMetrics(self._gutterFont)
+        advance = fontMetrics.horizontalAdvance(
+            "۹" if self._gutterFormat is DigitSet.Eastern else "9"
+        )
+        em = fontMetrics.horizontalAdvance("M")
+        padding = int(em * 1.5)
+        width = digits * advance + padding
+
+        if width == self._gutterWidth:
+            return  # no-op guard
+
+        self._gutterWidth = width
+        self.setViewportMargins(0, 0, width, 0)
+        self._repositionGutter()
+
+    # ==========================================================================
+    def _repositionGutter(self) -> None:
+        """Re-position the GutterArea at the right edge of contentsRect."""
+        gutter = self._findGutter()
+        if gutter is None:
+            return
+        cr = self.contentsRect()
+        gutter.setGeometry(
+            cr.right() - self._gutterWidth,
+            cr.top(),
+            self._gutterWidth,
+            cr.height(),
+        )
+        gutter.raise_()
 
     # ==========================================================================
     def _syncBlockAlignment(self) -> None:

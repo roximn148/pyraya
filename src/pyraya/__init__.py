@@ -12,6 +12,7 @@ from PySide6.QtGui import QColor, QKeySequence, QPalette, QShortcut
 from PySide6.QtWidgets import QApplication
 from romanalfaz.engine import Suggestion
 
+from .gutter import DigitSet, GutterArea
 from .pyraya_widget import (
     DefaultFontSize,
     EscDoubleTapInterval,
@@ -83,6 +84,8 @@ __all__ = [
     "OverlayLayoutSpacing",
     "SuggestionListMargin",
     "AddWordDialog",
+    "DigitSet",
+    "GutterArea",
     "main",
 ]
 
