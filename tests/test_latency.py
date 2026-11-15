@@ -43,7 +43,7 @@ from PySide6.QtCore import QCoreApplication, QEvent, Qt
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QApplication, QWidget
 
-from pyraya import PyRaya
+from pyraya import GutterArea, PyRaya
 from pyraya.pyraya_widget import _isArabicChar
 
 _LatencyEnv = "PYRAYA_LATENCY"
@@ -379,3 +379,28 @@ def testOverlayPath(app) -> None:  # noqa: ARG001
     single = _milliseconds(lambda: _sendKey(lineEdit, Qt.Key.Key_A.value, "a"))
     assert lineEdit.text() != before, "the overlay keystroke must edit the text"
     _checked("one overlay keystroke (refresh + suggestions + re-place)", single, 10.0)
+
+
+# ******************************************************************************
+def _gutterPaint() -> float:
+    """One gutter paint on the 200 k fixture (the visible-blocks loop).
+
+    The gutter walks only the visible blocks — bounded to the viewport —
+    so this row's cost is the per-visible-block geometry read plus the
+    digit-string paint, not a document-length scan.
+    """
+    widget = _prepareWidget(_fixture("03-200k-doc.txt"))
+    widget.setGutterEnabled(True)
+    _processEvents()
+    gutter = widget.findChild(GutterArea)
+    assert gutter is not None
+    return _milliseconds(gutter.repaint)
+
+
+def testGutterPaint(app) -> None:  # noqa: ARG001
+    """Gutter paint cost on the largest fixture."""
+    _checked(
+        "gutter paint, 200 000 chars (visible-blocks loop)",
+        _gutterPaint(),
+        50.0,
+    )

@@ -113,7 +113,8 @@ def main() -> None:
     Creates a :class:`QApplication`, shows a top-level :class:`PyRaya`
     widget, and enters the Qt event loop. Ctrl+D toggles the light and
     dark palettes: the widget's document and overlay colours follow the
-    effective palette, so the toggle repaints them live.
+    effective palette, so the toggle repaints them live. Ctrl+L toggles
+    the line-number gutter.
     """
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
@@ -127,6 +128,12 @@ def main() -> None:
         app.setPalette(dark if app.palette() == light else light)
 
     toggle.activated.connect(_toggleTheme)
+    gutterToggle = QShortcut(QKeySequence("Ctrl+L"), editor)
+
+    def _toggleGutter() -> None:
+        editor.setGutterEnabled(not editor.isGutterEnabled())
+
+    gutterToggle.activated.connect(_toggleGutter)
     editor.show()
     sys.exit(app.exec())
 
