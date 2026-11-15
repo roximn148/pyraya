@@ -33,6 +33,16 @@ into this release version.
   is tagged with the region kind resolved at its own landing position, the
   write is one edit block (one logical undo step), and it emits no signal.
   Pinned in `tests/test_auto_wrap.py`.
+- Line-number gutter: a host-configurable right-edge gutter
+  (`setGutterEnabled`, `isGutterEnabled`), one number per document line
+  in Eastern or Western digits (`DigitSet`), coloured by the theme stop
+  (`gutterBackground`, `gutterText`, `gutterBorder`). The gutter is a
+  `GutterArea` child widget (sibling of the viewport), reserves a right
+  margin via `setViewportMargins`, and dynamically adjusts its width as
+  the largest visible line number crosses powers of ten. The digit
+  conversion reuses `regions.substituteText`; the gutter font is
+  independent of the document font (`setGutterFont` / `gutterFont`).
+  Off by default; the demo toggles it with `Ctrl+L`.
 
 ### Changed
 

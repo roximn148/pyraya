@@ -72,6 +72,8 @@ selected Urdu word lands in the document, in Urdu script.
   [Theming](#theming).
 - Word offsets for analysis: `wordRuns(text)` and `editor.wordRuns()`.
   See [Word runs](#word-runs).
+- A line-number gutter on the right edge, in Eastern or Western digits,
+  off by default. See [Line-number gutter](#line-number-gutter).
 
 ## Regions
 
@@ -280,6 +282,40 @@ and single forms) — and raises `ValueError` for an unknown name. The
 default set is the five pairs `DefaultWrapPairs` names: parentheses,
 square, curly, and the straight double and single quotes.
 
+## Line-number gutter
+
+The gutter is off by default. Enable it with:
+
+```python
+editor.setGutterEnabled(True)
+```
+
+Configure the digit set (Eastern by default):
+
+```python
+editor.setGutterFormat(DigitSet.Western)
+```
+
+Set the gutter font independently of the document font:
+
+```python
+editor.setGutterFont(QFont("Arial", 14))
+```
+
+Query the current settings:
+
+```python
+editor.isGutterEnabled()  # bool
+editor.gutterFormat()  # DigitSet
+editor.gutterFont()  # QFont
+```
+
+The gutter reserves a right margin, paints the line numbers on a `GutterArea`
+child widget (sibling of the viewport), and dynamically adjusts its width as
+the largest visible line number crosses powers of ten — the total line count
+never drives it. Colours come from the theme stop; no public colour API. The
+demo app toggles the gutter with `Ctrl+L`.
+
 ## Watching state changes
 
 Three signals report this editor's own state to its host, so a UI can
@@ -370,6 +406,7 @@ pyraya/
 ├── src/
 │   └── pyraya/
 │       ├── pyraya_widget.py  # the PyRaya widget and its highlighter
+│       ├── gutter.py         # line-number gutter: digits, GutterArea
 │       ├── regions.py        # region model: kinds, spans, seed, stored-tag property
 │       ├── roman_input.py    # roman-input engine and overlay widgets
 │       ├── theme.py          # palette-derived theme tokens
