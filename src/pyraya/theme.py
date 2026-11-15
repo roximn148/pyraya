@@ -47,6 +47,9 @@ class ThemeTokens:
         listBackground: The suggestion panel's opaque background.
         listBorder: The suggestion panel's border.
         listText: The suggestion rows' text colour.
+        gutterBackground: The gutter strip's background colour.
+        gutterText: The gutter line numbers' ink colour.
+        gutterBorder: The gutter strip's border colour.
     """
 
     ink: QColor
@@ -65,6 +68,9 @@ class ThemeTokens:
     listBackground: QColor
     listBorder: QColor
     listText: QColor
+    gutterBackground: QColor
+    gutterText: QColor
+    gutterBorder: QColor
 
 
 # ******************************************************************************
@@ -94,6 +100,9 @@ LightStop: ThemeTokens = ThemeTokens(
     listBackground=QColor(0xFF, 0xFF, 0xFF),
     listBorder=QColor(0xD0, 0xD5, 0xDD),
     listText=QColor(0x00, 0x00, 0x00),
+    gutterBackground=QColor(0xF5, 0xF5, 0xF5),
+    gutterText=QColor(0x6B, 0x72, 0x80),
+    gutterBorder=QColor(0xD0, 0xD5, 0xDD),
 )
 
 
@@ -123,6 +132,9 @@ DarkStop: ThemeTokens = ThemeTokens(
     listBackground=QColor(0x23, 0x23, 0x23),
     listBorder=QColor(0x3A, 0x3F, 0x4B),
     listText=QColor(0xDF, 0xDF, 0xDF),
+    gutterBackground=QColor(0x2B, 0x2B, 0x2B),
+    gutterText=QColor(0x9C, 0xA3, 0xAF),
+    gutterBorder=QColor(0x3A, 0x3F, 0x4B),
 )
 
 

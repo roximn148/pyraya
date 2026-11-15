@@ -67,6 +67,9 @@ def testLightStopHoldsTheLightPalette(app: QApplication) -> None:
     assert LightStop.listBackground == QColor(0xFF, 0xFF, 0xFF)
     assert LightStop.listBorder == QColor(0xD0, 0xD5, 0xDD)
     assert LightStop.listText == QColor(0x00, 0x00, 0x00)
+    assert LightStop.gutterBackground == QColor(0xF5, 0xF5, 0xF5)
+    assert LightStop.gutterText == QColor(0x6B, 0x72, 0x80)
+    assert LightStop.gutterBorder == QColor(0xD0, 0xD5, 0xDD)
 
 
 # ******************************************************************************
@@ -92,6 +95,9 @@ def testDarkStopHoldsTheDarkPalette(app: QApplication) -> None:
     assert DarkStop.listBackground == QColor(0x23, 0x23, 0x23)
     assert DarkStop.listBorder == QColor(0x3A, 0x3F, 0x4B)
     assert DarkStop.listText == QColor(0xDF, 0xDF, 0xDF)
+    assert DarkStop.gutterBackground == QColor(0x2B, 0x2B, 0x2B)
+    assert DarkStop.gutterText == QColor(0x9C, 0xA3, 0xAF)
+    assert DarkStop.gutterBorder == QColor(0x3A, 0x3F, 0x4B)
 
 
 # ******************************************************************************
