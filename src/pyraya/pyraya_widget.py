@@ -1055,6 +1055,7 @@ class PyRaya(QPlainTextEdit):
             gutter = self._findGutter()
             if gutter is not None:
                 gutter.setDigitSet(digitSet)
+                gutter.update()
 
     # ==========================================================================
     def gutterFormat(self) -> DigitSet:
@@ -1081,6 +1082,7 @@ class PyRaya(QPlainTextEdit):
             gutter = self._findGutter()
             if gutter is not None:
                 gutter.setGutterFont(font)
+                gutter.update()
             self._updateGutterWidth()
 
     # ==========================================================================
@@ -3236,12 +3238,19 @@ class PyRaya(QPlainTextEdit):
         :meth:`_onScrollChanged`, so the two view events make the same
         decision.
 
+        The gutter is repositioned on every resize when enabled: it is
+        a sibling widget that does not track the edge on its own, so even
+        a resize that leaves the digit count (and therefore the width)
+        unchanged must move it to the new contents rect's right edge —
+        the reposition is a no-op when the geometry already matches.
+
         Args:
             event: The resize event.
         """
         super().resizeEvent(event)
         if self._gutterEnabled:
             self._updateGutterWidth()
+            self._repositionGutter()
         self._onViewChanged()
 
     # ==========================================================================
@@ -3651,10 +3660,18 @@ class PyRaya(QPlainTextEdit):
 
     # ==========================================================================
     def _removeGutter(self) -> None:
-        """Hide the GutterArea and remove the right margin."""
+        """Hide the GutterArea and remove the right margin.
+
+        Resets ``_gutterWidth`` to zero so that re-enabling the gutter
+        recomputes the width from scratch instead of hitting the no-op
+        guard in :meth:`_updateGutterWidth` — a stale width would leave
+        the margin and the gutter placement stranded, and the opaque
+        strip would paint over the rightmost column of text.
+        """
         gutter = self._findGutter()
         if gutter is not None:
             gutter.hide()
+        self._gutterWidth = 0
         self.setViewportMargins(0, 0, 0, 0)
 
     # ==========================================================================

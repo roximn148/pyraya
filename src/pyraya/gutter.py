@@ -14,10 +14,9 @@ The digit conversion reuses :func:`~pyraya.regions.substituteText` from
 from enum import IntEnum
 from typing import TYPE_CHECKING, cast
 
-from PySide6.QtCore import QRect
+from PySide6.QtCore import QRect, QRectF, Qt
 from PySide6.QtGui import (
     QFont,
-    QFontMetrics,
     QPainter,
     QPaintEvent,
     QPen,
@@ -144,18 +143,19 @@ class GutterArea(QWidget):
         # The dirty rect bounds the paint
         dirty = event.rect()
 
+        painter.setFont(self._gutterFont)
+        painter.setPen(tokens.gutterText)
         for block, top, height in self._iterVisibleBlocks(editor, first, last, dirty):
             number = block.blockNumber() + 1  # 1-based
             text = formatLineNumber(number, self._digitSet)
-            # Paint the number, physically left-aligned, vertically
-            # centred in the block's height
-            painter.setPen(tokens.gutterText)
-            fontMetrics = QFontMetrics(self._gutterFont)
-            textHeight = fontMetrics.height()
-            painter.setFont(self._gutterFont)
+            # Paint the number into its block's band, physically
+            # left-aligned and vertically centred. The band is in
+            # GutterArea-local coordinates: the geometry is in PyRaya
+            # content coordinates, so shift by the gutter's own y (the
+            # gutter sits at the contents rect's top edge).
             painter.drawText(
-                1,  # left padding (after the 1 px border)
-                top + (height - textHeight) // 2,
+                QRectF(1.0, float(top - self.y()), float(self.width()) - 1.0, float(height)),
+                int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft),
                 text,
             )
         painter.end()

@@ -7,12 +7,13 @@ import os
 from collections.abc import Generator
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QPoint
+from PySide6.QtCore import QCoreApplication, QEvent, QObject, QPoint, QRect
 from PySide6.QtGui import QColor, QFont, QImage, QPainter, QTextCursor
 from PySide6.QtWidgets import QApplication
 
 from pyraya import DigitSet, GutterArea, PyRaya
 from pyraya.gutter import formatLineNumber
+from pyraya.theme import resolveTheme
 
 
 # ******************************************************************************
@@ -29,6 +30,20 @@ def app() -> Generator[QCoreApplication | QApplication]:
 def _processEvents() -> None:
     """Let Qt settle layout and pending signals."""
     QCoreApplication.processEvents()
+
+
+# ******************************************************************************
+class _PaintSpy(QObject):
+    """Counts Paint events on its installed target."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.count = 0
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.Paint:
+            self.count += 1
+        return False
 
 
 # ******************************************************************************
@@ -250,6 +265,8 @@ def testBlockCountChangedLeavesWidthAlone(app: QApplication) -> None:
     widget.setGutterEnabled(True)
     widget.show()
     _processEvents()
+    width3 = widget.viewportMargins().right()
+    assert width3 > 0
 
     # A 1500-line document scrolled to the top: the largest visible line
     # is small (a few lines), so the width stays at the 3-digit baseline.
@@ -267,7 +284,7 @@ def testBlockCountChangedLeavesWidthAlone(app: QApplication) -> None:
     # The width should be the 3-digit baseline (not 4-digit, even though
     # the document has 1500 lines)
     width = widget.viewportMargins().right()
-    assert width > 0
+    assert width == width3, "width must stay at the 3-digit baseline"
 
 
 # ******************************************************************************
@@ -333,11 +350,135 @@ def testGutterEnabledWithActiveOverlayReplacesNoRevision(app: QApplication) -> N
     assert widget._overlay is not None and widget._overlayActive()
 
     revision = widget.document().revision()
+    emissions: list[int] = []
+    widget.regionsChanged.connect(lambda: emissions.append(1))
 
     widget.setGutterEnabled(True)
     widget.show()
     _processEvents()
 
     assert widget.document().revision() == revision, "no revision bump"
+    assert emissions == [], "no regionsChanged"
     # The overlay should still be active (re-placed, not deactivated)
     assert widget._overlay is not None
+
+
+# ******************************************************************************
+def testGutterReEnableRestoresMargin(app: QApplication) -> None:
+    """Re-enabling the gutter after a disable restores margin and geometry."""
+    widget = PyRaya()
+    widget.resize(900, 600)
+    widget.setGutterEnabled(True)
+    widget.show()
+    _processEvents()
+    width = widget.viewportMargins().right()
+    assert width > 0
+
+    widget.setGutterEnabled(False)
+    _processEvents()
+
+    # Re-enable: the margin must be restored and the gutter re-placed at
+    # the right edge of the contents rect (without this, the no-op width
+    # guard swallows the recompute and the gutter paints over the text).
+    widget.setGutterEnabled(True)
+    widget.show()
+    _processEvents()
+    margins = widget.viewportMargins()
+    assert margins.right() == width, "re-enable must restore the gutter margin"
+    gutter = widget.findChild(GutterArea)
+    assert gutter is not None
+    cr = widget.contentsRect()
+    expected = QRect(cr.right() - width, cr.top(), width, cr.height())
+    assert gutter.geometry() == expected
+
+
+# ******************************************************************************
+def testGutterNumbersAlignWithTheirLines(app: QApplication) -> None:
+    """Each line number is vertically centred within its own block's band."""
+    widget = PyRaya()
+    widget.resize(900, 600)
+    widget.setGutterEnabled(True)
+    widget.setGutterFont(QFont("Arial", 10))
+    widget.setPlainText("a\nb\nc\nd\ne")
+    widget.show()
+    _processEvents()
+    gutter = widget.findChild(GutterArea)
+    assert gutter is not None
+    background = resolveTheme(widget.palette()).gutterBackground
+    # Render the gutter into a QImage (gutter-local coordinates) and check
+    # that each block's ink is centred in that block's band.
+    image = QImage(gutter.size(), QImage.Format.Format_ARGB32)
+    image.fill(QColor(0, 0, 0, 0))
+    painter = QPainter(image)
+    gutter.render(painter, QPoint(0, 0))
+    painter.end()
+    for i in range(5):
+        block = widget.document().findBlockByNumber(i)
+        geometry = widget.blockBoundingGeometry(block).translated(widget.contentOffset())
+        bandTop = int(geometry.top()) - gutter.y()
+        height = int(geometry.height())
+        bandCenter = bandTop + height // 2
+        ink = []
+        for y in range(bandTop, min(bandTop + height, image.height())):
+            for x in range(2, image.width()):
+                if QColor(image.pixel(x, y)) != background:
+                    ink.append(y)
+        assert ink, f"line {i + 1} must paint ink inside its band"
+        centroid = sum(ink) / len(ink)
+        assert abs(centroid - bandCenter) <= height // 3, (
+            f"line {i + 1} ink centroid {centroid} is not centred in its band {bandCenter}"
+        )
+
+
+# ******************************************************************************
+def testResizeRepositionsGutterAtUnchangedWidth(app: QApplication) -> None:
+    """A resize that leaves the digit count unchanged still moves the gutter to the edge."""
+    widget = PyRaya()
+    widget.resize(900, 600)
+    widget.setGutterEnabled(True)
+    widget.show()
+    _processEvents()
+    widget.setPlainText("a\nb\nc")
+    _processEvents()
+    width = widget.viewportMargins().right()
+    assert width > 0
+
+    # A plain resize: the digit count (and therefore the width) is
+    # unchanged, but the contents rect moves — the gutter must follow it
+    # to the new right edge.
+    widget.resize(1200, 700)
+    _processEvents()
+    gutter = widget.findChild(GutterArea)
+    assert gutter is not None
+    cr = widget.contentsRect()
+    expected = QRect(cr.right() - width, cr.top(), width, cr.height())
+    assert gutter.geometry() == expected
+
+
+# ******************************************************************************
+def testGutterSettersMarkTheGutterDirty(app: QApplication) -> None:
+    """setGutterFormat and setGutterFont mark the gutter dirty."""
+    widget = PyRaya()
+    widget.resize(900, 600)
+    widget.setGutterEnabled(True)
+    widget.show()
+    _processEvents()
+    widget.setPlainText("a\nb\nc")
+    _processEvents()
+    gutter = widget.findChild(GutterArea)
+    assert gutter is not None
+
+    spy = _PaintSpy()
+    gutter.installEventFilter(spy)
+
+    widget.setGutterFormat(DigitSet.Western)
+    _processEvents()
+    assert spy.count > 0, "setGutterFormat must mark the gutter dirty"
+
+    spy.count = 0
+    # A no-op font (the current gutter font): only an explicit
+    # gutter.update() can dirty the strip here — the width path is a
+    # no-op for an identical font.
+    widget.setGutterFont(widget.gutterFont())
+    _processEvents()
+    assert spy.count > 0, "setGutterFont must mark the gutter dirty"
