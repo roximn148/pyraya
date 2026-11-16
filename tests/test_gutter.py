@@ -525,3 +525,69 @@ def testGutterSettersMarkTheGutterDirty(app: QApplication) -> None:
     widget.setGutterFont(widget.gutterFont())
     _processEvents()
     assert spy.count > 0, "setGutterFont must mark the gutter dirty"
+
+
+# ******************************************************************************
+def testGutterPaddingIsConfigurable(app: QApplication) -> None:
+    """The gutter padding has a 4 px seed and is settable on GutterArea."""
+    widget = PyRaya()
+    widget.resize(900, 600)
+    widget.setGutterEnabled(True)
+    widget.show()
+    _processEvents()
+    gutter = widget.findChild(GutterArea)
+    assert gutter is not None
+    assert gutter.gutterPadding() == 4.0
+    gutter.setGutterPadding(8.0)
+    assert gutter.gutterPadding() == 8.0
+    # A negative padding is ignored (the band would run past the border).
+    gutter.setGutterPadding(-1.0)
+    assert gutter.gutterPadding() == 8.0
+
+
+# ******************************************************************************
+def testGutterPaddingDoesNotShiftTheCentredNumbers(app: QApplication) -> None:
+    """The paint padding insets the band without moving the centred ink.
+
+    The numbers are centred in the strip, and the band is always centred
+    in the strip, so changing the padding changes only the band's inset,
+    never the ink position.
+    """
+    widget = PyRaya()
+    widget.resize(900, 600)
+    widget.setGutterEnabled(True)
+    widget.setGutterFont(QFont("Arial", 10))
+    widget.setPlainText("a\nb\nc")
+    widget.show()
+    _processEvents()
+    gutter = widget.findChild(GutterArea)
+    assert gutter is not None
+    background = resolveTheme(widget.palette()).gutterBackground
+
+    def inkSpan() -> tuple[int, int]:
+        image = QImage(gutter.size(), QImage.Format.Format_ARGB32)
+        image.fill(QColor(0, 0, 0, 0))
+        painter = QPainter(image)
+        gutter.render(painter, QPoint(0, 0))
+        painter.end()
+        xs = [
+            x
+            for y in range(image.height())
+            for x in range(1, image.width())
+            if QColor(image.pixel(x, y)) != background
+        ]
+        assert xs, "the numbers must paint ink inside the gutter"
+        return min(xs), max(xs)
+
+    seedMinX, seedMaxX = inkSpan()
+    # The numbers are centred in the strip: the ink span is symmetric
+    # about the strip's centre.
+    centre = (seedMinX + seedMaxX) / 2.0
+    assert abs(centre - gutter.width() / 2.0) <= 1.0, "the numbers must be centred in the strip"
+    gutter.setGutterPadding(0.0)
+    # render() repaints on demand, so the new padding is picked up
+    # without a dirty pass.
+    zeroMinX, zeroMaxX = inkSpan()
+    assert (zeroMinX, zeroMaxX) == (seedMinX, seedMaxX), (
+        "the padding must not shift the centred ink"
+    )

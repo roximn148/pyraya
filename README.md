@@ -317,6 +317,10 @@ the largest visible line number crosses powers of ten — the total line count
 never drives it. Colours come from the theme stop; no public colour API. The
 demo app toggles the gutter with `Ctrl+L`.
 
+The paint padding around the line numbers is a `GutterArea`-only setting
+(`GutterArea.setGutterPadding` / `gutterPadding`, seeded 4 px): paint-only,
+never part of the width formula.
+
 ## Watching state changes
 
 Three signals report this editor's own state to its host, so a UI can

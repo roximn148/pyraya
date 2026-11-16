@@ -71,9 +71,9 @@ host-driven — no host behaviour depends on it).
   with the document while the strip stays fixed.
 - **`GutterArea.paintEvent`** walks visible blocks only (`firstVisibleBlock()` upward,
   bounded to the dirty rect — load-bearing for the 200 k latency budget), draws each
-  1-based number with the converted digit string, physical `AlignVCenter | AlignLeft`
-  (painter alignment flags are physical, so the widget's RTL layout direction does not
-  flip them), then a 1 px splitter on the text-facing (left) edge. Colours are resolved
+  1-based number with the converted digit string, `AlignVCenter | AlignHCenter`
+  (centred in the band, inset on both sides by the gutter padding), then a 1 px
+  border on the text-facing (left) edge. Colours are resolved
   **per paint** from `resolveTheme(self.palette())`, so a palette swap repoints the strip on
   the next repaint and a no-op retheme paints nothing new.
 - **Scroll** (`_onGutterUpdateRequest(rect, dy)`, connected to `updateRequest`): `dy ≠ 0` →

@@ -41,7 +41,13 @@ into this release version.
   margin via `setViewportMargins`, and dynamically adjusts its width as
   the largest visible line number crosses powers of ten. The digit
   conversion reuses `regions.substituteText`; the gutter font is
-  independent of the document font (`setGutterFont` / `gutterFont`).
+  independent of the document font (`setGutterFont` / `gutterFont`), and
+  the paint padding around the numbers is a `GutterArea`-only variable
+  (`GutterArea.setGutterPadding` / `gutterPadding`, seeded 4 px, negative
+  ignored) that insets the paint band on both sides of the centred
+  numbers — paint-only, never part of the width formula (pinned by
+  `tests/test_gutter.py`: `testGutterPaddingIsConfigurable`,
+  `testGutterPaddingDoesNotShiftTheCentredNumbers`).
   Off by default; the demo toggles it with `Ctrl+L`.
 - Urdu locale and the 'locl' OpenType localized-forms font feature: the
   widget is constructed with the Urdu (Pakistan) locale, and the document

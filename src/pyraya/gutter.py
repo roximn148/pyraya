@@ -71,7 +71,9 @@ class GutterArea(QWidget):
     A child of :class:`~pyraya.PyRaya`, **sibling of the viewport**,
     placed at the right edge of ``contentsRect``. It paints the line
     numbers in Eastern or Western digits, coloured by the theme stop,
-    with a 1 px border on the text-facing (left) edge.
+    with a 1 px border on the text-facing (left) edge and a configurable
+    paint padding around the numbers (:meth:`setGutterPadding`, seeded
+    4 px).
 
     The gutter is read-only over the document: painting never edits,
     never re-highlights, never bumps the revision, never touches the
@@ -87,6 +89,7 @@ class GutterArea(QWidget):
         super().__init__(parent)
         self._digitSet: DigitSet = DigitSet.Eastern
         self._gutterFont: QFont = parent.font()
+        self._gutterPadding: float = 4.0
 
     def setDigitSet(self, digitSet: DigitSet) -> None:
         """Set the digit set for line numbers.
@@ -104,15 +107,38 @@ class GutterArea(QWidget):
         """
         self._gutterFont = font
 
+    def setGutterPadding(self, padding: float) -> None:
+        """Set the paint padding around the line numbers.
+
+        Insets the paint band on both sides of the centred numbers;
+        the band is a paint-only concern and never enters the width
+        formula.
+
+        Args:
+            padding: The padding in pixels. A negative padding is
+                ignored.
+        """
+        if padding < 0:
+            return
+        self._gutterPadding = padding
+
+    def gutterPadding(self) -> float:
+        """The paint padding around the line numbers.
+
+        Returns:
+            The padding in pixels, seeded at 4.0.
+        """
+        return self._gutterPadding
+
     def paintEvent(self, event: QPaintEvent) -> None:
         """Paint the line numbers for visible blocks only.
 
         Walks visible blocks only (bounded to the dirty rect —
         load-bearing for the 200 k latency budget), draws each 1-based
-        number with the converted digit string, physically left-aligned
-        and vertically centred on the block's first line (painter alignment
-        flags are physical, so the widget's RTL layout direction does not
-        flip them), then a 1 px border on the text-facing (left) edge.
+        number with the converted digit string, centred horizontally and
+        vertically on the block's first line, and inset by the gutter
+        padding on both sides, then a 1 px border on the text-facing
+        (left) edge.
         Colours are resolved **per paint** from
         ``resolveTheme(self.palette())``.
         """
@@ -151,19 +177,20 @@ class GutterArea(QWidget):
                 continue
             number = block.blockNumber() + 1  # 1-based
             text = formatLineNumber(number, self._digitSet)
-            # Paint the number into its block's first-line band, physically
-            # left-aligned and vertically centred on that line. The band is
-            # in GutterArea-local coordinates: the geometry is in PyRaya
+            # Paint the number into its block's first-line band, centred
+            # horizontally and vertically on that line, and inset by the
+            # gutter padding on both sides. The band is in
+            # GutterArea-local coordinates: the geometry is in PyRaya
             # content coordinates, so shift by the gutter's own y (the
             # gutter sits at the contents rect's top edge).
             painter.drawText(
                 QRectF(
-                    1.0,
+                    self._gutterPadding,
                     float(top - self.y()),
-                    float(self.width()) - 1.0,
+                    float(self.width()) - 2.0 * self._gutterPadding,
                     float(line.rect().height()),
                 ),
-                int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft),
+                int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignHCenter),
                 text,
             )
         painter.end()
