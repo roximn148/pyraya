@@ -11,6 +11,8 @@ into this release version.
 
 ## [Unreleased]
 
+## [0.1.0a15] - 2026-11-16
+
 ### Added
 
 - Selection enveloping (auto-wrap): pressing a trigger key over a selection
