@@ -11,6 +11,8 @@ into this release version.
 
 ## [Unreleased]
 
+## [0.1.0a16] - 2026-11-20
+
 ### Removed
 
 - The widget no longer sets the Urdu (Pakistan) locale or enables the
