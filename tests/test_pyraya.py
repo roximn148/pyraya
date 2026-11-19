@@ -11,11 +11,10 @@ from collections.abc import Generator
 from typing import cast
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QEvent, QLocale, QPoint, Qt
+from PySide6.QtCore import QCoreApplication, QEvent, QPoint, Qt
 from PySide6.QtGui import (
     QColor,
     QContextMenuEvent,
-    QFont,
     QKeyEvent,
     QMouseEvent,
     QTextCharFormat,
@@ -83,31 +82,6 @@ def testPyrayaRightAlignment(app: QApplication) -> None:
     widget = PyRaya()
     block = widget.document().begin()
     assert block.blockFormat().alignment() == Qt.AlignmentFlag.AlignRight
-
-
-# ******************************************************************************
-def testUrduLocaleIsSet(app: QApplication) -> None:
-    """PyRaya sets the widget locale to Urdu (Pakistan).
-
-    HarfBuzz picks up the widget's locale and applies the Urdu-specific
-    letter forms to any font that carries the localized forms.
-    """
-    widget = PyRaya()
-    assert widget.locale() == QLocale(QLocale.Language.Urdu, QLocale.Country.Pakistan)
-
-
-# ******************************************************************************
-def testLoclFeatureIsSetOnTheDocumentFont(app: QApplication) -> None:
-    """The document font enables the 'locl' OpenType feature.
-
-    The feature must survive every font write: a ``setFontSize`` call
-    re-applies the font and must not drop it.
-    """
-    widget = PyRaya()
-    tag = QFont.Tag.fromString("locl")
-    assert widget.font().isFeatureSet(tag)
-    widget.setFontSize(12)
-    assert widget.font().isFeatureSet(tag)
 
 
 # ******************************************************************************

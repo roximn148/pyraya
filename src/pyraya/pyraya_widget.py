@@ -24,7 +24,6 @@ from typing import cast
 
 from PySide6.QtCore import (
     QEvent,
-    QLocale,
     QPoint,
     QPointF,
     QRect,
@@ -112,13 +111,6 @@ PyRayaFonts: tuple[str, ...] = (
 
 #: Default point size applied to the default font.
 DefaultFontSize: float = 14.0
-
-#: The 'locl' OpenType feature tag: the localized-forms feature that
-#: switches an Arabic font to its Urdu letter forms. Enabled on the
-#: document font by :meth:`PyRaya._applyFont`; a font that does not
-#: carry the feature ignores it, so enabling it on the resolved
-#: stack is always safe.
-_LoclTag = QFont.Tag.fromString("locl")
 
 #: The trigger-character lookup behind selection enveloping: every pair's
 #: trigger characters mapped to the pair. Two pairs sharing a trigger
@@ -719,11 +711,8 @@ class PyRaya(QPlainTextEdit):
     A drop-in ``QPlainTextEdit`` for embedding Urdu text editing in a Qt UI.
     Configures right-to-left layout, right-aligned paragraphs, a configurable
     font stack (default ``Kawkab Mono``, the first installed entry of
-    :data:`PyRayaFonts` — the Nastaliq web/mono fonts follow it), the Urdu
-    (Pakistan) widget locale, and the 'locl' OpenType localized-forms
-    feature on the document font, so HarfBuzz applies the Urdu letter
-    forms to any font that carries them; plus visible whitespace, a
-    dedicated rule-based :class:`PyRayaHighlighter`
+    :data:`PyRayaFonts` — the Nastaliq web/mono fonts follow it), visible
+    whitespace, a dedicated rule-based :class:`PyRayaHighlighter`
     for formatting, and text regions: spans tagged with a
     :class:`~pyraya.regions.RegionType` stored as a custom character-format
     property. Every character resolves to exactly one kind — a stored tag
@@ -778,11 +767,6 @@ class PyRaya(QPlainTextEdit):
             parent: Optional parent widget; defaults to a top-level window.
         """
         super().__init__(parent)
-        # Urdu locale: HarfBuzz picks up the widget's locale and applies
-        # the Urdu-specific letter forms to any font that carries the
-        # localized forms. The child widgets (the overlay, the gutter)
-        # inherit it.
-        self.setLocale(QLocale(QLocale.Language.Urdu, QLocale.Country.Pakistan))
         self._fontFamily = self._resolveDefaultFont()
         self._fontSize: float = DefaultFontSize
         self._alignment: Qt.AlignmentFlag = Qt.AlignmentFlag.AlignRight
@@ -3650,18 +3634,11 @@ class PyRaya(QPlainTextEdit):
 
     # ==========================================================================
     def _applyFont(self) -> None:
-        """Apply the current font family and size to the widget.
-
-        The 'locl' OpenType feature stays enabled on every re-apply
-        (construction, :meth:`setFontFamily`, :meth:`setFontSize`):
-        the widget's Urdu locale pairs with the font's localized
-        forms, so the Urdu letter forms are applied by HarfBuzz.
-        """
+        """Apply the current font family and size to the widget."""
         font = QFont()
         font.setFamilies([self._fontFamily, "Noto Sans"])
         font.setPointSizeF(self._fontSize)
         font.setWeight(QFont.Weight.Normal)
-        font.setFeature(_LoclTag, True)
         self.setFont(font)
 
     # ==========================================================================

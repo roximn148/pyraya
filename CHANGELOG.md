@@ -11,6 +11,18 @@ into this release version.
 
 ## [Unreleased]
 
+### Removed
+
+- The widget no longer sets the Urdu (Pakistan) locale or enables the
+  'locl' OpenType feature on the document font. Shaping language is a
+  host-application concern: Qt derives the HarfBuzz language from the
+  application's global `QLocale` default, which a widget locale does not
+  affect, so neither setting produced the Urdu localized glyph forms.
+  Hosts that need locale-specific glyphs (such as the URD `locl` digits)
+  must set the global locale themselves. PyRaya now leaves it untouched.
+  This is a breaking change for hosts that relied on the widget configuring
+  it; the two settings-only tests were removed.
+
 ## [0.1.0a15] - 2026-11-16
 
 ### Added
